@@ -9,13 +9,13 @@
 > - Desktop shell: Wails (Go + native WebView, no bundled Chromium)
 > - UI: React + TypeScript (+ Tailwind/shadcn)
 > - macOS adapter: Swift/ObjC at the boundary only (CGEvent, AX, FIFinderSync)
-> - Windows adapter: Minimal Win32/C++ (Raw Input, SendInput)
+> - Windows adapter: Minimal Win32/C++ (WH_KEYBOARD_LL intercept + Raw Input observe + SendInput; UIPI applies to elevated targets)
 > - Config: JSON/YAML
 > - License: MIT
 >
 > **Toolchain policy:** always use the current stable release at scaffold time — do not pin
 > to the versions below unless a verified incompatibility exists. **Wails v2 vs v3 must be
-> decided by a 1–2 day spike before scaffolding** (API/architecture differ significantly);
+> decided by a 1–2 day spike before scaffolding** (v3 changes service/manager API significantly — decide on tray, multi-window, native menu, lifecycle, autostart, signing, and packaging needs);
 > default to v2 stable for MVP 0 unless multi-window needs force v3.
 
 ---
@@ -44,12 +44,12 @@ CrossOS is a **desktop UX compatibility layer** — not a VM, not a shell replac
 ### Design Principles
 | Principle | What it means |
 |---|---|
-| Intercept, don't patch | Only remap/intercept input events. Never patch Finder, system binaries, or the kernel. Disabling = zero effect. |
+| Intercept, don't patch | Only remap/intercept input events. Never patch Finder, system binaries, or the kernel. Disabled = CrossOS stops affecting input/behavior (OS permission entries in System Settings may remain until the user removes them). |
 | Ownership | Every integration records ownership metadata. Cleanup removes only what CrossOS created. |
 | Reversibility | All state changes are reversible. Every action has a rollback path. |
-| Non-tech first | Default config "just works" for typical Windows migrants. No setup required for MVP. |
+| Non-tech first | No technical configuration required. CrossOS guides the user through required OS permissions (Welcome → Enable → Open System Settings → Verify ready). |
 | Dev second | Developers can write plugins, extend rules, and customize behavior. |
-| Kill switch | Emergency deactivation disables hooks → stops daemon → disables plugins → removes login item → verifies no process remains. |
+| Kill switch (PANIC STOP) | One click: disable event interception → disable plugin actions → flush/close. Does NOT remove login item, does NOT uninstall. |
 | Safe mode | New integrations enabled for 30s; user must confirm or auto-rollback. |
 
 ---
@@ -89,7 +89,7 @@ CrossOS is a **desktop UX compatibility layer** — not a VM, not a shell replac
              ▼                             ▼
         macOS Adapter                 Windows Adapter
              │                             │
-      CGEvent / AX / Finder          Raw Input / Win32
+      CGEvent / AX / Finder          WH_KEYBOARD_LL / Raw Input / Win32
 ```
 
 > Interface note: the MVP exposes the event pipeline behind an `EventBus`-named
@@ -100,19 +100,27 @@ CrossOS is a **desktop UX compatibility layer** — not a VM, not a shell replac
 
 ### Data Flow (per event)
 
-1. **Input Layer** captures a physical event (keyboard, mouse, hotkey).
-2. **Keyboard State Machine** normalizes it — tracks keydown/keyup, modifier state,
-   repeat, dead keys, IME composition, Fn/CapsLock/NumLock, media keys, device identity,
-   and flags synthetic events — then emits a normalized key event.
-3. **Context Cache** supplies runtime context from cache (updated on app/window/selection
-   change, NOT queried synchronously per keydown — required to stay < 1ms):
-   - Active application (bundle ID / executable name)
-   - Frontmost window title
-   - Active window class
-   - Focused element (AX-focused UIElement)
-   - Cursor position / screen
-   - Selected items (for Finder/file ops)
-   - Device identity (for keyboard remapping)
+> Latency budget: **intercept decision < 1ms** = CGEvent/hook callback < ~100µs +
+> fast rule match < ~500µs. Recorder, UI logs, IPC, and context enrichment are on the
+> slow path and NEVER in the budget.
+
+**Fast path (synchronous, in the native callback):**
+1. **Native callback** (CGEventTap / WH_KEYBOARD_LL) does ONLY: normalize minimal data,
+   update atomic keyboard state, enqueue a bounded event. It NEVER runs the Core pipeline —
+   a slow callback gets the tap disabled by timeout (`kCGEventTapDisabledByTimeout`) on macOS
+   or the hook removed on Windows.
+2. **Fast matcher**: Keyboard State → Rule lookup (Core-compiled matcher) → Decision
+   `PASS / SUPPRESS / REPLACE`. Declarative/builtin rules only (see §3.6: external plugins
+   are async/advisory, never on this path).
+3. **FastContext** supplies the decision inputs from cache (updated on app/window change,
+   NOT queried synchronously per keydown):
+   - AppID (bundle ID / executable + AppMode: native | terminal | remote | vm | excluded)
+   - WindowID + class
+   - DeviceID (for keyboard remapping)
+   - Modifier state
+
+**Slow path (async worker):** Recorder, context enrichment (LazyContext: selection, cursor,
+focused element, UTI), UI activity log, plugin IPC, analytics/debug.
 4. **Rule Engine + Intent Resolver** match normalized event + cached context against rules
    → produces a platform-independent `Intent` (never a raw shortcut translation):
    `Physical Shortcut → Logical Shortcut → Intent → Native Action`.
@@ -122,8 +130,10 @@ CrossOS is a **desktop UX compatibility layer** — not a VM, not a shell replac
 5. **Conflict resolution** picks the winner when several plugins claim one event
    (most-specific match wins; see §3.5b): Priority × Scope × Specificity, verdict
    `CONSUME / PASS / REPLACE`.
-6. **Plugin Manager** dispatches to the winning plugin (builtin in-process for MVP latency;
-   out-of-process via JSON-RPC for Level B executable plugins).
+6. **Plugin Manager** applies the winner. Builtin/declarative rules are Core-compiled into the
+   fast matcher. **External (Level B) plugins MUST NOT participate synchronously on the keyboard
+   critical path** — a 100ms plugin hang would break typing. They act async/advisory only
+   (observe, suggest, register rules); Core compiles their rules into the cached fast matcher.
 7. **Permission Manager** checks the request against granted least-privilege permissions.
 8. **Action Dispatcher → Platform Capability API → Adapter** executes the native action.
    The Recorder taps every stage (event → context → rule → intent → action → result) for
@@ -134,7 +144,7 @@ CrossOS is a **desktop UX compatibility layer** — not a VM, not a shell replac
 The plugin model is event-driven and capability-based. Plugins declare what they can do and subscribe to what they want to see. This mirrors the Pi extension API model described in the ChatGPT conversation:
 
 - **Plugin manifest** (`plugin.json`): declares hooks subscribed, capabilities registered, permissions required, config schema.
-- **Hooks**: `onIntent`, `onContext`, `onEvent`, `onLifecycle`.
+- **Registration** (not per-event hooks): `RegisterRule`, `RegisterIntent`, `RegisterCapability`, `RegisterContextProvider`, `RegisterMenu`. `OnEvent` exists only as an async slow-path observer — never a fast-path decision hook.
 - **Capabilities**: plugins register capability handlers (e.g., `"keyboard.intercept"`, `"window.move"`, `"finder.contextMenu"`).
 - **Intent**: plugins emit intents that the intent resolver routes to capability handlers.
 - **IPC**: plugins communicate with Core via a JSON-over-stdin or Unix socket protocol. Script plugins run as child processes.
@@ -202,29 +212,53 @@ type EventSource struct {
 }
 ```
 
-The EventBus is a publish-subscribe channel. Plugins can subscribe to events by type. The event bus is the "single source of truth" — all input flows through it.
+The `EventBus` interface is the single entry point, but the MVP implementation is a deterministic synchronous EventRouter (`input → normalize → context → rule → action`). Plugins do NOT subscribe to hot-path events; they register rules/capabilities (§3.6). Generic pub/sub is deferred until broadcast is genuinely needed.
 
 ### 3.3 Context Resolver
 
 **Source:** keymapper `FocusedWindow` classes, menumate `RuleMatcher`, nudge AX patterns.
 
+// FastContext rides the hot path (all fields cache-resident). LazyContext is resolved
+// async on the slow path, only for rules that declare `requires:` on it.
 ```go
-type Context struct {
+type FastContext struct {
+    AppID      string       // bundle ID / executable
+    AppMode    AppMode      // native | terminal | remote | vm | excluded
+    WindowID   string
+    DeviceID   string
+    Modifiers  ModifierState
+}
+
+type LazyContext struct {
+    Selection      SelectionInfo // Finder selection, UTIs
+    Cursor         CursorInfo
+    FocusedElement string        // AX path
+}
+
+type Context struct {            // full context (slow path / debugging)
     Event       Event
+    Fast        FastContext
+    Lazy        *LazyContext     // nil unless a matching rule requires it
     Application ApplicationInfo
     Window      WindowInfo
-    Cursor      CursorInfo
-    Selection   SelectionInfo
-    Device      DeviceInfo
-    Session     SessionInfo   // login state, power state
+    Session     SessionInfo      // login state, power state
 }
+
+type AppMode string
+const (
+    AppModeNative   AppMode = "native"
+    AppModeTerminal AppMode = "terminal" // Ctrl+C = INTERRUPT, Ctrl+V = PASTE, etc.
+    AppModeRemote   AppMode = "remote"   // RDP/Citrix: CrossOS disabled
+    AppModeVM       AppMode = "vm"       // Parallels/VMware/VirtualBox: CrossOS disabled
+    AppModeExcluded AppMode = "excluded" // user-excluded apps
+)
 
 type ApplicationInfo struct {
     BundleID      string   // macOS: com.apple.finder, com.microsoft.teams
     Executable    string   // process name
     PID           int
     DisplayName   string
-    IsRemote      bool     // VM/RDP/Remote session
+    AppMode       AppMode    // replaces coarse IsRemote bool + excludedApps[] allowlist
     Category      AppCategory // "terminal", "browser", "remote", "system", "user"
 }
 
@@ -259,11 +293,13 @@ Context Resolver is pluggable per-platform:
 **Source:** keymapper `Stage` output matching, windows-keyboard-for-mac behavior matrix.
 
 ```go
+// Intent is a versioned structured type — never a loose Action string + any-map.
+// Parameters are validated against the target capability's input schema.
 type Intent struct {
-    Action   string            // "copy", "cut", "paste", "rename", "closeWindow", "quitApp", "snapWindow", "newFile", "openTerminal", etc.
-    Modifiers map[string]bool   // which logical modifiers are held
-    Source   string            // "keyboard", "hotkey", "contextMenu"
-    Parameters map[string]any   // action-specific params
+    ID         string          // e.g. "window.snap", "clipboard.copy" (canonical registry, §3.12)
+    Version    int             // intent schema version
+    Source     Source          // "keyboard", "hotkey", "contextMenu"
+    Parameters json.RawMessage // e.g. {"zone":"left-half"} — schema-validated
 }
 ```
 
@@ -287,36 +323,61 @@ Rules are expressed as JSON/YAML and stored in the plugin's config.
 When several plugins claim one event (e.g. Windows UX maps `Ctrl+C → COPY`, Vim UX maps
 `Ctrl+C` to something else, Terminal plugin maps it to `SIGINT`):
 
-- Score = Priority x Scope x Specificity. Example baselines: Terminal context = 100,
-  app-specific (VSCode) = 80, global = 10. Most-specific match wins.
-- Each plugin returns a `Decision`: `CONSUME` (handled — stop), `PASS` (not mine — continue),
-  `REPLACE` (handled — substitute a new intent).
-- Core logs winner + losers per event (feeds the Recorder).
+```go
+type RuleMatch struct {
+    RuleID      string
+    PluginID    string
+    Priority    int        // baseline: terminal/VM = 100, app-specific = 80, global = 10
+    Specificity int        // computed: app+window+device+requires match depth
+    Scope       Scope
+    Intent      Intent
+}
+
+type Resolution struct {
+    RuleID   string
+    PluginID string
+    Intent   Intent
+    Decision Decision
+}
+```
+
+Resolution is a Core function over candidate rules: filter (enabled, AppMode, requires
+satisfiable) → rank by specificity → break ties by priority → exactly ONE winner →
+one Intent. Plugins never REPLACE another plugin's resolved intent after the fact;
+a "replace" is just the winner's own Intent substituting the native action.
+Core logs winner + losers per event (feeds the Recorder).
 
 ### 3.6 Plugin Runtime
 
 **Source:** windhawk's Mod system, komorebi's external client model, menumate's extension pack system.
 
 ```go
-// Plugin API v1 — data + logic in plugin, authority in Core.
+// Plugin API v1 — plugins REGISTER behavior; Core owns the pipeline.
+// A plugin never sits in the event path: no per-event callbacks on the fast path.
+// OnEvent is an async observer hook (slow path) — NOT a decision hook.
 type Plugin interface {
     Manifest() Manifest
-    OnLoad(ctx Context) error
-    OnEvent(event Event) Decision
-    OnIntent(intent Intent) Decision
-    OnUnload() error
+    Register(registry *Registry) error
 }
 
-// Decision is the conflict-resolution verdict a plugin returns.
+type Registry interface {
+    RegisterRule(rule Rule) error             // physical → intent, with requires:/scope:/priority
+    RegisterIntent(intent IntentDef) error
+    RegisterCapability(cap Capability) error  // capability a Level B plugin implements
+    RegisterContextProvider(p CtxProvider) error
+    RegisterMenu(menu MenuDef) error          // Finder/context menus (native actions only)
+}
+
+// Decision is produced by CORE's conflict resolver, not returned by plugins.
 type Decision int
 const (
-    DecisionPass    Decision = iota // not mine — let others handle
-    DecisionConsume                  // handled — stop propagation
-    DecisionReplace                  // handled — substitute a new intent
+    DecisionPass    Decision = iota // no rule matched — pass through
+    DecisionConsume                  // winner handled — suppress original
+    DecisionReplace                  // winner substitutes a native action
 )
 
 type Capability struct {
-    Name        string   // e.g. "keyboard.intercept", "window.manage", "finder.contextMenu"
+    Name        string   // canonical registry name, e.g. "window.close" (§3.12)
     Description string
 }
 
@@ -325,7 +386,7 @@ type PluginManifest struct {
     Name          string            `json:"name"`
     Version       string            `json:"version"`
     Entry         string            `json:"entry"`          // path to executable or Go plugin
-    Type          PluginType        `json:"type"`           // "builtin", "script", "extension"
+    Type          PluginType        `json:"type"`           // "builtin", "declarative", "executable", "extpack"
     Permissions   []Permission      `json:"permissions"`
     Capabilities  []Capability      `json:"capabilities"`
     ConfigSchema  json.RawMessage   `json:"config_schema"`
@@ -347,10 +408,11 @@ const (
 // Core spawns the executable; a plugin crash never takes down Core (restart/disable).
 // Level B is MVP 1 — MVP 0 ships builtin + declarative only.
 
+// Legacy hook names (registry methods in §3.6 are normative; OnEvent = async observer only).
 type Hook string
 const (
     HookOnIntent     Hook = "onIntent"
-    HookOnEvent      Hook = "onEvent"
+    HookOnEvent      Hook = "onEvent"      // async observer, slow path only
     HookOnContext    Hook = "onContext"
     HookOnLifecycle  Hook = "onLifecycle"
 )
@@ -367,6 +429,40 @@ Plugin loading strategy:
    never the default action mechanism — default Finder actions go through native capabilities
    (`filesystem.createFile`, `clipboard.copyPath`, `app.open`, `terminal.openAt`, `file.moveToTrash`).
 
+### 3.12 Capability Registry (canonical, P0)
+
+Every capability is a versioned contract:
+
+```go
+type CapabilityDescriptor struct {
+    ID          string       // e.g. "window.close"
+    Version     string
+    Description string
+    Permission  Permission    // CrossOS permission required
+    InputSchema Schema
+    OutputSchema Schema
+    Platforms   []Platform    // macOS / Windows
+    SideEffects []SideEffect
+    Reversible  bool
+}
+```
+
+Canonical registry (v1):
+
+```
+input.observe, input.intercept
+window.read, window.move, window.close, window.minimize, window.maximize
+clipboard.read, clipboard.write, clipboard.copyPath
+filesystem.read, filesystem.write, filesystem.createFile, filesystem.createFolder, file.moveToTrash
+app.launch, app.open, terminal.openAt
+finder.menu
+```
+
+Example — `window.close`: permission `accessibility.control`; platforms macOS+Windows;
+side effect closes focused window; reversible `false`.
+Manifest, Plugin API, and Capability API versions are independent
+(`manifestVersion` / `pluginApiVersion` / `capabilityApiVersion` + `minCoreVersion`).
+
 ### 3.7 Permission Manager
 
 **Source:** menumate's `ActionDispatcher` security model, the concept of "secure by default."
@@ -375,7 +471,9 @@ Plugin loading strategy:
 type Permission string
 
 const (
-    PermInputIntercept   Permission = "input.intercept"    // capture keyboard/mouse
+    PermInputMonitor     Permission = "input.monitor"       // observe input events (macOS: Input Monitoring consent)
+    PermInputIntercept   Permission = "input.intercept"    // suppress/replace input (macOS: Input Monitoring consent; Win: WH_KEYBOARD_LL)
+    PermAccessControl    Permission = "accessibility.control" // control other apps via AX/UIA (macOS: Accessibility; Win: UIA)
     PermAccessibility    Permission = "accessibility"     // control other apps
     PermFilesystem       Permission = "filesystem"        // read/write files
     PermNetwork         Permission = "network"            // network access
@@ -460,6 +558,12 @@ Real Input ─┬──→ Runtime pipeline
 - **Observe (dry-run) mode**: before CrossOS modifies anything, the UI logs
   `Physical → Context → Matched rule → Intent → Would-execute` WITHOUT executing.
   User enables execution only after the trace looks right. Essential for testing new plugins.
+- **Privacy model (normative):** modes `OFF / METADATA_ONLY (default) / DEBUG / FULL_TRACE`.
+  METADATA_ONLY redacts typed text, clipboard content, and password fields. Replay replays
+  semantic events (`KEY_DOWN Ctrl`, `KEY_DOWN C`) — never raw clipboard/secret contents.
+- **Replay tiers:** (1) Raw — `Ctrl down / C down / C up / Ctrl up`; (2) Semantic — `COPY_SELECTION`;
+  (3) Capability — `clipboard.copySelection`. Tier 2/3 are the primary debug loop
+  (reproduce → fix → replay → verify).
 
 ## 4. Platform Adapters
 
@@ -467,12 +571,11 @@ Real Input ─┬──→ Runtime pipeline
 
 **Source:** newfile's FIFinderSync, menumate's FinderExtension, nudge's AX/Carbon patterns, Karabiner-Elements' CGEvent/DriverKit.
 
-The macOS adapter is a Swift framework (`platform/darwin/`) that exposes C-compatible functions called via CGO from Go core. It provides:
+The macOS adapter lives in `platform/darwin/`. Boundary is **Go → C ABI (cgo) → Objective-C++ → Swift/AppKit/CoreGraphics** (Swift is never called from Go directly). It provides:
 
 #### Keyboard Interception
-- **CGEvent tap** (`CGEventTapCreate`) for low-level keyboard/mouse event capture.
-- Uses `kCGHIDEventTap` for hardware event interception.
-- Inspired by Karabiner-Elements' approach but at the application level (no kernel driver needed for MVP).
+- **CGEvent tap** (`CGEventTapCreate`) for session/HID-level keyboard/mouse interception.
+- Session/HID-level interception via `kCGHIDEventTap` (NOT "application-level" — it sits low in the event pipeline; permission scope differs by tap location). No kernel driver needed for MVP; DriverKit virtual-HID is post-MVP.
 
 #### Context Detection
 - `NSWorkspace` for active application (bundle ID, PID).
@@ -491,6 +594,7 @@ The macOS adapter is a Swift framework (`platform/darwin/`) that exposes C-compa
 - Uses `FIFinderSyncController` for directory-scoped menus.
 - IPC with Core daemon via **Unix socket** (normative). `DistributedNotificationCenter` is rejected for command transport (no delivery guarantees / error handling).
 - The Finder Sync Extension is a **minimal IPC client only**: display menu → send action request → receive result. It MUST NOT become a mini CrossOS runtime — no rule evaluation, no script execution.
+- **Lifecycle/fallback (normative):** daemon-not-running, restarting, stale/unavailable socket, permission mismatch, extension-launched-before-daemon, daemon-killed → the extension MUST fail gracefully: hide the CrossOS menu section, NEVER block Finder. IPC timeout ~100-300ms; no response → fallback/hide. Finder never waits for CrossOS.
 
 #### App Categories
 - Bundle ID → category mapping (terminal, browser, remote, system).
@@ -503,7 +607,8 @@ The macOS adapter is a Swift framework (`platform/darwin/`) that exposes C-compa
 **Source:** keymapper's `server/windows/`, windhawk's mod injection model.
 
 Provides equivalent functionality on Windows:
-- **Raw Input** (`/win/0x100` + `RegisterRawInputDevices`) for keyboard/mouse capture.
+- **WH_KEYBOARD_LL** (`SetWindowsHookEx`) for interception/suppression — callback returns non-zero to suppress. Raw Input (`RegisterRawInputDevices`, `WM_INPUT`) is observation/device identity ONLY, not a suppression mechanism.
+- **SendInput** for synthetic input. Subject to UIPI: can only inject into apps at equal-or-lower integrity level (elevated targets require elevated CrossOS).
 - **SendInput** for synthetic input generation.
 - **GetForegroundWindow** + **GetWindowText** for active window/app detection.
 - **AccessibleObject** / UI Automation for window manipulation.
@@ -517,7 +622,10 @@ Provides equivalent functionality on Windows:
 
 ```json
 {
-  "schemaVersion": 2,
+  "manifestVersion": 2,
+  "pluginApiVersion": 1,
+  "capabilityApiVersion": 1,
+  "minCoreVersion": "0.1.0",
   "id": "windows-keyboard",
   "name": "Windows Keyboard",
   "description": "Windows muscle-memory keyboard shortcuts on macOS",
@@ -529,7 +637,7 @@ Provides equivalent functionality on Windows:
   "capabilities": [
     {"name": "keyboard.intercept", "description": "Intercept and remap keyboard events"}
   ],
-  "hooks": ["onIntent", "onEvent"],
+  "hooks": ["onIntent"],
   "config_schema": {
     "type": "object",
     "properties": {
@@ -560,7 +668,7 @@ Provides equivalent functionality on Windows:
 Extension packs are Git repos installed into `plugins/<pack-id>/`. They contain:
 ```
 pack/
-├── manifest.json       # PackManifest (schemaVersion, name, author, description, icon, actions[])
+├── manifest.json       # PackManifest (manifestVersion, name, author, description, icon, actions[])
 ├── actions/            # scripts (shell, python, etc.)
 │   ├── copy-path.zsh
 │   └── open-terminal.zsh
@@ -573,7 +681,9 @@ pack/
 
 ```json
 {
-  "schemaVersion": 2,
+  "manifestVersion": 2,
+  "pluginApiVersion": 1,
+  "capabilityApiVersion": 1,
   "name": "Windows Explorer UX",
   "author": "CrossOS",
   "description": "Right-click context menu items matching Windows Explorer",
@@ -583,7 +693,7 @@ pack/
       "id": "new-text-file",
       "title": "New > Text Document",
       "icon": "doc.text",
-      "script": "actions/new-file.zsh",
+      "action": {"type": "native", "capability": "filesystem.createFile", "parameters": {"extension": "txt"}},
       "targets": "files",
       "utis": ["public.folder"],
       "placement": "submenu",
@@ -595,7 +705,7 @@ pack/
       "id": "copy-path",
       "title": "Copy as Path",
       "icon": "doc.on.doc",
-      "script": "actions/copy-path.zsh",
+      "action": {"type": "native", "capability": "clipboard.copyPath"},
       "targets": "any",
       "placement": "topLevel"
     }
@@ -610,7 +720,7 @@ pack/
 | `id` | string | yes | Unique action identifier |
 | `title` | string | yes | Display name in context menu |
 | `icon` | string | yes | SF Symbol name (macOS) / icon name (Windows) |
-| `script` | string | yes | Path relative to pack root. Must be within pack dir. |
+| `action` | object | yes | `{"type":"native","capability":"…","parameters":{…}}` (default) or `{"type":"process","plugin":"…","operation":"…"}` (Level B). `script` is NOT part of the schema. |
 | `targets` | string\|string[] | yes | `"files"`, `"folders"`, `"any"`, `"container"`, `"selection"` |
 | `utis` | string[] | no | UTI filters (macOS only) |
 | `placement` | string | no | `"topLevel"` or `"submenu"` (default: `"topLevel"`) |
@@ -662,27 +772,25 @@ the Adapter, not a static table, decides the native action. `Ctrl+W` similarly r
 | Alt+F4 | `CLOSE_WINDOW` → Adapter closes current window (NOT Cmd+Q quit) | pass through |
 | Alt+F4 (on VM) | Alt+F4 (pass through) | Alt+F4 |
 | Alt+Tab | Cmd+Tab | Cmd+Tab |
-| Win+D | F11 (fullscreen) or Mission Control | F11 |
+| Win+D | `SHOW_DESKTOP` intent → Adapter native show-desktop | — |
 | Win+L | Ctrl+Cmd+Q (lock screen) | Ctrl+Cmd+Q |
-| Win+E | Cmd+Space (Spotlight) or Finder | Cmd+Space |
-| Win+Shift+S | Shift+Cmd+5 (screenshot) | Shift+Cmd+5 |
-| Win+Arrow Left | Cmd+Ctrl+F2 (snap left) → use Moom/Yabai | Cmd+Ctrl+F2 |
-| Win+Arrow Right | Cmd+Ctrl+F2 (snap right) | Cmd+Ctrl+F2 |
+| Win+E | `OPEN_FILE_MANAGER` intent → Adapter opens Finder/Explorer | — |
+| Win+Shift+S | `SCREENSHOT_REGION` intent → Adapter native region capture | — |
+| Win+Arrow Left | `SNAP_LEFT` intent → Adapter native snap | — |
+| Win+Arrow Right | `SNAP_RIGHT` intent → Adapter native snap | — |
 | Win+Arrow Up | Zoom/maximize | — |
 | Win+Arrow Down | Minimize | — |
 | Ctrl+Win+F | Cmd+Ctrl+F (fullscreen) | Cmd+Ctrl+F |
-| Win+Shift+Left/Right | Alt+Cmd+←/→ (move space) | — |
+| Win+Shift+Left/Right | `MOVE_WINDOW_TO_DISPLAY` intent → Adapter moves window across displays | — |
 | Home/End | Cmd+Home/End (scroll to top/bottom) | — |
 | Ctrl+Home/End | Cmd+Up/Down | — |
 | NumLock | Clear | — |
 | Scroll Lock | F18 (or Shift+F18) | — |
 
-**Terminal apps** (pass-through Ctrl): Terminal, iTerm2, WezTerm, Warp, Alacritty, Kitty, Hyper, Ghostty, VSCode, Chrome Dev Tools.
-**Remote apps** (pass-through everything): Microsoft RDC, Parallels, VMware Fusion, VirtualBox, JumpDesktop, Citrix.
+**AppMode routing (config-driven bundle lists, not hardcoded logic):** Terminal apps (Terminal, iTerm2, WezTerm, Warp, Alacritty, Kitty, Hyper, Ghostty, VSCode) → `AppModeTerminal` (Ctrl+C = INTERRUPT, Ctrl+V = PASTE per-intent, not blanket passthrough). Remote/VM apps (RDC, Parallels, VMware, VirtualBox, JumpDesktop, Citrix) → `AppModeRemote`/`AppModeVM` (CrossOS disabled for that window).
 
 **Implementation**:
-- Uses Karabiner-Elements' virtual HID approach (pqrs/Karabiner-DriverKit-VirtualHIDDevice) OR application-level CGEvent tap.
-- For MVP: CGEvent tap at application level (no driver needed). For production: virtual HID driver for system-wide remapping.
+- MVP: session/HID-level CGEventTap (no driver). Production option: DriverKit virtual-HID for full system-wide remapping.
 - Uses device filters (like keymapper's `Stage`) to exclude specific keyboards.
 - Uses app filters (like windows-keyboard-for-mac's `frontmost_application_if`) to apply different rules per app.
 
@@ -718,7 +826,7 @@ Next Display, Previous Display
 - Frame history (capacity 128) for restore.
 - Multi-monitor support.
 
-### 6.3 Plugin 3: Windows Explorer UX (Extension Pack, Swift FIFinderSync)
+### 6.3 Plugin 3: Windows Explorer UX (Plugin; uses the Finder Sync Platform Extension)
 
 **Context menu items** (from FinderRight + newfile + menumate):
 
@@ -740,7 +848,7 @@ Next Display, Previous Display
 **Implementation**:
 - FIFinderSync extension in `extensions/finder-sync/` (Swift).
 - Context menu built from extension pack's `manifest.json` actions.
-- Actions executed as shell scripts with env injection (like MenuMate's `ShellRunner`).
+- Actions execute as NATIVE capabilities via the Platform Capability API. Shell/process actions are opt-in Level B executable plugins only (never the default).
 - Security: ActionDispatcher validates requests against local config, checks paths, max path count.
 - IPC: Unix socket to Core for execution (normative — see §4.1).
 
@@ -779,17 +887,18 @@ app/
 
 ### 7.2 Key UI Pages
 
-| Page | Purpose |
-|---|---|
-| **Dashboard** | Status of all plugins, enable/disable toggle, safe mode indicator, kill switch button. |
-| **Keyboard** | View/edit the Windows keyboard behavior matrix. App-specific overrides. |
-| **Windows** | Window management shortcuts, snap zone editor. |
-| **Finder** | Context menu items, extension packs, action settings. |
-| **Plugins** | Installed plugins, marketplace browser, install/enable/disable/update. |
-| **Shortcuts** | Global keyboard shortcut manager. |
-| **Activity** | Real-time event log, intent resolution trace, plugin actions. |
-| **Safety** | Kill switch, Reset Everything, Safe Mode settings, ownership audit. |
-| **About** | Version, license, attribution, repository credits. |
+| Page | Purpose | MVP |
+|---|---|---|
+| **Dashboard** | Status of all plugins, enable/disable toggle, safe mode indicator, kill switch button. | MVP 0 |
+| **Keyboard** | View/edit the Windows keyboard behavior matrix. App-specific overrides. | MVP 0 |
+| **Activity** | Real-time event log, intent resolution trace, plugin actions. | MVP 0 |
+| **Safety** | Kill switch, Reset, Safe Mode settings, ownership audit. | MVP 0 |
+| **Settings** | Permissions, autostart, general config. | MVP 0 |
+| **Windows** | Window management shortcuts, snap zone editor. | MVP 1 |
+| **Finder** | Context menu items, extension packs, action settings. | MVP 2 |
+| **Plugins** | Installed plugins, install/enable/disable/update. | MVP 1+ (local only; NO marketplace browser until Phase 3C) |
+| **Shortcuts** | Global keyboard shortcut manager. | later |
+| **About** | Version, license, attribution, repository credits. | MVP 0 |
 
 ### 7.3 Wails Bridge
 
@@ -810,9 +919,9 @@ func (a *App) GetEventLogs() []string { ... }
 
 1. **Intercept only** → disabling removes all effects; never patch Finder, system binaries, or the kernel.
 2. **Ownership tracking** → every integration records ownership metadata; only clean up what CrossOS created.
-3. **Emergency kill switch** → one click: disable hooks → stop daemon → disable plugins/extension → remove login item → verify.
+3. **Emergency kill switch (PANIC STOP)** → one click: disable interception + plugin actions + flush/close. Login item stays.
 4. **Safe Mode** → enable for 30s → confirm/rollback.
-5. **Reset Everything** → restore CrossOS-owned state → all integrations reversed → verify no process remains.
+5. **Reset / Uninstall** → remove login item, disable extension, clean CrossOS-owned state, verify no process remains.
 
 ### 8.2 CrossOS Integration State & Rollback
 
@@ -837,7 +946,9 @@ type IntegrationRecord struct {
 
 | Feature | macOS Permission | Windows Permission |
 |---|---|---|
-| Keyboard interception | Accessibility (AX) + Accessibility API | Run as admin / Raw Input |
+| Keyboard observation | Input Monitoring consent | Raw Input (no admin) |
+| Keyboard interception | Input Monitoring consent | WH_KEYBOARD_LL (no admin; driver = future) |
+| Synthetic input | — | SendInput (UIPI: equal-or-lower IL only) |
 | Window management | Accessibility (AX) | Run as admin |
 | Finder context menu | Finder Sync Extension (user approves in System Settings) | Context menu handler (registry) |
 | Clipboard | Accessibility or Accessibility API | — |
@@ -884,7 +995,12 @@ From the research (see `docs/RESEARCH.md` for full matrix):
 ## 10. Implementation Phases
 
 ### Phase 0: Foundation — lock the 4 contracts first (2-3 weeks)
-- [ ] Wails v2/v3 spike (1–2 days) → lock stack at current stable; scaffold only after
+- [ ] Wails v2-stable vs v3-beta spike (1–2 days, NO scaffolding before it) — decide on CrossOS needs: tray, settings, multi-window, native menu, lifecycle, autostart, signing, macOS/Windows packaging, Go service integration. Never pick v3 just for novelty.
+- [ ] Native spikes BEFORE Go Core (each must pass or architecture is reworked):
+  - [ ] Spike A (macOS CGEventTap): intercept Ctrl+C → suppress → emit replacement → recover after timeout-disable
+  - [ ] Spike B (Windows WH_KEYBOARD_LL): suppress Ctrl+C → SendInput replacement → elevated vs non-elevated targets (UIPI)
+  - [ ] Spike C (AX/UIA): get focused app/window → move/resize window
+  - [ ] Spike D (Finder Sync): menu → Unix socket → daemon-down graceful fallback (hide, never block)
 - [ ] Create Go core project structure (`core/` + `pkg/`)
 - [ ] **P0 contracts (must be reviewed before any plugin code):**
   - [ ] Plugin API v1 (manifest + lifecycle + `Decision`: PASS/CONSUME/REPLACE) + apiVersion
@@ -898,14 +1014,14 @@ From the research (see `docs/RESEARCH.md` for full matrix):
 - [ ] Config manager with schema validation
 - [ ] IPC server (JSON-RPC over Unix socket)
 - [ ] Core daemon lifecycle (init, run, stop, safe mode)
-- [ ] macOS adapter skeleton (Swift Framework, CGEvent tap, AX bridge)
+- [ ] macOS adapter skeleton (C-ABI bridge → ObjC++/Swift: session/HID CGEventTap, AX bridge; build/linking/signing locked here)
 - [ ] Basic UI shell (Wails + React + shadcn)
 - [ ] Safety layer (kill switch, reset everything, ownership rollback)
 - [ ] Observe/dry-run mode (log `Physical → Context → Rule → Intent → Would-execute` without executing)
 
 ### MVP 0: Core + Keyboard only (3-4 weeks)
 - [ ] **Plugin: Windows Keyboard** (builtin + declarative rules)
-  - CGEvent tap on macOS (DriverKit deferred to post-MVP)
+  - Session/HID CGEventTap on macOS (DriverKit deferred to post-MVP)
   - Intent-first matrix (~10 shortcuts first): Ctrl+C/V/X/A, F2, Alt+F4 (`CLOSE_WINDOW`),
     Alt+Tab, Win+Left/Right — validated in Finder, text editor, browser, Terminal
   - Terminal/Remote/VM exclusions (Terminal, iTerm2, WezTerm, Warp, Alacritty, Kitty, Hyper,
@@ -921,12 +1037,13 @@ From the research (see `docs/RESEARCH.md` for full matrix):
 - [ ] Permission prompts (non-tech friendly, explicit approve), activity log
 
 ### MVP 2: + Finder UX (3 weeks)
-- [ ] **Plugin: Finder UX** (declarative extpack; FIFinderSync = minimal IPC client)
+- [ ] **Plugin: Finder UX** (declarative rules + menus; Finder Sync Platform Extension = minimal IPC client).
+  Note: "Extension Pack" = package/distribution format only — never the name for the native Finder Sync Platform Extension.
   - Context menu via native capabilities (`filesystem.createFile`, `clipboard.copyPath`,
     `app.open`, `terminal.openAt`, `file.moveToTrash`); shell is opt-in Level B only
   - Extension-pack loading (manifest parser), path validation, undeclared-file inspection
 
-### Phase 3: Plugin Ecosystem (3-4 weeks)
+### Phase 3: Plugin Ecosystem — staged (local → git → signed registry → marketplace)
 - [ ] Extension pack marketplace (Git-based)
 - [ ] Plugin install/enable/disable/update lifecycle + health states (DISABLED/TRIAL/HEALTHY/ENABLED)
 - [ ] Plugin config schema UI (auto-generated forms)
@@ -971,7 +1088,7 @@ From the research (see `docs/RESEARCH.md` for full matrix):
 
 ### Platform-Specific Tests
 - macOS: FIFinderSync context menu visibility, AX window manipulation
-- Windows: Raw Input capture, SendInput output
+- Windows: WH_KEYBOARD_LL suppress/replace, SendInput output (incl. UIPI elevated-target case)
 
 ### Reference Tests (behavioral matrix — Shortcut × Application × Input state × OS state)
 - Keyboard: shortcuts × {Finder, Browser, VSCode, Terminal, Remote Desktop} ×
@@ -995,9 +1112,9 @@ crossos/
 │   ├── pkg/
 │   └── internal/adapter/     # CGO bridge to platform adapters
 ├── platform/
-│   ├── darwin/               # Swift Framework (CGEvent, AX, FIFinderSync)
+│   ├── darwin/               # ObjC++/Swift via C ABI (CGEventTap, AX, FIFinderSync)
 │   │   └── extensions/finder-sync/   # Swift FIFinderSync Extension
-│   └── windows/              # C++ static library (Raw Input, SendInput)
+│   └── windows/              # small native helper only (hook + raw input + sendinput; logic stays in Go)
 ├── plugins/                  # plugin manifests + scripts
 │   ├── windows-keyboard/
 │   │   └── plugin.json
@@ -1095,7 +1212,7 @@ All reference repos cloned into `tmp/research/` for code archaeology:
 
 | # | Question | Options | Recommendation |
 |---|---|---|---|
-| 1 | How to intercept keyboard input? | App-level CGEvent tap vs kernel DriverKit | Start with CGEvent tap for MVP; upgrade to DriverKit for production |
+| 1 | How to intercept keyboard input? | Session/HID CGEventTap vs DriverKit (macOS); WH_KEYBOARD_LL vs driver (Windows) | RESOLVED: session/HID tap (macOS) + WH_KEYBOARD_LL (Win) for MVP; DriverKit/driver post-MVP. Proved by Spikes A+B before Core. |
 | 2 | How to communicate with Finder extension? | DistributedNotificationCenter vs Unix socket | RESOLVED: Unix socket (normative). DistributedNotificationCenter rejected for command transport |
 | 3 | How to handle multi-user / multiple macOS instances? | Session-aware context | Design context resolver to include session info |
 | 4 | How to handle updates to extension packs? | Git pull + reload vs bundled version | Git-based auto-update with user approval |
