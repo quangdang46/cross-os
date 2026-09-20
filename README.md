@@ -52,7 +52,8 @@ crossos/
 ├── app/             # Wails backend + frontend (React/TS)
 ├── extensions/
 │   └── finder-sync/ # Swift Finder Sync Extension
-├── docs/            # research matrix, architecture
+├── COMPREHENSIVE_PLAN.md  # architecture (source of truth)
+├── docs/            # research matrix
 └── tmp/research/    # read-only clones of reference OSS repos (gitignored, not committed)
 ```
 
@@ -71,7 +72,7 @@ crossos/
 - [docs/RESEARCH.md](docs/RESEARCH.md) — a matrix of ~35 repos (keyboard/input,
   window, Finder/context-menu, automation, plugin architecture), classified as
   COPY/ADAPT (MIT) vs ARCHITECTURE-only (GPL) vs UX/behavior.
-- [docs/COMPREHENSIVE_PLAN.md](docs/COMPREHENSIVE_PLAN.md) — detailed architecture,
+- [COMPREHENSIVE_PLAN.md](COMPREHENSIVE_PLAN.md) — detailed architecture,
   module-by-module design, plugin spec, MVP breakdown (Windows Keyboard, Window
   Management, Explorer UX), safety layer, phased implementation, testing, and
   build/distribution.
