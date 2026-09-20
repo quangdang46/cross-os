@@ -91,3 +91,9 @@ which parts are reusable under its LICENSE?), then map Our Feature → reuse sou
 - Finder → NewFile / MenuMate (adapt)
 - Automation → CrossMacro / Hammerspoon (arch)
 - Plugin Marketplace → Windhawk / MenuMate / komorebi (arch)
+
+## See also
+
+For the full implementation plan — architecture, module designs, MVP breakdown,
+safety layer, phased timeline, testing, and build/distribution — see
+[COMPREHENSIVE_PLAN.md](COMPREHENSIVE_PLAN.md).
