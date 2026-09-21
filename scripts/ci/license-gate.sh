@@ -25,12 +25,23 @@ set -euo pipefail
 
 MODE="${1:---diff}"
 BASE="${2:-origin/main}"
+# GATE_ROOT lets the self-test redirect at a scratch tree (default: repo
+# third_party). The scratch tree mirrors the real layout: $GATE_ROOT/
+# third_party/<repo>/ — so ROOT is always $GATE_ROOT/third_party.
+# Never point it at anything but a disposable dir.
+ROOT="${GATE_ROOT:-.}/third_party"
+ROOT="${ROOT#./}"
 FAIL=0
 
 if [ "$MODE" = "--all" ]; then
   # NOTE: ls-files pathspec quirks vary by git version — list tracked
   # files plus untracked fixture files (self-test) via --others.
-  FILES=$( (git ls-files 'third_party' ; git ls-files --others --exclude-standard 'third_party') 2>/dev/null | sort -u || true)
+  FILES=$( (git ls-files "$ROOT" ; git ls-files --others --exclude-standard "$ROOT") 2>/dev/null | sort -u || true)
+  # Scratch trees aren't git-tracked: fall back to filesystem listing so
+  # fixtures are found even with no git index entries.
+  if [ -z "$FILES" ] && [ -d "$ROOT" ]; then
+    FILES=$(find "$ROOT" -type f | sort || true)
+  fi
 else
   if ! git fetch origin main --quiet 2>/dev/null; then
     echo "license-gate WARN: cannot fetch $BASE — diffing against possibly-stale base"
@@ -62,7 +73,7 @@ FIELDS="Source repository:|Source commit:|Source file:|Original license:|Origina
 
 check_repo() {
   local repo="$1"
-  local dir="third_party/$repo"
+  local dir="$ROOT/$repo"
   local ok=1
   for f in LICENSE NOTICE ATTRIBUTION.md; do
     if [ ! -f "$dir/$f" ]; then
@@ -142,13 +153,18 @@ check_repo() {
   return 0
 }
 
-# (e) Guard stray paths: entries directly under third_party/ (no repo dir)
+# (e) Guard stray paths: entries directly under the root (no repo dir)
 # fail with a clear message, not a misleading missing-LICENSE path.
+# NOTE: when ROOT itself is nested (self-test scratch .tmp-gate-test/
+# third_party), FILES entries carry the full scratch prefix — strip it
+# first, then split the REMAINDER into repo/file.
 REPOS=""
 while IFS= read -r f; do
-  case "$f" in
-    third_party/*/*) repo=$(echo "$f" | cut -d/ -f2); REPOS="$REPOS $repo";;
-    *) echo "license-gate FAIL: '$f' is directly under third_party/ (must live in third_party/<repo>/ — §9.11)"; FAIL=1;;
+  rel="${f#$ROOT/}"
+  # Defensive: an entry equal to ROOT or outside it yields no slash.
+  case "$rel" in
+    */*) repo=$(echo "$rel" | cut -d/ -f1); REPOS="$REPOS $repo";;
+    *) echo "license-gate FAIL: '$f' is directly under $ROOT/ (must live in $ROOT/<repo>/ — §9.11)"; FAIL=1;;
   esac
 done <<< "$FILES"
 REPOS=$(echo "$REPOS" | tr ' ' '\n' | sort -u)

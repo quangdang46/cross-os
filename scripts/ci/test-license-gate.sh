@@ -12,24 +12,37 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 PASS=0; FAIL=0
+# SAFETY (incident fix, bead cross-os-nir.1 review): run_cases execute in a
+# SCRATCH dir (./.tmp-gate-test/third_party), NEVER in the real
+# ./third_party. The old form did `rm -rf third_party` around each case and
+# wiped the real vendored attribution once. Refuse to run if invoked
+# anywhere the scratch path escapes the repo.
 run_case() { # name, setup-fn, want(exit code)
   local name="$1" setup="$2" want="$3"
-  rm -rf third_party && mkdir -p third_party
-  "$setup"
-  if bash scripts/ci/license-gate.sh --all >/tmp/gate-out.txt 2>&1; then got=0; else got=1; fi
+  local scratch=".tmp-gate-test/third_party"
+  # Marker-file guard (review: cross-os-c0): dirname matching is
+  # rename-fragile, so require the repo marker instead.
+  if [ ! -f "COMPREHENSIVE_PLAN.md" ]; then
+    echo "refusing: run from repo root (COMPREHENSIVE_PLAN.md not found)"
+    return 1
+  fi
+  rm -rf .tmp-gate-test && mkdir -p "$scratch"
+  # Redirect the fixture helpers at the scratch dir via env.
+  GATE_SCRATCH="$scratch" "$setup"
+  if GATE_ROOT=".tmp-gate-test" bash scripts/ci/license-gate.sh --all >/tmp/gate-out.txt 2>&1; then got=0; else got=1; fi
   if [ "$got" = "$want" ]; then echo "PASS [$name]"; PASS=$((PASS+1)); else echo "FAIL [$name] (want exit $want, got $got)"; cat /tmp/gate-out.txt; FAIL=$((FAIL+1)); fi
-  rm -rf third_party
+  rm -rf .tmp-gate-test
 }
 
 mk_base() { # $1=repo — LICENSE + NOTICE only
-  mkdir -p "third_party/$1"
-  echo "MIT License" > "third_party/$1/LICENSE"
-  echo "Copyright (c) test" > "third_party/$1/NOTICE"
+  mkdir -p "$GATE_SCRATCH/$1"
+  echo "MIT License" > "$GATE_SCRATCH/$1/LICENSE"
+  echo "Copyright (c) test" > "$GATE_SCRATCH/$1/NOTICE"
 }
 
 positive() {
   mk_base good
-  cat > third_party/good/ATTRIBUTION.md <<'EOF'
+  cat > $GATE_SCRATCH/good/ATTRIBUTION.md <<'EOF'
 Source repository: example/good
 Source commit: 0123456789abcdef0123456789abcdef01234567
 Source file: src/a.swift
@@ -40,14 +53,14 @@ Modification: adapted to Capability API
 Reason for modification: strip app UI
 CrossOS license: MIT
 EOF
-  echo "code" > third_party/good/a.swift
+  echo "code" > $GATE_SCRATCH/good/a.swift
 }
 
-unattributed() { mk_base bad; echo "code" > third_party/bad/a.swift; }
+unattributed() { mk_base bad; echo "code" > $GATE_SCRATCH/bad/a.swift; }
 
 gpl() {
   mk_base gplrepo
-  cat > third_party/gplrepo/ATTRIBUTION.md <<'EOF'
+  cat > $GATE_SCRATCH/gplrepo/ATTRIBUTION.md <<'EOF'
 Source repository: example/gpl
 Source commit: 0123456789abcdef0123456789abcdef01234567
 Source file: src/a.c
@@ -62,7 +75,7 @@ EOF
 
 nolicense() {
   mk_base nonelic
-  cat > third_party/nonelic/ATTRIBUTION.md <<'EOF'
+  cat > $GATE_SCRATCH/nonelic/ATTRIBUTION.md <<'EOF'
 Source repository: example/none
 Source commit: 0123456789abcdef0123456789abcdef01234567
 Source file: src/a.c
@@ -77,7 +90,7 @@ EOF
 
 unpinned() {
   mk_base floatrepo
-  cat > third_party/floatrepo/ATTRIBUTION.md <<'EOF'
+  cat > $GATE_SCRATCH/floatrepo/ATTRIBUTION.md <<'EOF'
 Source repository: example/float
 Source commit: main
 Source file: src/a.c
@@ -95,7 +108,7 @@ smuggledgpl() {
   # Two header shapes: full-phrase ("GNU GENERAL PUBLIC LICENSE", no bare
   # GPL substring) and SPDX ("GPL-3.0-only") — the gate must catch BOTH.
   mk_base smug
-  cat > third_party/smug/ATTRIBUTION.md <<'EOF'
+  cat > $GATE_SCRATCH/smug/ATTRIBUTION.md <<'EOF'
 Source repository: example/smug
 Source commit: 0123456789abcdef0123456789abcdef01234567
 Source file: src/a.c
@@ -106,7 +119,7 @@ Modification: none
 Reason for modification: n/a
 CrossOS license: MIT
 EOF
-  cat > third_party/smug/a.c <<'EOF'
+  cat > $GATE_SCRATCH/smug/a.c <<'EOF'
 /* GNU GENERAL PUBLIC LICENSE Version 3 */
 // SPDX-License-Identifier: GPL-3.0-only
 int main(void) { return 0; }
@@ -116,7 +129,7 @@ EOF
 spdxonly() {
   # SPDX-only GPL marker (no full phrase) → must FAIL.
   mk_base spdxrepo
-  cat > third_party/spdxrepo/ATTRIBUTION.md <<'EOF'
+  cat > $GATE_SCRATCH/spdxrepo/ATTRIBUTION.md <<'EOF'
 Source repository: example/spdx
 Source commit: 0123456789abcdef0123456789abcdef01234567
 Source file: src/a.c
@@ -127,13 +140,13 @@ Modification: none
 Reason for modification: n/a
 CrossOS license: MIT
 EOF
-  echo '// SPDX-License-Identifier: GPL-3.0-only' > third_party/spdxrepo/a.c
+  echo '// SPDX-License-Identifier: GPL-3.0-only' > $GATE_SCRATCH/spdxrepo/a.c
 }
 
 partialattr() {
   # 2 source files, 1 attribution entry → must FAIL (per-file completeness).
   mk_base partial
-  cat > third_party/partial/ATTRIBUTION.md <<'EOF'
+  cat > $GATE_SCRATCH/partial/ATTRIBUTION.md <<'EOF'
 Source repository: example/partial
 Source commit: 0123456789abcdef0123456789abcdef01234567
 Source file: src/a.c
@@ -144,8 +157,8 @@ Modification: none
 Reason for modification: n/a
 CrossOS license: MIT
 EOF
-  echo "a" > third_party/partial/a.c
-  echo "b" > third_party/partial/b.c
+  echo "a" > $GATE_SCRATCH/partial/a.c
+  echo "b" > $GATE_SCRATCH/partial/b.c
 }
 
 run_case "positive-mit-passes" positive 0
