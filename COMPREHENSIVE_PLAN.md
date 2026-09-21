@@ -509,7 +509,7 @@ Canonical registry (v1):
 ```
 input.observe, input.intercept
 window.read, window.move, window.close, window.minimize, window.maximize
-clipboard.read, clipboard.write, clipboard.copyPath
+clipboard.read, clipboard.write, clipboard.copy, clipboard.copyPath
 filesystem.read, filesystem.write, filesystem.createFile, filesystem.createFolder, file.moveToTrash
 app.launch, app.open, terminal.openAt
 finder.menu

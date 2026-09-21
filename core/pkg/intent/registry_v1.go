@@ -91,6 +91,14 @@ func canonicalV1() []CapabilityDescriptor {
 			Reversible: true,
 		},
 		{
+			ID: "clipboard.copy", Version: "1",
+			Description:  "Copy the current selection via the native copy path",
+			Permission:   PermAccessControl,
+			InputSchema:  noParams,
+			Platforms:    []Platform{PlatformMacOS, PlatformWindows},
+			Reversible:   true,
+		},
+		{
 			ID: "clipboard.copyPath", Version: "1",
 			Description: "Copy selected file paths to the clipboard",
 			Permission:  PermAccessControl,

@@ -12,9 +12,11 @@ func testRegistry(t *testing.T) *Registry {
 
 func TestCanonicalV1Count(t *testing.T) {
 	r := testRegistry(t)
-	// §3.12 lists exactly 19 capabilities.
-	if got := len(r.IDs()); got != 19 {
-		t.Fatalf("canonical v1: got %d IDs, want 19: %v", got, r.IDs())
+	// §3.12 lists 19 capabilities + clipboard.copy (added for the s4i
+	// Ctrl+C→COPY mapping; review: cross-os-c0 — copyPath is file-paths
+	// copy, not selection copy).
+	if got := len(r.IDs()); got != 20 {
+		t.Fatalf("canonical v1: got %d IDs, want 20: %v", got, r.IDs())
 	}
 }
 
@@ -23,7 +25,7 @@ func TestCanonicalV1IDs(t *testing.T) {
 	for _, id := range []string{
 		"input.observe", "input.intercept",
 		"window.read", "window.move", "window.close", "window.minimize", "window.maximize",
-		"clipboard.read", "clipboard.write", "clipboard.copyPath",
+		"clipboard.read", "clipboard.write", "clipboard.copy", "clipboard.copyPath",
 		"filesystem.read", "filesystem.write", "filesystem.createFile",
 		"filesystem.createFolder", "file.moveToTrash",
 		"app.launch", "app.open", "terminal.openAt",
