@@ -14,9 +14,10 @@
 > - License: MIT
 >
 > **Toolchain policy:** always use the current stable release at scaffold time — do not pin
-> to the versions below unless a verified incompatibility exists. **Wails v2 vs v3 must be
-> decided by a 1–2 day spike before scaffolding** (v3 changes service/manager API significantly — decide on tray, multi-window, native menu, lifecycle, autostart, signing, and packaging needs);
-> default to v2 stable for MVP 0 unless multi-window needs force v3.
+> to the versions below unless a verified incompatibility exists. **Wails: v3 beta decided
+> by spike 2026-09-21 (see docs/wails-spike.md)** — multi-window + tray-attached windows are
+> structural CrossOS needs (single-window v2 forces workarounds); revisit at scaffold: if v3
+> platform APIs are still unstable, start shell on v2 and port at GA.
 
 ---
 
