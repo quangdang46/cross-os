@@ -1,0 +1,21 @@
+# License/attribution merge gate (§9.11) — REQUIRED job.
+# Bead: cross-os-qhp.5. Fail-closed: missing pin/license/attribution = fail.
+name: license-gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  license-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Self-test first: fixture drift fails loudly in CI, not just locally.
+      - name: License gate self-test (fixtures)
+        run: bash scripts/ci/test-license-gate.sh
+      - name: Run license gate on PR diff
+        run: bash scripts/ci/license-gate.sh --diff origin/main
