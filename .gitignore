@@ -8,3 +8,4 @@ tmp/
 .beads/*.fsqlite*
 .beads/*-lock-*
 .beads/last-touched
+*.exe
