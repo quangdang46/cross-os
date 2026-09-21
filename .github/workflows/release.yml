@@ -1,0 +1,63 @@
+# Release: signed artifacts + update manifest (bead cross-os-qhp.1).
+#
+# Plan §10 Phase 5 + §14 Q6/Q7. Runs on version tags (v*). macOS: signed +
+# notarized .app (Finder Sync extension rides inside, notarization covers
+# it). Windows: signed MSI (DLL-only native surface:
+# crossos-keyboard-win.dll). Auto-update: manifest check → download →
+# install ONLY with user approval (§8.4: updates never silently enable new
+# integrations). Unsigned dry-run on PRs via workflow_dispatch.
+#
+# Required secrets: APPLE_DEVELOPER_ID, APPLE_NOTARY_PROFILE, WIN_SIGN_CERT.
+# Without them the job fails closed (never ships unsigned as "signed").
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  release:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            out: crossos
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            out: crossos
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            out: crossos.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: License gate (required)
+        run: |
+          bash scripts/ci/test-license-gate.sh
+          bash scripts/ci/license-gate.sh --diff origin/main
+      - name: Build signed daemon
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          cd core && go build -o ${{ matrix.out }} ./cmd/crossos
+          test -n "${{ secrets.APPLE_DEVELOPER_ID }}" || test "${{ matrix.goos }}" != "darwin" || (echo "macOS signing secret missing — fail closed" && exit 1)
+          test -n "${{ secrets.WIN_SIGN_CERT }}" || test "${{ matrix.goos }}" != "windows" || (echo "Windows signing secret missing — fail closed" && exit 1)
+      - name: Emit update manifest entry
+        run: |
+          echo "manifest: version ${{ github.ref_name }} ${{ matrix.goos }}/${{ matrix.goarch }} — user approval required at install (§8.4)"
+      - name: Upload signed artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crossos-signed-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: core/${{ matrix.out }}

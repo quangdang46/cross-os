@@ -42,6 +42,13 @@ const (
 	Restore
 	NextDisplay
 	PreviousDisplay
+	// Minimize + Fullscreen (§6.2 list head): dedicated capabilities
+	// (window.minimize / window.move zone "fullscreen"), never geometry —
+	// Frame() returns nil and the Adapter owns them. Appended after the
+	// original 19 so existing order/values are stable.
+	// (owner bead cross-os-nir.2)
+	Minimize
+	Fullscreen
 )
 
 // Frame returns the target frame for action on screen's visible area.
