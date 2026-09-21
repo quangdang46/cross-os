@@ -582,13 +582,14 @@ const (
     LifecycleInitializing LifecycleState = "initializing"
     LifecycleRunning      LifecycleState = "running"
     LifecycleSafeMode     LifecycleState = "safemode"      // 30s grace
-)
-
-// Plugin enable is transactional (ownership-scoped, NOT an OS snapshot):
-// DISABLED → TRIAL → (user confirms + healthy) → ENABLED.
-// crash / timeout / kill-switch during TRIAL → DISABLED.
     LifecyclePaused       LifecycleState = "paused"
     LifecycleStopped      LifecycleState = "stopped"
+    // Plugin enable flow (transactional, ownership-scoped, NOT an OS snapshot):
+    // DISABLED → TRIAL → (user confirms + healthy) → ENABLED.
+    // crash / timeout / kill-switch during TRIAL → DISABLED.
+    LifecycleDisabled     LifecycleState = "disabled"
+    LifecycleTrial        LifecycleState = "trial"
+    LifecycleEnabled      LifecycleState = "enabled"
 )
 ```
 
