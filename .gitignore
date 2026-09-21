@@ -3,3 +3,8 @@ tmp/
 
 # reference repos cloned for code archaeology (see §9 of COMPREHENSIVE_PLAN.md)
 .tmp/
+# beads local runtime (SQLite WAL, locks, caches) — only JSONL is committed
+.beads/*.db*
+.beads/*.fsqlite*
+.beads/*-lock-*
+.beads/last-touched
