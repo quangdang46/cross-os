@@ -1,2 +1,5 @@
 tmp/
 .DS_Store
+
+# reference repos cloned for code archaeology (see §9 of COMPREHENSIVE_PLAN.md)
+.tmp/

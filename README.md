@@ -69,12 +69,10 @@ crossos/
 
 ## Research & Planning
 
-- [docs/RESEARCH.md](docs/RESEARCH.md) — a matrix of ~35 repos (keyboard/input,
-  window, Finder/context-menu, automation, plugin architecture), classified as
-  COPY/ADAPT (MIT) vs ARCHITECTURE-only (GPL) vs UX/behavior.
-- [COMPREHENSIVE_PLAN.md](COMPREHENSIVE_PLAN.md) — detailed architecture,
-  module-by-module design, plugin spec, MVP breakdown (Windows Keyboard, Window
-  Management, Explorer UX), safety layer, phased implementation, testing, and
+- [COMPREHENSIVE_PLAN.md](COMPREHENSIVE_PLAN.md) — the single source of truth:
+  detailed architecture, module-by-module design, plugin spec, research/licensing
+  matrix (§9, ~37 repos), MVP breakdown (Windows Keyboard, Window Management,
+  Explorer UX), safety layer, phased implementation, testing, and
   build/distribution.
 
 Reference repos are shallow-cloned into `tmp/research/` for code archaeology
