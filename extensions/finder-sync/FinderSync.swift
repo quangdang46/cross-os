@@ -11,7 +11,8 @@ import os
 // The extension sends one JSON request {action, targetDir, ext, baseName}
 // and applies the daemon's reply. Daemon-down → nil menu (hide, never block).
 // Host-app UI (SwiftUI prefs, template editor) is NOT copied — settings are
-// declarative (§3.6c) via the app-group SettingsStore below.
+// declarative (§3.6c). (No app-group SettingsStore exists in tree yet; the
+// enabledEntries stub below names the deferred vbl.2/vbl.4 wiring.)
 //
 // Merge gate (§9.11): attribution in third_party/newfile/.
 
@@ -107,7 +108,10 @@ final class FinderSync: FIFinderSync {
             NSSound.beep()
             return
         }
-        let req = DaemonRequest(action: "createFile", targetDir: directory.path, ext: entry.ext, baseName: entry.baseName)
+        // Use the entry's own verb (review: cross-os-ed): today's stubs are
+        // all file-creation, but hardcoding "createFile" here would make the
+        // MenuEntry action field decorative the day a second verb exists.
+        let req = DaemonRequest(action: entry.action, targetDir: directory.path, ext: entry.ext, baseName: entry.baseName)
         do {
             let resp = try sendToDaemon(req)
             if !resp.ok {
@@ -194,9 +198,12 @@ final class FinderSync: FIFinderSync {
     // MARK: - Helpers (adapted from newfile: directoryForCreation/resolvedDirectory)
 
     private func enabledEntries() -> [MenuEntry] {
-        // Menu rows come from the app-group store (daemon is source of truth
-        // for enabled types; the store mirrors it for the menu-open path).
-        // Seeded from the Go Seeds parity list on first read.
+        // Deferred wiring (review: cross-os-ed): menu rows will come from the
+        // app-group SettingsStore (daemon is source of truth for enabled
+        // types; the store mirrors it for the menu-open path), seeded from
+        // the Go Seeds parity list on first read. No such store exists in
+        // tree yet — that wiring lands with vbl.2 (menus) / vbl.4
+        // (lifecycle). Until then this returns [] (menu shows the empty row).
         return []
     }
 

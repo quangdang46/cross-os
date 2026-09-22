@@ -22,6 +22,13 @@ import (
 // return fast; a slow daemon must degrade to hide, not hang Finder.
 const DialTimeout = 500 * time.Millisecond
 
+// DefaultSocketPath is the conventional daemon socket location. It MUST match
+// the Swift literal daemonSocketPath in FinderSync.swift (cross-language
+// parity is convention-only — Go tests cannot assert on a Swift literal —
+// so this named constant is the single Go-side reference; the README repeats
+// the same string for the Xcode side). (review: cross-os-ed)
+const DefaultSocketPath = "~/Library/Application Support/CrossOS/crossos.sock"
+
 // Request is the only shape the extension ever sends.
 type Request struct {
 	// Action is a closed-set verb (see allowedActions).

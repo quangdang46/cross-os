@@ -1,0 +1,18 @@
+# Normalize line endings so the CI gofmt gate is checkout-independent.
+.gitattributes text eol=lf
+#
+# Background (review: cross-os-ed on qhp.1): with no .gitattributes and
+# core.autocrlf=true, Windows checkouts land CRLF and `gofmt -l` flags every
+# CRLF Go file — the CI gofmt step then passes or fails by checkout lottery
+# (LF on macos runners, CRLF on windows runners). Pinning eol=lf for text
+# sources makes the gate deterministic on both OSes.
+*.go text eol=lf
+*.swift text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf
+*.sh text eol=lf
+*.plist text eol=lf
+*.entitlements text eol=lf
