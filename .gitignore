@@ -9,3 +9,7 @@ tmp/
 .beads/*-lock-*
 .beads/last-touched
 *.exe
+# Built Windows helper DLL is a reproducible CMake artifact (platform/windows),
+# not a source — same policy as *.exe test binaries above. CI rebuilds it;
+# the tree keeps sources only.
+*.dll
