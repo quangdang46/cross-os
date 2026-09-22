@@ -1,0 +1,38 @@
+name: CrossOSFinderSync
+options:
+  bundleIdPrefix: dev.crossos
+  deploymentTarget:
+    macOS: "14.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: YES
+  configs:
+    Debug:
+      CODE_SIGN_IDENTITY: "-"
+    Release:
+      CODE_SIGN_IDENTITY: "-"
+
+targets:
+  CrossOSFinderSync:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: FinderSync.swift
+    info:
+      path: Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.crossos.CrossOSFinderSync
+        CODE_SIGN_ENTITLEMENTS: CrossOSFinderSync.entitlements
+        INFOPLIST_KEY_NSExtensionPointIdentifier: com.apple.FinderSync
+        INFOPLIST_KEY_NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).FinderSync"
+        SKIP_INSTALL: YES

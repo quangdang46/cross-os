@@ -13,3 +13,15 @@ tmp/
 # not a source — same policy as *.exe test binaries above. CI rebuilds it;
 # the tree keeps sources only.
 *.dll
+
+# xcodegen output: project.yml is the source of truth (regenerate with
+# `xcodegen generate --spec extensions/finder-sync/project.yml
+# --project extensions/finder-sync`). The generated .xcodeproj is committed
+# anyway (CLT-only machines cannot regenerate without XcodeGen... but it is
+# installed via brew; committed for CI convenience + review visibility).
+# Per-user Xcode state is never committed:
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+xcuserdata/
+DerivedData/
+*.xcuserstate
