@@ -135,6 +135,24 @@ jobs:
           name: crossos-keyboard-win-dll
           path: build/dll/**/crossos-keyboard-win.dll
 
+  # Finder appex: compile-check the Swift extension on every push (bead
+  # cross-os-dnj). Unsigned xcodebuild of the xcodegen project on
+  # macos-latest (full Xcode): proves FinderSync.swift + SettingsStore.swift
+  # still compile and the pbxproj stays in sync with project.yml. Signing /
+  # embedding into the .app stays cert-gated in qhp.6. No cert/secret needed.
+  finder-appex:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify xcodegen project in sync
+        run: |
+          brew install xcodegen
+          xcodegen generate --spec extensions/finder-sync/project.yml --project extensions/finder-sync
+          git diff --exit-code -- extensions/finder-sync/CrossOSFinderSync.xcodeproj || (echo "pbxproj out of sync with project.yml — run xcodegen and commit" && exit 1)
+      - name: Build appex (unsigned, Debug)
+        run: |
+          xcodebuild -project extensions/finder-sync/CrossOSFinderSync.xcodeproj -scheme CrossOSFinderSync -configuration Debug -destination 'platform=macOS' CODE_SIGN_IDENTITY="-" CODE_SIGNING_ALLOWED=YES build
+
   license-gate:
     runs-on: ubuntu-latest
     steps:

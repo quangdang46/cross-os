@@ -7,12 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		9743341A2818140B6F9D5BE2 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF92F21972B5F25CB85EE116 /* SettingsStore.swift */; };
 		BAEE5A328D120149211665BB /* FinderSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 656F956ADD28F21F1668A6EC /* FinderSync.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		656F956ADD28F21F1668A6EC /* FinderSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinderSync.swift; sourceTree = "<group>"; };
 		CCA42BB515A73FF97CE6EB2D /* CrossOSFinderSync.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CrossOSFinderSync.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		DF92F21972B5F25CB85EE116 /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -20,6 +22,7 @@
 			isa = PBXGroup;
 			children = (
 				656F956ADD28F21F1668A6EC /* FinderSync.swift */,
+				DF92F21972B5F25CB85EE116 /* SettingsStore.swift */,
 				969BE155EA854FD660068E03 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -92,6 +95,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				BAEE5A328D120149211665BB /* FinderSync.swift in Sources */,
+				9743341A2818140B6F9D5BE2 /* SettingsStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -27,6 +27,7 @@ targets:
     platform: macOS
     sources:
       - path: FinderSync.swift
+      - path: SettingsStore.swift
     info:
       path: Info.plist
     settings:

@@ -198,13 +198,11 @@ final class FinderSync: FIFinderSync {
     // MARK: - Helpers (adapted from newfile: directoryForCreation/resolvedDirectory)
 
     private func enabledEntries() -> [MenuEntry] {
-        // Deferred wiring (review: cross-os-ed): menu rows will come from the
-        // app-group SettingsStore (daemon is source of truth for enabled
-        // types; the store mirrors it for the menu-open path), seeded from
-        // the Go Seeds parity list on first read. No such store exists in
-        // tree yet — that wiring lands with vbl.2 (menus) / vbl.4
-        // (lifecycle). Until then this returns [] (menu shows the empty row).
-        return []
+        // App-group store (daemon mirrors enabled types here for the
+        // menu-open path; seeded from the parity list on first read).
+        // Store missing (no entitlement in this context) → [] → empty row.
+        guard let store = CrossOSSettingsStore.appGroupStore() else { return [] }
+        return store.enabledTypes.map { $0.menuEntry() }
     }
 
     private func directoryForCreation(target: URL?, selected: [URL]?) -> URL? {
