@@ -51,3 +51,18 @@ func (s *Service) ApplyUpdate(manifestVersion, platform, url, sha256 string, app
 func (s *Service) PanicStop() (map[string]any, error) {
 	return s.app.PanicStop()
 }
+
+// BeginTrial starts the enable trial (Safety page countdown).
+func (s *Service) BeginTrial(pluginID string) (string, error) {
+	return s.app.BeginTrial(pluginID)
+}
+
+// ConfirmTrial completes the trial (Safety page Confirm button).
+func (s *Service) ConfirmTrial(pluginID string, confirmed, healthy bool) (string, error) {
+	return s.app.ConfirmTrial(pluginID, confirmed, healthy)
+}
+
+// RollbackTrial aborts the trial (Safety page rollback).
+func (s *Service) RollbackTrial(pluginID, reason string) (string, error) {
+	return s.app.RollbackTrial(pluginID, reason)
+}

@@ -351,3 +351,65 @@ func TestPanicStopLive(t *testing.T) {
 		t.Fatalf("panicStop=%v, want stopped + login kept", m)
 	}
 }
+
+// TestTrialLifecycle: begin → confirm → enabled; begin → rollback →
+// disabled; confirm without trial fails; double-begin is idempotent.
+func TestTrialLifecycle(t *testing.T) {
+	c, err := NewCore(nil, nil)
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	c.registerBuiltin("plug", false)
+	begin := func(id string) (map[string]any, *ipc.RPCError) {
+		t.Helper()
+		res, rerr := c.handleBeginTrial(json.RawMessage(`{"pluginId":"` + id + `"}`))
+		if rerr != nil {
+			return nil, rerr
+		}
+		m, _ := res.(map[string]any)
+		return m, nil
+	}
+	if _, rerr := c.handleBeginTrial(json.RawMessage(`{"pluginId":"nope"}`)); rerr == nil {
+		t.Fatal("begin unknown plugin must fail")
+	}
+	if got, _ := begin("plug"); got["state"] != "trial" {
+		t.Fatalf("begin: %+v, want trial", got)
+	}
+	if got, _ := begin("plug"); got["state"] != "trial" {
+		t.Fatalf("re-begin: %+v, want trial (idempotent)", got)
+	}
+	c.registerBuiltin("other", false)
+	if _, rerr := c.handleConfirmTrial(json.RawMessage(`{"pluginId":"other","confirmed":true,"healthy":true}`)); rerr == nil {
+		t.Fatal("confirm without trial must fail")
+	}
+	if _, rerr := c.handleConfirmTrial(json.RawMessage(`{"pluginId":"plug","confirmed":false,"healthy":true}`)); rerr == nil {
+		t.Fatal("unconfirmed approve must fail closed")
+	}
+	res, rerr := c.handleConfirmTrial(json.RawMessage(`{"pluginId":"plug","confirmed":true,"healthy":true}`))
+	if rerr != nil {
+		t.Fatalf("confirm: %v", rerr)
+	}
+	if m, _ := res.(map[string]any); m["state"] != "enabled" {
+		t.Fatalf("confirm: %+v, want enabled", m)
+	}
+	if !c.plugins["plug"] {
+		t.Fatal("confirm must flip enable map")
+	}
+	c.registerBuiltin("plug2", false)
+	if _, rerr := c.handleBeginTrial(json.RawMessage(`{"pluginId":"plug2"}`)); rerr != nil {
+		t.Fatalf("begin plug2: %v", rerr)
+	}
+	res, rerr = c.handleRollbackTrial(json.RawMessage(`{"pluginId":"plug2","reason":"user cancel"}`))
+	if rerr != nil {
+		t.Fatalf("rollback: %v", rerr)
+	}
+	if m, _ := res.(map[string]any); m["state"] != "disabled" {
+		t.Fatalf("rollback: %+v, want disabled", m)
+	}
+	if c.plugins["plug2"] {
+		t.Fatal("rollback must leave plugin disabled")
+	}
+	if _, rerr := c.handleRollbackTrial(json.RawMessage(`{"pluginId":"plug2"}`)); rerr == nil {
+		t.Fatal("rollback without trial must fail")
+	}
+}

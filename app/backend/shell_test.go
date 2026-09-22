@@ -115,6 +115,14 @@ func (s *stubCore) ApplyUpdate(mv, plat, url, sum string, approved bool, by stri
 func (s *stubCore) PanicStop() (map[string]any, error) {
 	return map[string]any{"interceptionDisabled": true, "loginItemKept": true}, nil
 }
+func (s *stubCore) BeginTrial(pluginID string) (string, error) { return "trial", nil }
+func (s *stubCore) ConfirmTrial(pluginID string, confirmed, healthy bool) (string, error) {
+	if !confirmed || !healthy {
+		return "", errors.New("shell: trial not confirmed-healthy")
+	}
+	return "enabled", nil
+}
+func (s *stubCore) RollbackTrial(pluginID, reason string) (string, error) { return "disabled", nil }
 
 func TestBridge(t *testing.T) {
 	c := &stubCore{running: true, plugins: []PluginState{{ID: "win-kb", Enabled: true, Healthy: "healthy"}}, logs: []string{"e1"}}
@@ -163,5 +171,24 @@ func TestPanicStopSurfaced(t *testing.T) {
 	}
 	if res["interceptionDisabled"] != true || res["loginItemKept"] != true {
 		t.Fatalf("PanicStop=%v, want interception stopped + login kept", res)
+	}
+}
+
+func TestTrialBridgeSurfaced(t *testing.T) {
+	app := NewApp(&stubCore{})
+	if st, err := app.BeginTrial("plug"); err != nil || st != "trial" {
+		t.Fatalf("BeginTrial=%q,%v, want trial", st, err)
+	}
+	if st, err := app.ConfirmTrial("plug", true, true); err != nil || st != "enabled" {
+		t.Fatalf("ConfirmTrial=%q,%v, want enabled", st, err)
+	}
+	if _, err := app.ConfirmTrial("plug", false, true); err == nil {
+		t.Fatal("unconfirmed trial must fail closed")
+	}
+	if len(app.UILogs()) == 0 {
+		t.Fatal("denied confirm must land in UI logs")
+	}
+	if st, err := app.RollbackTrial("plug", "cancel"); err != nil || st != "disabled" {
+		t.Fatalf("RollbackTrial=%q,%v, want disabled", st, err)
 	}
 }

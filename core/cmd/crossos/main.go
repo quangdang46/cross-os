@@ -51,13 +51,15 @@ func DefaultSocketPath() string {
 }
 
 // Core owns the daemon state behind the IPC methods. One mutex guards the
-// plugin enable map (handlers run on independent connection goroutines).
+// plugin enable map + trial map (handlers run on independent connection
+// goroutines).
 type Core struct {
 	mu      sync.Mutex
 	daemon  *daemon.Daemon
 	router  *event.Router
 	rec     *record.Recorder
 	plugins map[string]bool // id → enabled
+	trials  map[string]*safety.Trial
 	order   []string
 }
 
@@ -75,6 +77,7 @@ func NewCore(rules []event.CompiledRule, grants map[string][]intent.Permission) 
 		router:  event.Compile(rules, reg, grants, nil),
 		rec:     record.NewRecorder(),
 		plugins: map[string]bool{},
+		trials:  map[string]*safety.Trial{},
 	}
 	return c, nil
 }
@@ -331,6 +334,86 @@ func (c *Core) handlePanicStop(_ json.RawMessage) (any, *ipc.RPCError) {
 	}, nil
 }
 
+// handleBeginTrial serves safety.beginTrial: {pluginId} → TRIAL (idempotent:
+// repeat calls return the in-flight trial, never a second one). The Safety
+// page countdown + confirm/rollback buttons drive this.
+func (c *Core) handleBeginTrial(raw json.RawMessage) (any, *ipc.RPCError) {
+	var p struct {
+		PluginID string `json:"pluginId"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil || p.PluginID == "" {
+		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "need {pluginId}"}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.plugins[p.PluginID]; !ok {
+		return nil, &ipc.RPCError{Code: ipc.ErrInvalid, Message: fmt.Sprintf("core: unknown plugin %q", p.PluginID)}
+	}
+	if _, ok := c.trials[p.PluginID]; ok {
+		return map[string]any{"pluginId": p.PluginID, "state": "trial"}, nil
+	}
+	tr, err := safety.BeginTrial(p.PluginID, nil)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInternal, Message: err.Error()}
+	}
+	c.trials[p.PluginID] = tr
+	return map[string]any{"pluginId": p.PluginID, "state": "trial"}, nil
+}
+
+// handleConfirmTrial serves safety.confirmTrial: {pluginId, confirmed,
+// healthy} → ENABLED. confirmed=false or healthy=false fails closed
+// (mirrors safety.Trial.Confirm — no auto-approve path, ever).
+func (c *Core) handleConfirmTrial(raw json.RawMessage) (any, *ipc.RPCError) {
+	var p struct {
+		PluginID  string `json:"pluginId"`
+		Confirmed bool   `json:"confirmed"`
+		Healthy   bool   `json:"healthy"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil || p.PluginID == "" {
+		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "need {pluginId, confirmed, healthy}"}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	tr, ok := c.trials[p.PluginID]
+	if !ok || tr == nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInvalid, Message: fmt.Sprintf("core: no trial for plugin %q (begin trial first)", p.PluginID)}
+	}
+	if err := tr.Confirm(p.Confirmed, p.Healthy); err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInvalid, Message: err.Error()}
+	}
+	delete(c.trials, p.PluginID)
+	c.plugins[p.PluginID] = true
+	return map[string]any{"pluginId": p.PluginID, "state": "enabled"}, nil
+}
+
+// handleRollbackTrial serves safety.rollbackTrial: {pluginId, reason} →
+// DISABLED (user cancel, timeout, kill-switch). Explicit, never surprising.
+func (c *Core) handleRollbackTrial(raw json.RawMessage) (any, *ipc.RPCError) {
+	var p struct {
+		PluginID string `json:"pluginId"`
+		Reason   string `json:"reason"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil || p.PluginID == "" {
+		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "need {pluginId}"}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	tr, ok := c.trials[p.PluginID]
+	if !ok || tr == nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInvalid, Message: fmt.Sprintf("core: no trial for plugin %q", p.PluginID)}
+	}
+	reason := p.Reason
+	if reason == "" {
+		reason = "user rollback"
+	}
+	if err := tr.Abort(reason); err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInvalid, Message: err.Error()}
+	}
+	delete(c.trials, p.PluginID)
+	c.plugins[p.PluginID] = false
+	return map[string]any{"pluginId": p.PluginID, "state": "disabled"}, nil
+}
+
 // Serve registers the shell methods and serves ln in the background,
 // returning the server (Close stops the accept loop: Close closes the
 // listener, Accept errors, and Serve returns via the closed channel).
@@ -339,15 +422,18 @@ func (c *Core) handlePanicStop(_ json.RawMessage) (any, *ipc.RPCError) {
 func (c *Core) Serve(ln net.Listener) *ipc.Server {
 	srv := ipc.NewServer()
 	methods := map[string]ipc.Handler{
-		"core.status":         c.handleStatus,
-		"plugin.list":         c.handlePluginList,
-		"plugin.setEnabled":   c.handlePluginSetEnabled,
-		"core.keyEvent":       c.handleKeyEvent,
-		"core.reset":          c.handleReset,
-		"core.eventLogs":      c.handleEventLogs,
-		"safety.panicStop":    c.handlePanicStop,
-		"core.checkForUpdate": c.handleCheckForUpdate,
-		"core.applyUpdate":    c.handleApplyUpdate,
+		"core.status":          c.handleStatus,
+		"plugin.list":          c.handlePluginList,
+		"plugin.setEnabled":    c.handlePluginSetEnabled,
+		"core.keyEvent":        c.handleKeyEvent,
+		"core.reset":           c.handleReset,
+		"core.eventLogs":       c.handleEventLogs,
+		"safety.panicStop":     c.handlePanicStop,
+		"safety.beginTrial":    c.handleBeginTrial,
+		"safety.confirmTrial":  c.handleConfirmTrial,
+		"safety.rollbackTrial": c.handleRollbackTrial,
+		"core.checkForUpdate":  c.handleCheckForUpdate,
+		"core.applyUpdate":     c.handleApplyUpdate,
 	}
 	for name, h := range methods {
 		if err := srv.Register(name, h); err != nil {

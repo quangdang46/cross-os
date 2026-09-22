@@ -244,3 +244,42 @@ func (c *IPCCore) PanicStop() (map[string]any, error) {
 	}
 	return out, nil
 }
+
+// trialState decodes the {pluginId, state} shape shared by the three
+// trial methods.
+func trialState(raw json.RawMessage) (string, error) {
+	var out struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", err
+	}
+	return out.State, nil
+}
+
+// BeginTrial implements Core via safety.beginTrial.
+func (c *IPCCore) BeginTrial(pluginID string) (string, error) {
+	raw, err := c.call("safety.beginTrial", map[string]any{"pluginId": pluginID})
+	if err != nil {
+		return "", err
+	}
+	return trialState(raw)
+}
+
+// ConfirmTrial implements Core via safety.confirmTrial.
+func (c *IPCCore) ConfirmTrial(pluginID string, confirmed, healthy bool) (string, error) {
+	raw, err := c.call("safety.confirmTrial", map[string]any{"pluginId": pluginID, "confirmed": confirmed, "healthy": healthy})
+	if err != nil {
+		return "", err
+	}
+	return trialState(raw)
+}
+
+// RollbackTrial implements Core via safety.rollbackTrial.
+func (c *IPCCore) RollbackTrial(pluginID, reason string) (string, error) {
+	raw, err := c.call("safety.rollbackTrial", map[string]any{"pluginId": pluginID, "reason": reason})
+	if err != nil {
+		return "", err
+	}
+	return trialState(raw)
+}

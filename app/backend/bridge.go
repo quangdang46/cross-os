@@ -70,6 +70,14 @@ type Core interface {
 	// interception + plugin actions, keeps the login item. Result names
 	// what stopped — never a silent kill.
 	PanicStop() (map[string]any, error)
+	// BeginTrial starts DISABLED → TRIAL for one plugin (safety.beginTrial).
+	// Idempotent: repeat calls return the in-flight trial.
+	BeginTrial(pluginID string) (string, error)
+	// ConfirmTrial completes TRIAL → ENABLED (safety.confirmTrial).
+	// Confirmed=false or healthy=false fails closed — no auto path.
+	ConfirmTrial(pluginID string, confirmed, healthy bool) (string, error)
+	// RollbackTrial moves TRIAL → DISABLED (safety.rollbackTrial).
+	RollbackTrial(pluginID, reason string) (string, error)
 }
 
 // App is the Wails-bound service (§7.3 shape: GetStatus, TogglePlugin,
@@ -161,4 +169,35 @@ func (a *App) PanicStop() (map[string]any, error) {
 		return nil, err
 	}
 	return res, nil
+}
+
+// BeginTrial starts the enable trial for one plugin (Safety page countdown).
+func (a *App) BeginTrial(pluginID string) (string, error) {
+	state, err := a.core.BeginTrial(pluginID)
+	if err != nil {
+		a.log.Append("BeginTrial " + pluginID + ": " + err.Error())
+		return "", err
+	}
+	return state, nil
+}
+
+// ConfirmTrial completes the trial (Safety page Confirm button). Denials
+// fail closed in the daemon and surface here AND in the UI log.
+func (a *App) ConfirmTrial(pluginID string, confirmed, healthy bool) (string, error) {
+	state, err := a.core.ConfirmTrial(pluginID, confirmed, healthy)
+	if err != nil {
+		a.log.Append("ConfirmTrial " + pluginID + ": " + err.Error())
+		return "", err
+	}
+	return state, nil
+}
+
+// RollbackTrial aborts the trial (Safety page rollback / timeout path).
+func (a *App) RollbackTrial(pluginID, reason string) (string, error) {
+	state, err := a.core.RollbackTrial(pluginID, reason)
+	if err != nil {
+		a.log.Append("RollbackTrial " + pluginID + ": " + err.Error())
+		return "", err
+	}
+	return state, nil
 }
