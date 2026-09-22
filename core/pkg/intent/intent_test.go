@@ -14,9 +14,10 @@ func TestCanonicalV1Count(t *testing.T) {
 	r := testRegistry(t)
 	// §3.12 lists 19 capabilities + clipboard.copy (added for the s4i
 	// Ctrl+C→COPY mapping; review: cross-os-c0 — copyPath is file-paths
-	// copy, not selection copy).
-	if got := len(r.IDs()); got != 20 {
-		t.Fatalf("canonical v1: got %d IDs, want 20: %v", got, r.IDs())
+	// copy, not selection copy) + launcher.open (shell-owned palette
+	// action, bead cross-os-jpr.4).
+	if got := len(r.IDs()); got != 21 {
+		t.Fatalf("canonical v1: got %d IDs, want 21: %v", got, r.IDs())
 	}
 }
 
@@ -29,7 +30,7 @@ func TestCanonicalV1IDs(t *testing.T) {
 		"filesystem.read", "filesystem.write", "filesystem.createFile",
 		"filesystem.createFolder", "file.moveToTrash",
 		"app.launch", "app.open", "terminal.openAt",
-		"finder.menu",
+		"finder.menu", "launcher.open",
 	} {
 		if _, ok := r.Get(id); !ok {
 			t.Fatalf("canonical v1 missing %q", id)

@@ -92,11 +92,11 @@ func canonicalV1() []CapabilityDescriptor {
 		},
 		{
 			ID: "clipboard.copy", Version: "1",
-			Description:  "Copy the current selection via the native copy path",
-			Permission:   PermAccessControl,
-			InputSchema:  noParams,
-			Platforms:    []Platform{PlatformMacOS, PlatformWindows},
-			Reversible:   true,
+			Description: "Copy the current selection via the native copy path",
+			Permission:  PermAccessControl,
+			InputSchema: noParams,
+			Platforms:   []Platform{PlatformMacOS, PlatformWindows},
+			Reversible:  true,
 		},
 		{
 			ID: "clipboard.copyPath", Version: "1",
@@ -211,6 +211,14 @@ func canonicalV1() []CapabilityDescriptor {
 			},
 			Platforms:   []Platform{PlatformMacOS},
 			SideEffects: []SideEffect{SideEffectModifiesMenus},
+			Reversible:  true,
+		},
+		{
+			ID: "launcher.open", Version: "1",
+			Description: "Open the command palette (shell-owned; no dispatch — CONSUME, palette opens)",
+			Permission:  PermInputIntercept,
+			InputSchema: noParams,
+			Platforms:   []Platform{PlatformMacOS, PlatformWindows},
 			Reversible:  true,
 		},
 	}
