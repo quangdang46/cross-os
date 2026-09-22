@@ -334,3 +334,20 @@ func TestApplyUpdateGates(t *testing.T) {
 	}
 	_ = good
 }
+
+// TestPanicStopLive: safety.panicStop over the live socket returns the kill
+// result (interception stopped, login kept) — the Safety page button path.
+func TestPanicStopLive(t *testing.T) {
+	c, err := NewCore(nil, nil)
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	res, rerr := c.handlePanicStop(nil)
+	if rerr != nil {
+		t.Fatalf("panicStop: %v", rerr)
+	}
+	m, _ := res.(map[string]any)
+	if m["interceptionDisabled"] != true || m["loginItemKept"] != true {
+		t.Fatalf("panicStop=%v, want stopped + login kept", m)
+	}
+}

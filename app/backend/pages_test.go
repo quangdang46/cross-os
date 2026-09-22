@@ -7,6 +7,7 @@
 package shell
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -170,5 +171,46 @@ func TestPageControlKinds(t *testing.T) {
 	}
 	if s := schemas["core.finder"]; strings.Contains(s, "plugin.installDisk") {
 		t.Fatalf("finder duplicates plugin lifecycle: %s", s)
+	}
+}
+
+func TestPagesCarrySchema(t *testing.T) {
+	// The frontend renders page bodies from Schema controls — Pages()
+	// without Schema would leave every page a title-only shell.
+	h := NewHost()
+	r := pluginapi.NewRegistry(nil)
+	for _, p := range CorePages() {
+		if err := r.RegisterUI(p); err != nil {
+			t.Fatalf("RegisterUI %s: %v", p.ID, err)
+		}
+	}
+	if err := h.Register(r); err != nil {
+		t.Fatalf("Host.Register: %v", err)
+	}
+	for _, p := range h.Pages() {
+		if len(p.Schema) == 0 {
+			t.Fatalf("page %s: empty Schema (frontend would render title-only)", p.ID)
+		}
+		var body struct {
+			Controls []struct {
+				Kind string `json:"kind"`
+				ID   string `json:"id"`
+			} `json:"controls"`
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(p.Schema, &body); err != nil {
+			t.Fatalf("page %s: schema not JSON: %v", p.ID, err)
+		}
+		if body.Type != "page" {
+			t.Fatalf("page %s: type=%q, want page", p.ID, body.Type)
+		}
+		if len(body.Controls) == 0 {
+			t.Fatalf("page %s: no controls (title-only shell)", p.ID)
+		}
+		for _, c := range body.Controls {
+			if c.Kind == "" || c.ID == "" {
+				t.Fatalf("page %s: control %+v missing kind/id", p.ID, c)
+			}
+		}
 	}
 }

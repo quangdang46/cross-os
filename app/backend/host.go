@@ -6,6 +6,7 @@
 package shell
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 
@@ -18,6 +19,13 @@ type Page struct {
 	Title    string
 	Location pluginapi.UILocation
 	Actions  []string
+	// Schema is the declarative page body (controls array): button, trial,
+	// auditList, pluginList, enableFlow, traceList, matrix, overrides,
+	// shortcutList, zoneEditor, palette, checklist, actionSettings,
+	// gateBadge, note, version, license, credits. The frontend renders
+	// controls generically — new kinds arrive via Registry, never via a
+	// shell code change (§7.2).
+	Schema json.RawMessage
 }
 
 // Host discovers UI contributions from registries.
@@ -42,7 +50,7 @@ func (h *Host) Register(reg *pluginapi.Registry) error {
 			continue // sections/commands/status render in their own slots
 		}
 		h.seen[u.ID] = struct{}{}
-		h.pages = append(h.pages, Page{ID: u.ID, Title: u.Title, Location: u.Location, Actions: u.Actions})
+		h.pages = append(h.pages, Page{ID: u.ID, Title: u.Title, Location: u.Location, Actions: u.Actions, Schema: u.Schema})
 	}
 	sort.Slice(h.pages, func(i, j int) bool { return h.pages[i].ID < h.pages[j].ID })
 	return nil

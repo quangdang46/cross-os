@@ -2,11 +2,51 @@ import { useEffect, useState } from 'react'
 import { Service as AppService } from "../bindings/crossos/app/backend";
 import type { Page, Status } from "../bindings/crossos/app/backend/models";
 
-// CrossOS settings shell: renders Host-discovered pages (Dashboard, Keyboard,
-// Windows, Finder, Activity, Safety, Plugins, Shortcuts, About, Welcome) served
-// by the Go backend over the Wails service binding. No page list is hardcoded
-// here — the Go Host owns discovery (§7.2); the frontend renders what it serves.
+// CrossOS settings shell: renders Host-discovered pages served by the Go
+// backend over the Wails service binding. No page list is hardcoded here —
+// the Go Host owns discovery (§7.2); the frontend renders what it serves.
 // Page/Status shapes are the generated binding models (never re-declared).
+//
+// Page bodies render GENERICALLY from Schema.controls: every control kind
+// below maps 1:1 to a backend `kind` string. New kinds arrive via Registry,
+// never via a frontend code change (same discovery rule as pages).
+interface Control {
+  kind: string;
+  id: string;
+  label?: string;
+  text?: string;
+  description?: string;
+  title?: string;
+  note?: string;
+  action?: string;
+  confirm?: string;
+  source?: string;
+  steps?: string[];
+  items?: string[];
+  format?: string;
+  fields?: string[];
+  readOnly?: string[];
+  rowActions?: string[];
+  actions?: string[];
+  rowAction?: string;
+  widgets?: string[];
+  aboutLink?: string;
+  trialLink?: string;
+  docsLink?: string;
+  editLinks?: string;
+  conflicts?: string;
+  editable?: boolean;
+  immediate?: boolean;
+}
+
+function parseControls(page: Page): Control[] {
+  try {
+    const schema = JSON.parse((page as any).Schema ?? (page as any).schema ?? '{}');
+    return Array.isArray(schema.controls) ? schema.controls : [];
+  } catch {
+    return [];
+  }
+}
 
 function App() {
   const [pages, setPages] = useState<Page[]>([]);
@@ -14,6 +54,7 @@ function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [error, setError] = useState<string>('');
+  const [actionMsg, setActionMsg] = useState<string>('');
 
   const refresh = () => {
     AppService.Pages()
@@ -39,6 +80,191 @@ function App() {
 
   const page = pages.find((p) => p.ID === active);
 
+  const runAction = (action: string) => {
+    // Safety page actions with live daemon backing.
+    if (action === 'safety.panicStop') {
+      AppService.PanicStop()
+        .then(() => { setActionMsg('PANIC STOP executed — interception disabled.'); refresh(); })
+        .catch((e: any) => setActionMsg('PANIC STOP failed: ' + String(e)));
+      return;
+    }
+    if (action === 'safety.reset') {
+      if (!window.confirm('Remove login item, disable extension, clean CrossOS-owned state?')) return;
+      AppService.ResetEverything()
+        .then((steps: string[] | null) => setActionMsg('Reset plan: ' + (steps ?? []).join(' → ')))
+        .catch((e: any) => setActionMsg('Reset failed: ' + String(e)));
+      return;
+    }
+    // Plugin lifecycle actions.
+    if (action === 'plugin.enable' || action === 'plugin.disable') {
+      setActionMsg('Toggle plugins from the Plugins section below.');
+      return;
+    }
+    setActionMsg('Action ' + action + ' queued (daemon executes).');
+  };
+
+  const renderControl = (c: Control, key: number) => {
+    switch (c.kind) {
+      case 'button':
+        return (
+          <div key={key} className="ctl">
+            <button
+              className={'btn' + (c.id === 'panicStop' ? ' is-danger' : '')}
+              onClick={() => c.action && runAction(c.action)}
+            >
+              {c.label ?? c.id}
+            </button>
+            {c.note && <p className="note">{c.note}</p>}
+            {c.confirm && <p className="note">Confirm: {c.confirm}</p>}
+          </div>
+        );
+      case 'trial':
+        return (
+          <div key={key} className="ctl">
+            <h3>{c.label ?? 'Trial'}</h3>
+            <p className="note">Countdown served by Core (trialCountdown). Trial links to the Safety surface.</p>
+            {(c.actions ?? []).map((a) => (
+              <button key={a} className="btn" onClick={() => runAction(a)}>{a}</button>
+            ))}
+          </div>
+        );
+      case 'auditList':
+        return (
+          <div key={key} className="ctl">
+            <h3>{c.label ?? 'Audit'}</h3>
+            <p className="note">Source: {c.source ?? 'core:ownershipAudit'}</p>
+            <button className="btn" onClick={() => c.rowAction && runAction(c.rowAction)}>Roll back</button>
+          </div>
+        );
+      case 'pluginList':
+        return (
+          <div key={key} className="ctl">
+            <h3>Installed plugins</h3>
+            <ul className="actions">
+              {(status?.Plugins ?? []).map((pl) => (
+                <li key={pl.ID}>
+                  {pl.ID} — {pl.Enabled ? 'enabled' : 'disabled'} ({pl.Healthy})
+                  {' '}
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      AppService.TogglePlugin(pl.ID, !pl.Enabled)
+                        .then(() => refresh())
+                        .catch((e: any) => setActionMsg('Toggle failed: ' + String(e)));
+                    }}
+                  >
+                    {pl.Enabled ? 'Disable' : 'Enable'}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      case 'enableFlow':
+        return (
+          <div key={key} className="ctl">
+            <h3>{c.label ?? 'Enable'}</h3>
+            <ol className="actions">
+              {(c.steps ?? []).map((s) => <li key={s}>{s}</li>)}
+            </ol>
+            {c.note && <p className="note">{c.note}</p>}
+          </div>
+        );
+      case 'traceList':
+        return (
+          <div key={key} className="ctl">
+            <h3>Activity trace</h3>
+            <p className="note">{c.format ?? ''}</p>
+            {logs.length === 0
+              ? <p className="note">No events yet — press a shortcut to seed the trace.</p>
+              : (
+                <ul className="actions">
+                  {logs.slice(-20).map((l, i) => <li key={i}>{l}</li>)}
+                </ul>
+              )}
+          </div>
+        );
+      case 'matrix':
+      case 'overrides':
+        return (
+          <div key={key} className="ctl">
+            <h3>{c.kind === 'matrix' ? 'Shortcut matrix' : 'App overrides'}</h3>
+            <p className="note">{c.note ?? ('Source: ' + (c.source ?? ''))}</p>
+            <p className="note">Edits take effect immediately (config.writeMatrix / config.writeOverride).</p>
+          </div>
+        );
+      case 'shortcutList':
+        return (
+          <div key={key} className="ctl">
+            <h3>Shortcuts</h3>
+            <p className="note">{c.editable ? 'Editable — conflicts resolve winner + losers.' : ''} Source: {c.source ?? ''}</p>
+            {c.editLinks && <p className="note">Edit content on owning pages ({c.editLinks}).</p>}
+          </div>
+        );
+      case 'zoneEditor':
+        return (
+          <div key={key} className="ctl">
+            <h3>Snap zones</h3>
+            <p className="note">{c.note ?? ''} Source: {c.source ?? ''}</p>
+          </div>
+        );
+      case 'palette':
+        return (
+          <div key={key} className="ctl">
+            <h3>Command palette</h3>
+            <p className="note">{c.note ?? ''}</p>
+          </div>
+        );
+      case 'checklist':
+        return (
+          <div key={key} className="ctl">
+            <h3>Readiness</h3>
+            <ul className="actions">
+              {(c.items ?? []).map((it) => <li key={it}>{it}</li>)}
+            </ul>
+          </div>
+        );
+      case 'actionSettings':
+        return (
+          <div key={key} className="ctl">
+            <h3>Action settings</h3>
+            <p className="note">Editable: {(c.fields ?? []).join(', ')}</p>
+            <p className="note">Read-only: {(c.readOnly ?? []).join(', ')}</p>
+            {c.note && <p className="note">{c.note}</p>}
+          </div>
+        );
+      case 'gateBadge':
+        return (
+          <div key={key} className="ctl">
+            <h3>Level B gate</h3>
+            <p className="note">{c.note ?? ''}</p>
+          </div>
+        );
+      case 'schemaForm':
+        return (
+          <div key={key} className="ctl">
+            <h3>Plugin settings</h3>
+            <p className="note">{c.note ?? 'Settings declared by plugins render here automatically.'}</p>
+          </div>
+        );
+      case 'note':
+        return <p key={key} className="note">{c.text ?? ''}</p>;
+      case 'version':
+      case 'license':
+      case 'credits':
+        return (
+          <div key={key} className="ctl">
+            <h3>{c.id}</h3>
+            <p className="note">Source: {c.source ?? ''}{c.note ? ' — ' + c.note : ''}</p>
+          </div>
+        );
+      default:
+        return <p key={key} className="note">Unsupported control “{c.kind}” ({c.id}) — update the shell renderer.</p>;
+    }
+  };
+
+  const controls = page ? parseControls(page) : [];
+
   return (
     <>
       <main className="container">
@@ -56,6 +282,7 @@ function App() {
         </header>
 
         {error && <div className="toast is-visible" role="alert"><span className="toast-msg">{error}</span></div>}
+        {actionMsg && <div className="toast is-visible" role="status"><span className="toast-msg">{actionMsg}</span></div>}
 
         <nav className="pages">
           {pages.map((p) => (
@@ -73,22 +300,9 @@ function App() {
           <section className="page">
             <h2>{page.Title}</h2>
             <p className="page-id">{page.ID}</p>
-            {page.Actions && page.Actions.length > 0 && (
-              <ul className="actions">
-                {page.Actions.map((a) => <li key={a}>{a}</li>)}
-              </ul>
-            )}
-          </section>
-        )}
-
-        {status && status.Plugins && status.Plugins.length > 0 && (
-          <section className="page">
-            <h2>Plugins</h2>
-            <ul className="actions">
-              {status.Plugins.map((pl) => (
-                <li key={pl.ID}>{pl.ID} — {pl.Enabled ? 'enabled' : 'disabled'} ({pl.Healthy})</li>
-              ))}
-            </ul>
+            {controls.length === 0
+              ? <p className="note">No controls served for this page yet.</p>
+              : controls.map((c, i) => renderControl(c, i))}
           </section>
         )}
       </main>

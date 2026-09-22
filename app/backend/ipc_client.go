@@ -231,3 +231,16 @@ func (c *IPCCore) ApplyUpdate(manifestVersion, platform, url, sha256 string, app
 	}
 	return out.Installed, nil
 }
+
+// PanicStop implements Core via safety.panicStop.
+func (c *IPCCore) PanicStop() (map[string]any, error) {
+	raw, err := c.call("safety.panicStop", nil)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

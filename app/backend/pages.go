@@ -140,6 +140,9 @@ func SchemaFormHelp() pluginapi.UIContribution {
 		"type":        "page",
 		"description": "Settings declared by plugins render here automatically.",
 		"renderer":    map[string]any{"tier": "mvp", "widgets": []string{"checkbox", "select", "slider", "button"}, "acceptance": "New plugin with config_schema shows working UI with zero Core UI changes."},
+		"controls": []any{
+			map[string]any{"kind": "schemaForm", "id": "pluginSettings", "source": "core:pluginSchemas", "note": "Each plugin's config_schema renders here with MVP widgets (checkbox/select/slider/button)."},
+		},
 	}, nil, "true")
 }
 

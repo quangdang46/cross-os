@@ -66,6 +66,10 @@ type Core interface {
 	// ApplyUpdate downloads + checksum-verifies + approval-gated installs
 	// (core.applyUpdate). Approved=false fails closed (§8.4).
 	ApplyUpdate(manifestVersion, platform, url, sha256 string, approved bool, approvedBy string) (string, error)
+	// PanicStop executes the kill switch (safety.panicStop): stops
+	// interception + plugin actions, keeps the login item. Result names
+	// what stopped — never a silent kill.
+	PanicStop() (map[string]any, error)
 }
 
 // App is the Wails-bound service (§7.3 shape: GetStatus, TogglePlugin,
@@ -146,4 +150,15 @@ func (a *App) ApplyUpdate(manifestVersion, platform, url, sha256 string, approve
 		return "", err
 	}
 	return installed, nil
+}
+
+// PanicStop executes the kill switch (Safety page button): stops CrossOS
+// from affecting the computer instantly. Failures land in the UI log.
+func (a *App) PanicStop() (map[string]any, error) {
+	res, err := a.core.PanicStop()
+	if err != nil {
+		a.log.Append("PanicStop: " + err.Error())
+		return nil, err
+	}
+	return res, nil
 }

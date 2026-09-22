@@ -112,6 +112,9 @@ func (s *stubCore) ApplyUpdate(mv, plat, url, sum string, approved bool, by stri
 	}
 	return mv, nil
 }
+func (s *stubCore) PanicStop() (map[string]any, error) {
+	return map[string]any{"interceptionDisabled": true, "loginItemKept": true}, nil
+}
 
 func TestBridge(t *testing.T) {
 	c := &stubCore{running: true, plugins: []PluginState{{ID: "win-kb", Enabled: true, Healthy: "healthy"}}, logs: []string{"e1"}}
@@ -149,5 +152,16 @@ func TestBridgeFailuresLogged(t *testing.T) {
 	}
 	if len(nilLogs.UILogs()) == 0 {
 		t.Fatal("nil-logs degradation must be noted in UI logs")
+	}
+}
+
+func TestPanicStopSurfaced(t *testing.T) {
+	app := NewApp(&stubCore{})
+	res, err := app.PanicStop()
+	if err != nil {
+		t.Fatalf("PanicStop: %v", err)
+	}
+	if res["interceptionDisabled"] != true || res["loginItemKept"] != true {
+		t.Fatalf("PanicStop=%v, want interception stopped + login kept", res)
 	}
 }

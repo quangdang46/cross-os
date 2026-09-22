@@ -318,6 +318,19 @@ func (c *Core) handleApplyUpdate(raw json.RawMessage) (any, *ipc.RPCError) {
 	return map[string]any{"installed": p.Manifest.Version}, nil
 }
 
+// handlePanicStop serves safety.panicStop: kill switch (safety.PanicStop).
+// Stops interception + plugin actions, keeps the login item (reversible
+// via Re-enable). Result names what stopped — never a silent kill.
+func (c *Core) handlePanicStop(_ json.RawMessage) (any, *ipc.RPCError) {
+	res := safety.PanicStop()
+	return map[string]any{
+		"interceptionDisabled": res.InterceptionDisabled,
+		"pluginActionsStopped": res.PluginActionsStopped,
+		"buffersFlushed":       res.BuffersFlushed,
+		"loginItemKept":        res.LoginItemKept,
+	}, nil
+}
+
 // Serve registers the shell methods and serves ln in the background,
 // returning the server (Close stops the accept loop: Close closes the
 // listener, Accept errors, and Serve returns via the closed channel).
@@ -332,6 +345,7 @@ func (c *Core) Serve(ln net.Listener) *ipc.Server {
 		"core.keyEvent":       c.handleKeyEvent,
 		"core.reset":          c.handleReset,
 		"core.eventLogs":      c.handleEventLogs,
+		"safety.panicStop":    c.handlePanicStop,
 		"core.checkForUpdate": c.handleCheckForUpdate,
 		"core.applyUpdate":    c.handleApplyUpdate,
 	}

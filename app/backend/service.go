@@ -46,3 +46,8 @@ func (s *Service) CheckForUpdate(manifestVersion, platform, url, sha256 string) 
 func (s *Service) ApplyUpdate(manifestVersion, platform, url, sha256 string, approved bool, approvedBy string) (string, error) {
 	return s.app.ApplyUpdate(manifestVersion, platform, url, sha256, approved, approvedBy)
 }
+
+// PanicStop executes the kill switch (Safety page PANIC STOP button).
+func (s *Service) PanicStop() (map[string]any, error) {
+	return s.app.PanicStop()
+}
