@@ -324,7 +324,8 @@ func ValidatePackPath(packDir, p string) error {
 		return fmt.Errorf("pack: rejected path %q (traversal)", p)
 	}
 	clean := filepath.Clean(p)
-	if clean == "/" {
+	// Root check must cover both separators: on Windows Clean("/") is "\\".
+	if clean == "/" || clean == "\\" || clean == string(filepath.Separator) {
 		return fmt.Errorf("pack: rejected path %q (root)", p)
 	}
 	if !filepath.IsAbs(clean) {
@@ -354,6 +355,9 @@ func InspectPack(packDir string, declared map[string]bool) ([]string, error) {
 		if rerr != nil || rel == "." {
 			return nil
 		}
+		// Normalize to forward slashes: declared keys and test fixtures
+		// use slash form on all platforms (Windows Rel returns backslash).
+		rel = filepath.ToSlash(rel)
 		if rel == ".git" || strings.HasPrefix(rel, ".git/") {
 			if d.IsDir() {
 				return filepath.SkipDir

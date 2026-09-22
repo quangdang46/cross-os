@@ -79,10 +79,10 @@ func TestErrorsSurfaced(t *testing.T) {
 	if err == nil {
 		t.Fatal("pre-link Install: want typed error, got nil (never silent success)")
 	}
-	// ...AND in the stage log.
+	// ...AND in the stage log ("tap:" on darwin, "hook:" on Windows).
 	found := false
 	for _, l := range log.lines {
-		if strings.HasPrefix(l, "tap:") {
+		if strings.HasPrefix(l, "tap:") || strings.HasPrefix(l, "hook:") {
 			found = true
 		}
 	}
