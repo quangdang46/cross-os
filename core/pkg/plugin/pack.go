@@ -16,8 +16,10 @@
 // default. Attribution notes menumate as concept source (no executor code).
 //
 // Wiring: this package parses + validates + matches packs and exposes the
-// actions as MenuTable-compatible rows for the vbl.2 Dispatch path; the
-// TODO(vbl.3) in finder-sync/menus.go resolves here.
+// actions as MenuTable-compatible rows for the vbl.2 Dispatch path.
+// RegisterMenus (finder-sync/register.go) owns the §3.6 registration;
+// a future pack-sourced menu layer swaps the row SOURCE (packs → MenuDefs)
+// without touching that path.
 package plugin
 
 import (
