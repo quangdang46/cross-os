@@ -33,3 +33,7 @@ app/frontend/node_modules/
 app/frontend/dist/
 app/frontend/bindings/
 app/bin/
+app/.task/
+app/build/ios/
+app/build/linux/
+app/build/windows/info.json
