@@ -1,3 +1,5 @@
+//go:build windows
+
 // Spike B — WH_KEYBOARD_LL suppress + SendInput replacement + UIPI probe.
 //
 // Bead: cross-os-ssj. Plan: COMPREHENSIVE_PLAN.md Phase 0 Spike B.

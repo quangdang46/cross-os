@@ -49,10 +49,10 @@ jobs:
           cd platform/darwin/spike_a && go vet . && go test -short .
           cd ../spike_c && go vet . && go test -short .
           cd ../../../extensions/finder-sync && go vet . && go test -short .
-      # spike_b has no build-tagged test shim (main_test.go is untagged but
-      # calls windows-only isWindows): it compiles on Windows only, so it
-      # gets its own Windows-gated step — the shared sweep above must stay
-      # green on macos-latest too.
+      # spike_b main_test.go is //go:build windows (it calls windows-only
+      # hook symbols); on macOS the package builds as the hook_other.go stub
+      # with no test files. It still gets its own Windows-gated step — the
+      # shared sweep above must stay green on macos-latest too.
       # unsafeptr is disabled for this package only (bead cross-os-qhp.9):
       # lowLevelProc's lParam→*KBDLLHOOKSTRUCT conversion is the documented
       # Win32 ABI (not a Go pointer escape), but vet's unsafeptr check fires
