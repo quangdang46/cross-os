@@ -4,12 +4,12 @@
 // platform/windows (bead cross-os-lla covers both OSes, UIA side deferred to
 // the windows seam under cross-os-ab4).
 //
-// NOTE: the live QueryFn/MoveFn/Query seams live in query_darwin.go, which
-// carries the union tag `//go:build darwin || !darwin` so Tier-1 tests
-// (validation, error mapping) run on every platform. The bodies are
+// NOTE: the consent-denied QueryFn/MoveFn/Query defaults are duplicated in
+// query_darwin.go under `//go:build darwin` so Tier-1 tests (validation,
+// error mapping) run on every platform without TCC. The bodies are
 // consent-denied defaults — safe anywhere, since real AX calls land behind
-// the ab4 C-ABI bridge. Filenames are swapped relative to content history;
-// tags are authoritative, names cosmetic.
+// the ab4 C-ABI bridge. (review nit: cross-os-ed — the old comment claimed
+// a union tag that no longer exists; both files are exclusive tags now.)
 package spikec
 
 // QueryFn fills a Focused snapshot or returns a typed error (default:

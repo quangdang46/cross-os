@@ -1,12 +1,12 @@
-//go:build !darwin
-
-// Non-darwin buildable seam: the Driver below is pure Go (decision +
+// Portable driver seam: the Driver below is pure Go (decision +
 // recovery math, no syscalls) and intentionally compiles everywhere so
-// Tier-1 tests run on Windows/Linux CI. The live CGEventTap loop is
+// Tier-1 tests run on Windows/Linux CI AND on darwin (the spike's actual
+// target — review: cross-os-ed caught that the old //go:build !darwin tag
+// left Driver undefined on darwin). The live CGEventTap loop is
 // darwin-only and Tier-2 gated; CGO is NOT wired in this spike (runtime TCC
 // consent unavailable in sandbox/CI — bead cross-os-ab4 wires the C-ABI
-// bridge). NOTE: tap_darwin.go holds the darwin-tagged live-loop doc;
-// this file holds the portable driver. Tags authoritative, names cosmetic.
+// bridge). NOTE: tap_darwin.go holds the darwin-tagged live-loop doc only
+// (no Go symbols); this file holds the portable driver.
 package spikea
 
 import "time"

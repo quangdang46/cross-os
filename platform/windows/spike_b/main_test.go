@@ -75,6 +75,31 @@ func TestClassifySuppress(t *testing.T) {
 	}
 }
 
+// modifierVKs pass through by design: the hook suppresses only the C of
+// Ctrl+C, never the Ctrl itself (classifyKey gates on vk==vkC). Tier-2
+// assertions must therefore ignore bare-modifier keydowns — otherwise every
+// run fails on the Ctrl keydown (vk=0x11) that correctly reaches the window
+// ahead of the suppressed C.
+func isModifierVK(vk uint32) bool {
+	return vk == vkControl || vk == 0x10 || vk == 0x12 // Ctrl/Shift/Alt
+}
+
+// waitKeyNonModifier drains bare-modifier keydowns and returns the first
+// non-modifier key, or 0 on timeout. Same pump-while-waiting contract as
+// waitKey (the hook lives on this LockedOSThread thread).
+func (tw *testWindow) waitKeyNonModifier(d time.Duration) uint32 {
+	deadline := time.Now().Add(d)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return 0
+		}
+		if k := tw.waitKey(remaining); k == 0 || !isModifierVK(k) {
+			return k
+		}
+	}
+}
+
 // TestSuppressCtrlC (Tier 2): with the hook armed, the original Ctrl+C never
 // reaches a focusable window. Skipped under -short (sandbox has no key
 // routing); run on a real interactive desktop.
@@ -107,7 +132,7 @@ func TestSuppressCtrlC(t *testing.T) {
 	if err := sendCtrlC(); err != nil {
 		t.Fatalf("sendCtrlC: %v", err)
 	}
-	if got := target.waitKey(500 * time.Millisecond); got != 0 {
+	if got := target.waitKeyNonModifier(500 * time.Millisecond); got != 0 {
 		t.Fatalf("original Ctrl+C leaked to target: vk=%#x", got)
 	}
 }
@@ -132,7 +157,7 @@ func TestSendInputReplacement(t *testing.T) {
 	if err := sendCtrlC(); err != nil {
 		t.Fatalf("sendCtrlC: %v", err)
 	}
-	if got := target.waitKey(2 * time.Second); got != vkF9 {
+	if got := target.waitKeyNonModifier(2 * time.Second); got != vkF9 {
 		t.Fatalf("replacement not received: got vk=%#x, want F9", got)
 	}
 }

@@ -10,6 +10,7 @@
 package adapter
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -95,6 +96,29 @@ func TestErrorsSurfaced(t *testing.T) {
 	}
 	if err := q.MoveResize(MoveResize{}); err == nil {
 		t.Fatal("MoveResize zero id: want typed error, got nil")
+	}
+}
+
+// TestDocMentions pins criterion 2: the build/linking/signing contract must
+// stay documented in doc.go (macOS static-archive + TCC note, Windows DLL
+// seam, no-Swift-direct rule). Guards against a future edit silently
+// dropping the contract the bead locked.
+// (review nit: cross-os-ed — header referenced this test before it existed.)
+func TestDocMentions(t *testing.T) {
+	raw, err := os.ReadFile("doc.go")
+	if err != nil {
+		t.Fatalf("ReadFile doc.go: %v", err)
+	}
+	doc := string(raw)
+	for _, want := range []string{
+		"Build/linking/signing notes",
+		"input-monitoring + accessibility consent",
+		"crossos-keyboard-win.dll",
+		"No Swift-direct-from-Go",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Fatalf("doc.go missing documented contract %q", want)
+		}
 	}
 }
 
