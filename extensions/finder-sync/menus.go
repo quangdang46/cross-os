@@ -17,6 +17,7 @@ package findersync
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -111,15 +112,27 @@ func Dispatch(itemID string, ctx SelectionCtx, paths []string) (capability strin
 		// Traversal check on the RAW path first: Clean("/tmp/../etc") ==
 		// "/etc" (no ".." left), so cleaning before checking would let
 		// escapes through. Reject ".." segments pre-clean, then clean.
+		//
+		// Slash-domain paths (Finder paths are slash-separated on macOS):
+		// use path (not filepath) so validation behaves identically on
+		// every build OS. filepath.IsAbs("/tmp/x") is FALSE on Windows
+		// ("/tmp" parses as volume-less rooted), which wrongly rejects
+		// every absolute Finder path when tests build on Windows.
 		if strings.Contains(p, "..") {
 			return "", nil, stages, fmt.Errorf("menu %q: rejected path %q", itemID, p)
 		}
-		clean := filepath.Clean(p)
+		clean := path.Clean(p)
 		if clean == "." || clean == "/" || strings.Contains(clean, "..") {
 			return "", nil, stages, fmt.Errorf("menu %q: rejected path %q", itemID, p)
 		}
-		if !filepath.IsAbs(clean) {
+		if !path.IsAbs(clean) {
 			return "", nil, stages, fmt.Errorf("menu %q: relative path %q rejected", itemID, p)
+		}
+		// Belt-and-suspenders: filepath is still consulted so OS-native
+		// separators in an already-validated slash path cannot smuggle an
+		// escape on the executing platform.
+		if filepath.Separator != '/' && strings.ContainsRune(p, filepath.Separator) {
+			return "", nil, stages, fmt.Errorf("menu %q: native separator in %q rejected", itemID, p)
 		}
 	}
 	stages = append(stages, "action: "+item.Capability+" paths="+fmt.Sprint(len(paths)))

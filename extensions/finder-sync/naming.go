@@ -19,7 +19,7 @@ package findersync
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 	"strings"
 )
 
@@ -58,7 +58,13 @@ var Seeds = []FileType{
 // Ports FilenameGenerator.uniqueFileURL: strips one redundant ".<ext>"
 // suffix (users type "data.json" into the base field), empty base → dotfile,
 // then "<base>.<ext>", "<base> 2.<ext>", … Exists is injected (same seam as
-// the Swift fileExists closure); filepath.Join replaces URL appending.
+// the Swift fileExists closure).
+//
+// path (slash) semantics, NOT filepath: Finder paths are slash-separated on
+// macOS, and the port must behave identically on every build OS. Using
+// filepath.Join here miscompiles on Windows: "/d" parses as a volume-less
+// rooted path and Join yields "\\d\\Untitled.md". path.Join is correct on
+// all platforms for this slash-domain function.
 func UniqueName(dir, baseName, ext string, exists func(string) bool) string {
 	base := baseName
 	suffix := "." + ext
@@ -68,14 +74,14 @@ func UniqueName(dir, baseName, ext string, exists func(string) bool) string {
 	candidate := func(i int) string {
 		if base == "" {
 			if i == 1 {
-				return filepath.Join(dir, "."+ext)
+				return path.Join(dir, "."+ext)
 			}
-			return filepath.Join(dir, fmt.Sprintf(".%s %d", ext, i))
+			return path.Join(dir, fmt.Sprintf(".%s %d", ext, i))
 		}
 		if i == 1 {
-			return filepath.Join(dir, base+"."+ext)
+			return path.Join(dir, base+"."+ext)
 		}
-		return filepath.Join(dir, fmt.Sprintf("%s %d.%s", base, i, ext))
+		return path.Join(dir, fmt.Sprintf("%s %d.%s", base, i, ext))
 	}
 	for i := 1; ; i++ {
 		if c := candidate(i); !exists(c) {
