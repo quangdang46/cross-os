@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- CrossOS daemon autostart (user opted in via Settings → Autostart).
+         Install: cp dev.crossos.daemon.plist ~/Library/LaunchAgents/ &&
+         launchctl load ~/Library/LaunchAgents/dev.crossos.daemon.plist
+         Remove: launchctl unload <path> && rm <path> (Reset Everything does
+         this when the login item exists — see safety ownership audit).
+         Daemon binary path is absolute at install time (installer rewrites
+         the ProgramArguments below); the fallback below suits `go run`. -->
+    <key>Label</key>
+    <string>dev.crossos.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/crossos</string>
+        <string>serve</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/tmp/dev.crossos.daemon.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/dev.crossos.daemon.err.log</string>
+</dict>
+</plist>

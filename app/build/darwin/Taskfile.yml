@@ -133,6 +133,7 @@ tasks:
     cmds:
       - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS"
       - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources"
+      - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/PlugIns"
       - cp build/darwin/icons.icns "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources"
       - |
         if [ -f build/darwin/Assets.car ]; then
@@ -140,6 +141,15 @@ tasks:
         fi
       - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS"
       - cp build/darwin/Info.plist "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents"
+      # FinderSync appex (unsigned dev copy): built on full-Xcode machines via
+      # extensions/finder-sync (xcodebuild → CrossOSFinderSync.appex); copied
+      # here when present so the bundle layout matches the signed path.
+      # Absent on CLT-only machines — bundle still builds and runs (the
+      # extension simply isn't embedded). Signed embed is qhp.6 scope.
+      - |
+        if [ -d extensions/finder-sync/build/Release/CrossOSFinderSync.appex ]; then
+          cp -R extensions/finder-sync/build/Release/CrossOSFinderSync.appex "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/PlugIns"
+        fi
       - task: '{{if eq OS "darwin"}}codesign:adhoc{{else}}codesign:skip{{end}}'
 
   codesign:adhoc:

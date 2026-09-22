@@ -273,6 +273,13 @@ func listenSocket(path string) (net.Listener, error) {
 }
 
 func main() {
+	// launchd invokes `crossos serve` (see scripts/launchd/); bare `crossos`
+	// with no args also serves (dev convenience). Any other subcommand is a
+	// usage error, never a silent serve.
+	if len(os.Args) > 2 || (len(os.Args) == 2 && os.Args[1] != "serve") {
+		fmt.Fprintln(os.Stderr, "usage: crossos [serve]")
+		os.Exit(2)
+	}
 	c, err := NewCore(builtin.All(), builtin.Grants())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "crossos: init:", err)
