@@ -141,6 +141,30 @@ function App() {
         .catch((e: any) => setActionMsg('Reset failed: ' + String(e)));
       return;
     }
+    // Trial countdown actions (Safety page trial control).
+    if (action === 'safety.confirmTrial' || action === 'safety.rollbackTrial') {
+      const pluginId = window.prompt('Plugin ID for trial ' + (action === 'safety.confirmTrial' ? 'confirm' : 'rollback') + '?', 'launcher') ?? '';
+      if (!pluginId) return;
+      if (action === 'safety.confirmTrial') {
+        AppService.ConfirmTrial(pluginId, true, true)
+          .then((state: string | null) => { setActionMsg('Trial confirmed: ' + pluginId + ' → ' + (state ?? '?')); refresh(); })
+          .catch((e: any) => setActionMsg('Confirm failed: ' + String(e)));
+      } else {
+        AppService.RollbackTrial(pluginId, 'user rollback from Safety page')
+          .then((state: string | null) => { setActionMsg('Trial rolled back: ' + pluginId + ' → ' + (state ?? '?')); refresh(); })
+          .catch((e: any) => setActionMsg('Rollback failed: ' + String(e)));
+      }
+      return;
+    }
+    if (action === 'safety.rollback') {
+      setActionMsg('Per-item rollback runs from the ownership audit (daemon executes).');
+      return;
+    }
+    // Update badge actions (Dashboard/Settings).
+    if (action === 'update.check' || action === 'update.apply') {
+      setActionMsg('Update check runs from the Dashboard badge (manifest-driven).');
+      return;
+    }
     // Plugin lifecycle actions.
     if (action === 'plugin.enable' || action === 'plugin.disable') {
       setActionMsg('Toggle plugins from the Plugins section below.');

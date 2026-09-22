@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"crossos/core/pkg/config"
 	"crossos/core/pkg/daemon"
 	"crossos/core/pkg/event"
 	"crossos/core/pkg/intent"
@@ -553,7 +554,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: crossos [serve]")
 		os.Exit(2)
 	}
-	c, err := NewCore(builtin.All(), builtin.Grants())
+	c, err := NewCoreWithSettings(builtin.All(), builtin.Grants(), config.DefaultConfigPath())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "crossos: init:", err)
 		os.Exit(1)
