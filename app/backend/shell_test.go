@@ -103,6 +103,15 @@ func (s *stubCore) SetEnabled(id string, e bool) error {
 	}
 	return nil
 }
+func (s *stubCore) CheckForUpdate(mv, plat, url, sum string) (bool, string, error) {
+	return mv == "v9.9.9", mv, nil
+}
+func (s *stubCore) ApplyUpdate(mv, plat, url, sum string, approved bool, by string) (string, error) {
+	if !approved {
+		return "", errors.New("shell: update needs approval")
+	}
+	return mv, nil
+}
 
 func TestBridge(t *testing.T) {
 	c := &stubCore{running: true, plugins: []PluginState{{ID: "win-kb", Enabled: true, Healthy: "healthy"}}, logs: []string{"e1"}}

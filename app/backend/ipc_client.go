@@ -194,3 +194,40 @@ func (c *IPCCore) EventLogs() []string {
 	}
 	return out
 }
+
+// CheckForUpdate implements Core via core.checkForUpdate.
+func (c *IPCCore) CheckForUpdate(manifestVersion, platform, url, sha256 string) (bool, string, error) {
+	raw, err := c.call("core.checkForUpdate", map[string]any{
+		"manifest": map[string]any{"version": manifestVersion, "platform": platform, "url": url, "sha256": sha256},
+	})
+	if err != nil {
+		return false, "", err
+	}
+	var out struct {
+		UpdateAvailable bool   `json:"updateAvailable"`
+		Version         string `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return false, "", err
+	}
+	return out.UpdateAvailable, out.Version, nil
+}
+
+// ApplyUpdate implements Core via core.applyUpdate.
+func (c *IPCCore) ApplyUpdate(manifestVersion, platform, url, sha256 string, approved bool, approvedBy string) (string, error) {
+	raw, err := c.call("core.applyUpdate", map[string]any{
+		"manifest":   map[string]any{"version": manifestVersion, "platform": platform, "url": url, "sha256": sha256},
+		"approved":   approved,
+		"approvedBy": approvedBy,
+	})
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		Installed string `json:"installed"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", err
+	}
+	return out.Installed, nil
+}

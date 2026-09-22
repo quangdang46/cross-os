@@ -59,6 +59,13 @@ type Core interface {
 	SetEnabled(id string, enabled bool) error
 	Reset() []string // returns the reset plan steps for audit
 	EventLogs() []string
+	// CheckForUpdate reports whether manifest.Version is newer than the
+	// running daemon (core.checkForUpdate). No network from the shell —
+	// the daemon fetches and compares.
+	CheckForUpdate(manifestVersion, platform, url, sha256 string) (bool, string, error)
+	// ApplyUpdate downloads + checksum-verifies + approval-gated installs
+	// (core.applyUpdate). Approved=false fails closed (§8.4).
+	ApplyUpdate(manifestVersion, platform, url, sha256 string, approved bool, approvedBy string) (string, error)
 }
 
 // App is the Wails-bound service (§7.3 shape: GetStatus, TogglePlugin,
@@ -117,4 +124,26 @@ func (a *App) GetEventLogs() []string {
 		return []string{}
 	}
 	return logs
+}
+
+// CheckForUpdate serves the update badge (Dashboard/Settings): whether the
+// manifest version is newer. Failures land in the UI log, never silent.
+func (a *App) CheckForUpdate(manifestVersion, platform, url, sha256 string) (bool, string, error) {
+	avail, ver, err := a.core.CheckForUpdate(manifestVersion, platform, url, sha256)
+	if err != nil {
+		a.log.Append("CheckForUpdate: " + err.Error())
+	}
+	return avail, ver, err
+}
+
+// ApplyUpdate applies a manifest update with explicit user approval
+// (§8.4: unapproved installs fail closed in the daemon, surfaced here AND
+// in the UI log — never a silent no-op).
+func (a *App) ApplyUpdate(manifestVersion, platform, url, sha256 string, approved bool, approvedBy string) (string, error) {
+	installed, err := a.core.ApplyUpdate(manifestVersion, platform, url, sha256, approved, approvedBy)
+	if err != nil {
+		a.log.Append("ApplyUpdate " + manifestVersion + ": " + err.Error())
+		return "", err
+	}
+	return installed, nil
 }

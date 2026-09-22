@@ -11,12 +11,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"crossos/core/pkg/daemon"
 	"crossos/core/pkg/event"
@@ -26,8 +30,14 @@ import (
 	"crossos/core/pkg/pluginapi"
 	"crossos/core/pkg/record"
 	"crossos/core/pkg/safety"
+	"crossos/core/pkg/update"
 	builtin "crossos/core/rules"
 )
+
+// CurrentVersion is the running daemon's version, compared against update
+// manifests by core.checkForUpdate. Bump on release (release.yml tags v*);
+// the manifest Version uses the same "vM.m.p" vocabulary.
+const CurrentVersion = "v0.1.0"
 
 // DefaultSocketPath is the Unix-socket path the daemon serves and the shell
 // dials (mirrors the FinderSync daemonSocketPath convention:
@@ -238,6 +248,76 @@ func decisionName(d pluginapi.Decision) string {
 	}
 }
 
+// httpFetcher wires update.Fetcher to net/http with a short timeout.
+// Finder menu handlers must return fast; the update check is off-path, but
+// a hanging dial would still wedge the caller — deadline it like ipc.go.
+type httpFetcher struct{ client *http.Client }
+
+func (f httpFetcher) Fetch(url string) ([]byte, error) {
+	resp, err := f.client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("update: fetch %s: status %s", url, resp.Status)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 256<<20))
+}
+
+func defaultFetcher() httpFetcher {
+	return httpFetcher{client: &http.Client{Timeout: 30 * time.Second}}
+}
+
+// handleCheckForUpdate serves core.checkForUpdate: {manifest:{version,
+// platform, url, sha256}} → {updateAvailable, version}. Malformed versions
+// are typed errors (update package fail-closed), never a silent false.
+func (c *Core) handleCheckForUpdate(raw json.RawMessage) (any, *ipc.RPCError) {
+	var p struct {
+		Manifest update.Manifest `json:"manifest"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "need {manifest:{version,platform,url,sha256}}"}
+	}
+	avail, err := update.CheckForUpdate(CurrentVersion, p.Manifest)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: err.Error()}
+	}
+	return map[string]any{"updateAvailable": avail, "version": p.Manifest.Version}, nil
+}
+
+// handleApplyUpdate serves core.applyUpdate: download + checksum-verify +
+// approval-gated atomic install over the RUNNING binary (os.Executable).
+// Params: {manifest:{...}, approved, approvedBy}. Unapproved → typed error
+// (§8.4: never silent). Checksum mismatch → typed error, bytes never
+// installed. Success restarts via launchd KeepAlive (daemon exits 0 after
+// install; launchd relaunches the fresh binary).
+func (c *Core) handleApplyUpdate(raw json.RawMessage) (any, *ipc.RPCError) {
+	var p struct {
+		Manifest   update.Manifest `json:"manifest"`
+		Approved   bool            `json:"approved"`
+		ApprovedBy string          `json:"approvedBy"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "need {manifest, approved}"}
+	}
+	if strings.TrimSpace(p.Manifest.URL) == "" {
+		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "manifest needs a download URL"}
+	}
+	data, err := update.Download(defaultFetcher(), p.Manifest)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInternal, Message: err.Error()}
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInternal, Message: "self path: " + err.Error()}
+	}
+	if err := update.Install(data, self, update.Approval{Granted: p.Approved, By: p.ApprovedBy}); err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInvalid, Message: err.Error()}
+	}
+	return map[string]any{"installed": p.Manifest.Version}, nil
+}
+
 // Serve registers the shell methods and serves ln in the background,
 // returning the server (Close stops the accept loop: Close closes the
 // listener, Accept errors, and Serve returns via the closed channel).
@@ -246,12 +326,14 @@ func decisionName(d pluginapi.Decision) string {
 func (c *Core) Serve(ln net.Listener) *ipc.Server {
 	srv := ipc.NewServer()
 	methods := map[string]ipc.Handler{
-		"core.status":       c.handleStatus,
-		"plugin.list":       c.handlePluginList,
-		"plugin.setEnabled": c.handlePluginSetEnabled,
-		"core.keyEvent":     c.handleKeyEvent,
-		"core.reset":        c.handleReset,
-		"core.eventLogs":    c.handleEventLogs,
+		"core.status":         c.handleStatus,
+		"plugin.list":         c.handlePluginList,
+		"plugin.setEnabled":   c.handlePluginSetEnabled,
+		"core.keyEvent":       c.handleKeyEvent,
+		"core.reset":          c.handleReset,
+		"core.eventLogs":      c.handleEventLogs,
+		"core.checkForUpdate": c.handleCheckForUpdate,
+		"core.applyUpdate":    c.handleApplyUpdate,
 	}
 	for name, h := range methods {
 		if err := srv.Register(name, h); err != nil {

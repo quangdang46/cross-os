@@ -35,3 +35,14 @@ func (s *Service) GetEventLogs() []string { return s.app.GetEventLogs() }
 
 // UILogs exposes the UI-visible log sink (bridge/IPC failures land here).
 func (s *Service) UILogs() []string { return s.app.UILogs() }
+
+// CheckForUpdate serves the update badge: whether manifest.Version is newer
+// than the running daemon (no shell-side network — daemon compares).
+func (s *Service) CheckForUpdate(manifestVersion, platform, url, sha256 string) (bool, string, error) {
+	return s.app.CheckForUpdate(manifestVersion, platform, url, sha256)
+}
+
+// ApplyUpdate applies a manifest update with explicit user approval (§8.4).
+func (s *Service) ApplyUpdate(manifestVersion, platform, url, sha256 string, approved bool, approvedBy string) (string, error) {
+	return s.app.ApplyUpdate(manifestVersion, platform, url, sha256, approved, approvedBy)
+}
