@@ -195,6 +195,14 @@ func uninstallTestHook() {
 
 // lowLevelProc is the hook callback. It classifies synchronously and returns:
 // nonzero suppresses the event, CallNextHookEx forwards it.
+//
+// NOTE on `go vet unsafeptr` (bead cross-os-qhp.9): lParam here is the
+// WH_KEYBOARD_LL-mandated KBDLLHOOKSTRUCT pointer (documented Win32 ABI, not
+// a Go pointer escape) — the conversion below is the only correct read, and
+// vet's unsafeptr check fires on the pattern regardless. There is no
+// //vet:ignore mechanism; the CI step for spike_b runs vet with the check
+// disabled (see .github/workflows/ci.yml), which is the sanctioned
+// suppression (cmd/vet: -unsafeptr=false runs all checks except unsafeptr).
 func lowLevelProc(nCode int32, wParam, lParam uintptr) uintptr {
 	if nCode != hcAction {
 		r, _, _ := procCallNext.Call(0, uintptr(nCode), wParam, lParam)

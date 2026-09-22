@@ -1,11 +1,13 @@
-# CI: lint + test + build (macOS + Windows) + artifacts (bead cross-os-qhp.1).
+# CI: lint + test + build (macOS + Windows) + artifacts (beads cross-os-qhp.1,
+# cross-os-qhp.9).
 #
 # Plan: COMPREHENSIVE_PLAN.md §12 + Phase 5. The license-gate job stays
 # REQUIRED (bead cross-os-qhp.5); this workflow adds build/test/packaging
 # around it. Signing + notarization run only on release (secrets-gated);
 # push/PR builds are unsigned but must compile + test green on both OSes.
 # arm64 + amd64 matrix (§14 Q6). Windows native surface is the thin
-# crossos-keyboard-win.dll only (§12).
+# crossos-keyboard-win.dll only (§12) — built from source on every push
+# (qhp.9: windows-dll job below), never committed as a binary.
 #
 # Known exclusions (pre-existing red on clean tree, verified via git stash):
 #   - core/pkg/config TestConfigPaths (windows-ish path expectation)
@@ -51,9 +53,15 @@ jobs:
       # calls windows-only isWindows): it compiles on Windows only, so it
       # gets its own Windows-gated step — the shared sweep above must stay
       # green on macos-latest too.
+      # unsafeptr is disabled for this package only (bead cross-os-qhp.9):
+      # lowLevelProc's lParam→*KBDLLHOOKSTRUCT conversion is the documented
+      # Win32 ABI (not a Go pointer escape), but vet's unsafeptr check fires
+      # on the pattern regardless — real CI red on every push since
+      # go-version:stable moved past the vet version that accepted it.
+      # -unsafeptr=false is cmd/vet's sanctioned per-check suppression.
       - name: Vet + test spike_b (Windows only)
         if: matrix.os == 'windows-latest'
-        run: cd platform/windows/spike_b && go vet . && go test -short .
+        run: cd platform/windows/spike_b && go vet -unsafeptr=false . && go test -short .
 
   build:
     strategy:
@@ -89,6 +97,43 @@ jobs:
         with:
           name: crossos-${{ matrix.goos }}-${{ matrix.goarch }}
           path: core/${{ matrix.out }}
+
+  # Windows DLL: build the thin helper from source on every push (bead
+  # cross-os-qhp.9). Proves the qhp.8 C sources still compile under MSVC and
+  # all 5 frozen exports resolve — a future edit that breaks the DLL fails
+  # here instead of silently shipping a stale binary. Unsigned build only;
+  # signing the DLL/MSI stays cert-gated in qhp.6. No cert/secret needed.
+  windows-dll:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (CMake, VS generator)
+        run: cmake -S platform/windows -B build/dll -G "Visual Studio 18 2026" -A x64
+      - name: Build DLL (Release)
+        run: cmake --build build/dll --config Release
+      - name: Assert DLL exists
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem build/dll -Recurse -Filter crossos-keyboard-win.dll | Select-Object -First 1
+          if (-not $dll) { Write-Error "crossos-keyboard-win.dll not produced"; exit 1 }
+          "DLL=$($dll.FullName)"
+          "DLL_BYTES=$($dll.Length)"
+          "DLL_PATH=$($dll.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Assert 5 frozen exports resolve (dumpbin, fail-closed)
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe | Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
+          $out = & $dumpbin.FullName /exports $env:DLL_PATH | Out-String
+          foreach ($sym in @('CrossOS_HookInstall','CrossOS_HookUninstall','CrossOS_SendInput','CrossOS_UIPIStatus','CrossOS_DeviceId')) {
+            if ($out -notmatch $sym) { Write-Error "export missing: $sym"; exit 1 }
+            "EXPORT_OK=$sym"
+          }
+      - name: Upload DLL artifact (unsigned)
+        uses: actions/upload-artifact@v4
+        with:
+          name: crossos-keyboard-win-dll
+          path: build/dll/**/crossos-keyboard-win.dll
 
   license-gate:
     runs-on: ubuntu-latest
