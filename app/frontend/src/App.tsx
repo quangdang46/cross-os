@@ -1,24 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Service as AppService } from "../bindings/crossos/app/backend";
+import type { Page, Status } from "../bindings/crossos/app/backend/models";
 
 // CrossOS settings shell: renders Host-discovered pages (Dashboard, Keyboard,
 // Windows, Finder, Activity, Safety, Plugins, Shortcuts, About, Welcome) served
 // by the Go backend over the Wails service binding. No page list is hardcoded
 // here — the Go Host owns discovery (§7.2); the frontend renders what it serves.
-
-interface Page {
-  ID: string;
-  Title: string;
-  Location: string;
-  Actions: string[];
-}
-
-interface Status {
-  Running: boolean;
-  SafeMode: boolean;
-  Killed: boolean;
-  Plugins: { ID: string; Enabled: boolean; Healthy: string }[];
-}
+// Page/Status shapes are the generated binding models (never re-declared).
 
 function App() {
   const [pages, setPages] = useState<Page[]>([]);
@@ -29,16 +17,17 @@ function App() {
 
   const refresh = () => {
     AppService.Pages()
-      .then((p: Page[]) => {
-        setPages(p);
-        if (!active && p.length > 0) setActive(p[0].ID);
+      .then((p: Page[] | null) => {
+        const list = p ?? [];
+        setPages(list);
+        if (!active && list.length > 0) setActive(list[0].ID);
       })
       .catch((e: any) => setError(String(e)));
     AppService.GetStatus()
-      .then(setStatus)
+      .then((s: Status | null) => { if (s) setStatus(s); })
       .catch((e: any) => setError(String(e)));
     AppService.UILogs()
-      .then(setLogs)
+      .then((l: string[] | null) => { if (l) setLogs(l); })
       .catch(() => {});
   };
 
@@ -84,7 +73,7 @@ function App() {
           <section className="page">
             <h2>{page.Title}</h2>
             <p className="page-id">{page.ID}</p>
-            {page.Actions.length > 0 && (
+            {page.Actions && page.Actions.length > 0 && (
               <ul className="actions">
                 {page.Actions.map((a) => <li key={a}>{a}</li>)}
               </ul>
@@ -92,7 +81,7 @@ function App() {
           </section>
         )}
 
-        {status && status.Plugins.length > 0 && (
+        {status && status.Plugins && status.Plugins.length > 0 && (
           <section className="page">
             <h2>Plugins</h2>
             <ul className="actions">
