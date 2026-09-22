@@ -26,6 +26,7 @@ import (
 	"crossos/core/pkg/pluginapi"
 	"crossos/core/pkg/record"
 	"crossos/core/pkg/safety"
+	builtin "crossos/core/rules"
 )
 
 // DefaultSocketPath is the Unix-socket path the daemon serves and the shell
@@ -127,6 +128,30 @@ func (c *Core) handlePluginSetEnabled(raw json.RawMessage) (any, *ipc.RPCError) 
 	return map[string]any{"id": p.ID, "enabled": p.Enabled}, nil
 }
 
+// decideLocked runs one key event through the router + recorder tap and
+// returns the decision. Disabled plugins' rules never fire: the router is
+// rebuilt from enabled-only rules on every toggle (10 rules — recompile is
+// microseconds, and correctness beats caching here). Caller holds no lock;
+// this takes mu to snapshot the enable set.
+func (c *Core) decideLocked(ev event.Event, ctx event.FastContext) event.Outcome {
+	c.mu.Lock()
+	enabled := map[string]bool{}
+	for id, on := range c.plugins {
+		enabled[id] = on
+	}
+	c.mu.Unlock()
+	var all []event.CompiledRule
+	for _, r := range builtin.All() {
+		if enabled[r.PluginID] {
+			all = append(all, r)
+		}
+	}
+	rt := event.Compile(all, intent.DefaultRegistry(), builtin.Grants(), nil)
+	out := rt.Decide(ev, ctx)
+	c.rec.OnOutcome(out)
+	return out
+}
+
 // handleReset serves core.reset: audited plan steps (safety.PlanReset).
 func (c *Core) handleReset(_ json.RawMessage) (any, *ipc.RPCError) {
 	plan := safety.PlanReset(safety.IntegrationState{})
@@ -185,15 +210,16 @@ func listenSocket(path string) (net.Listener, error) {
 }
 
 func main() {
-	c, err := NewCore(nil, nil)
+	c, err := NewCore(builtin.All(), builtin.Grants())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "crossos: init:", err)
 		os.Exit(1)
 	}
-	// Builtin plugins: matrices load here (nil rules above = no plugins;
-	// production wiring registers each builtin matrix + grants; the
-	// registerBuiltin calls below seed the enable map the shell toggles).
-	for _, id := range []string{"windows-keyboard", "developer", "launcher"} {
+	// Builtin plugins: matrices compiled into the router via core/rules
+	// (data port of the plugin matrices — core cannot import the plugin
+	// modules back; parity pinned by core/rules TestBuiltinParity).
+	// registerBuiltin seeds the enable map the shell toggles.
+	for _, id := range builtin.BuiltinIDs {
 		c.registerBuiltin(id, true)
 	}
 	path := DefaultSocketPath()
