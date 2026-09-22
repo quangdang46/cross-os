@@ -2,9 +2,11 @@ package developer
 
 import (
 	"testing"
+	"time"
 
 	"crossos/core/pkg/event"
 	"crossos/core/pkg/intent"
+	"crossos/core/pkg/plugin"
 	"crossos/core/pkg/pluginapi"
 	"crossos/core/pkg/rule"
 )
@@ -45,8 +47,11 @@ func TestFiveActions(t *testing.T) {
 }
 
 // TestShellGate: shell-bearing actions need Level B approve; the matrix
-// itself only requests native capabilities (gated terminal-in-dir runs via
-// shell.execute, never as a default rule target).
+// itself only requests native capabilities. Enforcement is structural but
+// lives one layer down from NeedsShellApproval (review: cross-os-ed):
+// terminal.openAt itself carries PermShellExecution in the capability
+// registry, and Router.Decide's Authorize step fails closed on a missing
+// grant — NeedsShellApproval documents the boundary, it isn't the gate.
 func TestShellGate(t *testing.T) {
 	if !NeedsShellApproval("shell.execute") {
 		t.Fatal("shell.execute must need Level B approve")
@@ -102,14 +107,16 @@ func TestPerAppScoping(t *testing.T) {
 
 // TestConfigDrivenLists: terminals/editors are config (add = list append).
 func TestConfigDrivenLists(t *testing.T) {
+	// defer-restore (review nit: cross-os-ed) so a mid-test Fatal can't
+	// leave the package globals polluted for the rest of the suite.
+	origTerm, origEdit := SupportedTerminals, SupportedEditors
+	defer func() { SupportedTerminals, SupportedEditors = origTerm, origEdit }()
 	before := len(SupportedTerminals) + len(SupportedEditors)
-	SupportedTerminals = append(SupportedTerminals, "TestTerm")
-	SupportedEditors = append(SupportedEditors, "TestEdit")
+	SupportedTerminals = append(append([]string{}, SupportedTerminals...), "TestTerm")
+	SupportedEditors = append(append([]string{}, SupportedEditors...), "TestEdit")
 	if len(SupportedTerminals)+len(SupportedEditors) != before+2 {
 		t.Fatal("lists must be appendable config (no code change to add one)")
 	}
-	SupportedTerminals = SupportedTerminals[:len(SupportedTerminals)-1]
-	SupportedEditors = SupportedEditors[:len(SupportedEditors)-1]
 	if PreferredEditor == "" {
 		t.Fatal("preferred editor must have a default")
 	}
@@ -125,6 +132,22 @@ func TestFinderItems(t *testing.T) {
 		if it.Title == "" || it.Capability == "" {
 			t.Fatalf("incomplete row %+v", it)
 		}
+	}
+}
+
+// TestInstallsThroughLifecycle proves "shipped as installable pack through
+// the Phase 4 lifecycle" (review: cross-os-ed — TestGrantsMatchManifest only
+// proved grants⊆permissions, not installability): the manifest actually
+// installs via the jpr.1 marketplace path (apiVersion-gated, TRIAL entry).
+func TestInstallsThroughLifecycle(t *testing.T) {
+	reg := plugin.NewRegistry("test")
+	approve := plugin.Approval{Granted: true, By: "test-user"}
+	p, err := reg.InstallManifest(Manifest(), "local", "v1", "0.2.0", time.Minute, approve, time.Now())
+	if err != nil {
+		t.Fatalf("InstallManifest: %v", err)
+	}
+	if p.Health != plugin.PackTrial || p.State != pluginapi.LifecycleTrial {
+		t.Fatalf("health=%s state=%s, want TRIAL/trial", p.Health, p.State)
 	}
 }
 
