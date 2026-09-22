@@ -37,3 +37,5 @@ app/.task/
 app/build/ios/
 app/build/linux/
 app/build/windows/info.json
+app/build/windows/nsis/
+app/build/windows/wails.exe.manifest
