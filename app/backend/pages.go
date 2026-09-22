@@ -158,14 +158,14 @@ func CommandsPage() pluginapi.UIContribution {
 	}, []string{"command.execute", "shortcut.setEnabled"}, "true")
 }
 
-// CorePages returns all nine Core page contributions in stable order,
-// including the first-run onboarding page (qhp.2): it registers through the
-// same Registry path, so the shared gates (trial literal, custom-view,
-// control kinds) cover it automatically.
+// CorePages returns all ten Core page contributions in stable order,
+// including the first-run onboarding page (qhp.2) and the Finder extpack
+// page (vbl.6): both register through the same Registry path, so the
+// shared gates (trial literal, custom-view, control kinds) cover them.
 func CorePages() []pluginapi.UIContribution {
 	return []pluginapi.UIContribution{
 		SafetyPage(), AboutPage(), PluginsPage(), ActivityPage(),
 		MatrixPage(), WindowsPage(), SchemaFormHelp(), CommandsPage(),
-		OnboardingFlow(),
+		OnboardingFlow(), FinderPage(),
 	}
 }

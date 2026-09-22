@@ -40,7 +40,7 @@ func pageByID(t *testing.T, h *Host, id string) Page {
 func TestAllPagesDiscovered(t *testing.T) {
 	h := NewHost()
 	registerAll(t, h)
-	want := []string{"core.safety", "core.about", "core.plugins", "core.activity", "core.keyboard", "core.windows", "core.schemaHelp", "core.shortcuts", "core.onboarding"}
+	want := []string{"core.safety", "core.about", "core.plugins", "core.activity", "core.keyboard", "core.windows", "core.schemaHelp", "core.shortcuts", "core.onboarding", "core.finder"}
 	if len(h.Pages()) != len(want) {
 		t.Fatalf("pages=%d, want %d", len(h.Pages()), len(want))
 	}
@@ -162,5 +162,13 @@ func TestPageControlKinds(t *testing.T) {
 	// About (credits) and Safety (trial), docs-linked.
 	if s := schemas["core.onboarding"]; !strings.Contains(s, `"kind":"enableFlow"`) || !strings.Contains(s, `"kind":"checklist"`) || !strings.Contains(s, "core.about") || !strings.Contains(s, "core.safety") {
 		t.Fatalf("onboarding missing enableFlow/checklist/about/safety links: %s", s)
+	}
+	// vbl.6 Finder: packList + actionSettings + gateBadge, boundary kept
+	// (no plugin-lifecycle duplication — nir.7 owns it).
+	if s := schemas["core.finder"]; !strings.Contains(s, `"kind":"packList"`) || !strings.Contains(s, `"kind":"actionSettings"`) || !strings.Contains(s, `"kind":"gateBadge"`) {
+		t.Fatalf("finder missing packList/actionSettings/gateBadge: %s", s)
+	}
+	if s := schemas["core.finder"]; strings.Contains(s, "plugin.installDisk") {
+		t.Fatalf("finder duplicates plugin lifecycle: %s", s)
 	}
 }
