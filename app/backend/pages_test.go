@@ -40,7 +40,7 @@ func pageByID(t *testing.T, h *Host, id string) Page {
 func TestAllPagesDiscovered(t *testing.T) {
 	h := NewHost()
 	registerAll(t, h)
-	want := []string{"core.safety", "core.about", "core.plugins", "core.activity", "core.keyboard", "core.windows", "core.schemaHelp", "core.shortcuts"}
+	want := []string{"core.safety", "core.about", "core.plugins", "core.activity", "core.keyboard", "core.windows", "core.schemaHelp", "core.shortcuts", "core.onboarding"}
 	if len(h.Pages()) != len(want) {
 		t.Fatalf("pages=%d, want %d", len(h.Pages()), len(want))
 	}
@@ -157,5 +157,10 @@ func TestPageControlKinds(t *testing.T) {
 	// jpr.6 Shortcuts: palette + shortcutList.
 	if s := schemas["core.shortcuts"]; !strings.Contains(s, `"kind":"palette"`) || !strings.Contains(s, `"kind":"shortcutList"`) {
 		t.Fatalf("shortcuts missing palette/shortcutList: %s", s)
+	}
+	// qhp.2 Onboarding: single enableFlow + readiness checklist, linked to
+	// About (credits) and Safety (trial), docs-linked.
+	if s := schemas["core.onboarding"]; !strings.Contains(s, `"kind":"enableFlow"`) || !strings.Contains(s, `"kind":"checklist"`) || !strings.Contains(s, "core.about") || !strings.Contains(s, "core.safety") {
+		t.Fatalf("onboarding missing enableFlow/checklist/about/safety links: %s", s)
 	}
 }
