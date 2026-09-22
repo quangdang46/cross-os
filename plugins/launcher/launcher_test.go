@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"runtime"
 	"testing"
 
 	"crossos/core/pkg/event"
@@ -9,13 +10,16 @@ import (
 )
 
 // TestHotkeyOpens: Ctrl+Space resolves through the standard rule path
-// (CONSUME — palette opens, conflict-visible like any rule).
+// (CONSUME — palette opens, conflict-visible like any rule). Uses
+// runtime.GOOS so the test proves whatever platform it runs on (review:
+// cross-os-ed — a hardcoded macOS keycode used to silently listen on the
+// wrong key on Windows; TestSpaceVKPerPlatform below pins both branches).
 func TestHotkeyOpens(t *testing.T) {
 	reg := intent.DefaultRegistry()
 	rt := event.Compile([]event.CompiledRule{HotkeyRule()}, reg,
 		map[string][]intent.Permission{pluginID: Grants()}, nil)
 	out := rt.Decide(
-		event.Event{Type: event.EventKeyDown, Source: event.SourceKeyboard, KeyCode: vkSpace, Modifiers: modCtrl},
+		event.Event{Type: event.EventKeyDown, Source: event.SourceKeyboard, KeyCode: spaceVK(runtime.GOOS), Modifiers: modCtrl},
 		event.FastContext{AppID: "Finder", AppMode: event.AppModeNative})
 	if out.Decision != pluginapi.DecisionConsume {
 		t.Fatalf("hotkey decision=%v, want CONSUME (palette opens)", out.Decision)
@@ -28,6 +32,20 @@ func TestHotkeyOpens(t *testing.T) {
 	// Validate — review: cross-os-8d).
 	if err := HotkeyRule().Intent.Validate(reg); err != nil {
 		t.Fatalf("hotkey intent invalid: %v", err)
+	}
+}
+
+// TestSpaceVKPerPlatform pins bead cross-os-jpr.7: Windows gets VK_SPACE
+// (0x20), every other GOOS gets kVK_Space (0x31) — no silent wrong-key
+// registration on either OS.
+func TestSpaceVKPerPlatform(t *testing.T) {
+	if got := spaceVK("windows"); got != 0x20 {
+		t.Fatalf("windows vk=%#x, want 0x20 (VK_SPACE)", got)
+	}
+	for _, goos := range []string{"darwin", "linux", "unknown"} {
+		if got := spaceVK(goos); got != 0x31 {
+			t.Fatalf("%s vk=%#x, want 0x31 (kVK_Space)", goos, got)
+		}
 	}
 }
 
