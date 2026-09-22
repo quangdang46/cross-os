@@ -176,7 +176,69 @@ func (c *Core) handleEventLogs(_ json.RawMessage) (any, *ipc.RPCError) {
 	return observe.SanitizeForDisplay(c.rec.Traces()), nil
 }
 
-// Serve registers the five shell methods and serves ln in the background,
+// handleKeyEvent serves core.keyEvent: one synthetic key event through the
+// decision path (router + recorder tap), for shell diagnostics, Activity
+// trace seeding, and headless e2e. Params: {keyCode, modifiers, appId,
+// appMode ("native"|"terminal"|"remote"|"vm"|"excluded"), windowId}.
+// type defaults to keydown; keyup never suppresses (matches spike A/B
+// key-down-only suppression). This is a DIAGNOSTIC path — the live tap
+// callback calls DecideOne directly, never over IPC (fast path stays
+// synchronous, <1ms). Result: {decision, intent, winner}.
+func (c *Core) handleKeyEvent(raw json.RawMessage) (any, *ipc.RPCError) {
+	var p struct {
+		KeyCode   uint32 `json:"keyCode"`
+		Modifiers uint32 `json:"modifiers"`
+		Type      string `json:"type"`
+		AppID     string `json:"appId"`
+		AppMode   string `json:"appMode"`
+		WindowID  string `json:"windowId"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "need {keyCode, ...}"}
+	}
+	typ := event.EventKeyDown
+	switch p.Type {
+	case "", "keydown":
+	case "keyup":
+		typ = event.EventKeyUp
+	case "flags":
+		typ = event.EventFlagsChanged
+	default:
+		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "unknown type (keydown|keyup|flags)"}
+	}
+	mode := event.AppMode(p.AppMode)
+	switch mode {
+	case "", event.AppModeNative:
+		mode = event.AppModeNative
+	case event.AppModeTerminal, event.AppModeRemote, event.AppModeVM, event.AppModeExcluded:
+	default:
+		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "unknown appMode"}
+	}
+	out := c.decideLocked(
+		event.Event{Type: typ, Source: event.SourceKeyboard, KeyCode: p.KeyCode, Modifiers: p.Modifiers},
+		event.FastContext{AppID: p.AppID, AppMode: mode, WindowID: p.WindowID},
+	)
+	return map[string]any{
+		"decision": decisionName(out.Decision),
+		"intent":   out.Intent.ID,
+		"winner":   out.WinnerRule,
+	}, nil
+}
+
+// decisionName names a Decision for the diagnostic result (the canonical
+// vocabulary is PASS/CONSUME/REPLACE — never a bare number over IPC).
+func decisionName(d pluginapi.Decision) string {
+	switch d {
+	case pluginapi.DecisionConsume:
+		return "CONSUME"
+	case pluginapi.DecisionReplace:
+		return "REPLACE"
+	default:
+		return "PASS"
+	}
+}
+
+// Serve registers the shell methods and serves ln in the background,
 // returning the server (Close stops the accept loop: Close closes the
 // listener, Accept errors, and Serve returns via the closed channel).
 // main blocks on signals instead — Serve must never block its caller or
@@ -187,6 +249,7 @@ func (c *Core) Serve(ln net.Listener) *ipc.Server {
 		"core.status":       c.handleStatus,
 		"plugin.list":       c.handlePluginList,
 		"plugin.setEnabled": c.handlePluginSetEnabled,
+		"core.keyEvent":     c.handleKeyEvent,
 		"core.reset":        c.handleReset,
 		"core.eventLogs":    c.handleEventLogs,
 	}

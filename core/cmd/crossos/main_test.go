@@ -18,6 +18,7 @@ import (
 	"crossos/core/pkg/event"
 	"crossos/core/pkg/intent"
 	"crossos/core/pkg/ipc"
+	builtin "crossos/core/rules"
 )
 
 // serveTest is intentionally absent: handlers are pure (Core + raw JSON)
@@ -194,5 +195,82 @@ func TestLiveSocketRoundTrip(t *testing.T) {
 	var logs []string
 	if err := json.Unmarshal(call("core.eventLogs", nil), &logs); err != nil {
 		t.Fatalf("live eventLogs not array: %v", err)
+	}
+	// core.keyEvent live over the socket: same bytes the shell sends.
+	var kd struct {
+		Decision string `json:"decision"`
+		Intent   string `json:"intent"`
+		Winner   string `json:"winner"`
+	}
+	if err := json.Unmarshal(call("core.keyEvent", map[string]any{
+		"keyCode": 67, "modifiers": 1, "appId": "com.apple.Finder", "appMode": "native",
+	}), &kd); err != nil {
+		t.Fatalf("live keyEvent decode: %v", err)
+	}
+	if kd.Decision != "REPLACE" || kd.Intent != "clipboard.copy" {
+		t.Fatalf("live keyEvent ctrl+c: %+v, want REPLACE/clipboard.copy", kd)
+	}
+}
+
+// TestKeyEventDecision: core.keyEvent drives the decision path — Ctrl+C
+// claims copy, F8 passes (unclaimed), Ctrl+Space consumes (launcher),
+// bad type/mode fail closed, and decisions land in the recorder trace.
+func TestKeyEventDecision(t *testing.T) {
+	c, err := NewCore(builtin.All(), builtin.Grants())
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, true)
+	}
+	key := func(params string) map[string]any {
+		t.Helper()
+		res, rerr := c.handleKeyEvent(json.RawMessage(params))
+		if rerr != nil {
+			t.Fatalf("keyEvent %s: rpc %d %s", params, rerr.Code, rerr.Message)
+		}
+		m, _ := res.(map[string]any)
+		return m
+	}
+	// Ctrl+C in Finder → REPLACE clipboard.copy (windows-keyboard matrix).
+	got := key(`{"keyCode":67,"modifiers":1,"appId":"com.apple.Finder","appMode":"native"}`)
+	if got["decision"] != "REPLACE" || got["intent"] != "clipboard.copy" {
+		t.Fatalf("ctrl+c: %+v, want REPLACE/clipboard.copy", got)
+	}
+	// F8 in VSCode → PASS (developer leaves it unclaimed).
+	got = key(`{"keyCode":119,"appId":"com.microsoft.VSCode","appMode":"native"}`)
+	if got["decision"] != "PASS" {
+		t.Fatalf("f8: %+v, want PASS", got)
+	}
+	// Ctrl+Space → CONSUME launcher.open.
+	got = key(`{"keyCode":49,"modifiers":1,"appId":"com.apple.Finder","appMode":"native"}`)
+	if got["decision"] != "CONSUME" || got["winner"] != "launcher.ctrl-space-launcher" {
+		t.Fatalf("ctrl+space: %+v, want CONSUME/launcher rule", got)
+	}
+	// Terminal Ctrl+C → PASS (SIGINT passthrough, copy-only is native-only).
+	got = key(`{"keyCode":67,"modifiers":1,"appId":"com.apple.Terminal","appMode":"terminal"}`)
+	if got["decision"] != "PASS" {
+		t.Fatalf("terminal ctrl+c: %+v, want PASS", got)
+	}
+	// Disabled plugin's rules never fire.
+	c.plugins["windows-keyboard"] = false
+	got = key(`{"keyCode":67,"modifiers":1,"appId":"com.apple.Finder","appMode":"native"}`)
+	if got["decision"] != "PASS" {
+		t.Fatalf("disabled keyboard ctrl+c: %+v, want PASS", got)
+	}
+	c.plugins["windows-keyboard"] = true
+	// Bad type / bad mode fail closed (never a silent default).
+	if _, rerr := c.handleKeyEvent(json.RawMessage(`{"keyCode":67,"type":"hold"}`)); rerr == nil || rerr.Code != ipc.ErrBadParams {
+		t.Fatalf("bad type must be ErrBadParams, got %v", rerr)
+	}
+	if _, rerr := c.handleKeyEvent(json.RawMessage(`{"keyCode":67,"appMode":"dream"}`)); rerr == nil || rerr.Code != ipc.ErrBadParams {
+		t.Fatalf("bad mode must be ErrBadParams, got %v", rerr)
+	}
+	if _, rerr := c.handleKeyEvent(json.RawMessage(`{bad`)); rerr == nil || rerr.Code != ipc.ErrBadParams {
+		t.Fatalf("malformed must be ErrBadParams, got %v", rerr)
+	}
+	// Decisions landed in the recorder (Activity trace seeding works).
+	if len(c.rec.Traces()) == 0 {
+		t.Fatal("key events must append recorder traces")
 	}
 }
