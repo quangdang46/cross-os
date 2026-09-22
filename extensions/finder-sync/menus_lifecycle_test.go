@@ -1,7 +1,8 @@
 // Menu + lifecycle tests — beads cross-os-vbl.2, cross-os-vbl.4.
 //
 // vbl.2 mapping: all §6.3 items × contexts, native-only caps, dispatcher
-// validation (paths + max count), stage traces (feeds vbl.5).
+// validation (paths + max count), stage traces (feeds vbl.5), RegisterMenu
+// wiring (TestRegisterMenus: 12 rows round-trip through a real Registry).
 // vbl.4 mapping: five states + transitions, daemon-down hide, NOT_APPROVED
 // guidance copy, status visibility + logging.
 package findersync
@@ -9,6 +10,8 @@ package findersync
 import (
 	"strings"
 	"testing"
+
+	"crossos/core/pkg/pluginapi"
 )
 
 func TestMenuTableCoverage(t *testing.T) {
@@ -111,6 +114,37 @@ func TestLifecycleStates(t *testing.T) {
 	}
 	if len(l.Log) == 0 {
 		t.Fatal("every transition must be logged (status UI + logs)")
+	}
+}
+
+// TestRegisterMenus pins the §3.6 normative path (review: cross-os-ed):
+// all 12 MenuTable rows register via RegisterMenu on a real Registry.
+// vbl.3 replaces the SOURCE (packs → MenuDefs); this path is unchanged.
+func TestRegisterMenus(t *testing.T) {
+	r := pluginapi.NewRegistry(nil)
+	if err := RegisterMenus(r); err != nil {
+		t.Fatalf("RegisterMenus: %v", err)
+	}
+	if len(r.Menus) != len(MenuTable) {
+		t.Fatalf("registered=%d, want %d", len(r.Menus), len(MenuTable))
+	}
+	seen := map[string]bool{}
+	for _, m := range r.Menus {
+		if m.ID == "" || m.Title == "" {
+			t.Fatalf("MenuDef incomplete: %+v", m)
+		}
+		if seen[m.ID] {
+			t.Fatalf("duplicate MenuDef %q", m.ID)
+		}
+		seen[m.ID] = true
+	}
+	for _, want := range []string{"finder.newText", "finder.trash", "finder.compress"} {
+		if !seen[want] {
+			t.Fatalf("MenuDef %q missing", want)
+		}
+	}
+	if err := RegisterMenus(nil); err == nil {
+		t.Fatal("nil Registry must fail, never a silent partial set")
 	}
 }
 

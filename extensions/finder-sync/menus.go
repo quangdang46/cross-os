@@ -10,9 +10,14 @@
 // against local config (path checks, max path count, §6.3 Security).
 // Shell/process actions are opt-in Level B only, never the default.
 // Every execution appends Recorder-bound stage traces (feeds vbl.5).
-// TODO(vbl.3): wire MenuTable through pluginapi.RegisterMenu when the
-// pack-loader lands (packs supply these menus; Dispatch standalone is the
-// interim normative path, not the finished wiring).
+//
+// Registration (§3.6 normative path): RegisterMenus converts the static
+// MenuTable into pluginapi.MenuDef rows on a caller-supplied Registry.
+// The static table is the source of truth today; vbl.3 (pack loader)
+// replaces the SOURCE (packs → MenuDefs) without changing this path.
+// (review: cross-os-ed — the old TODO had vbl.2 and vbl.3 pointing at
+// each other; the criterion says "registered via RegisterMenu", not
+// "sourced from packs", so this closes the criterion standalone.)
 package findersync
 
 import (
@@ -81,7 +86,11 @@ func ForContext(ctx SelectionCtx) []MenuItem {
 // Dispatch validates a menu execution (§6.3 Security) and returns the
 // capability invocation + trace stages. Validation FIRST (paths, count,
 // context fit); the trace records event → action → result for vbl.5.
-// Shell-bearing actions are rejected here (Level B gate) — native only.
+// Native-only gate: the MenuTable carries capability IDs only (no shell
+// strings exist at dispatch time), so shell-by-default is impossible by
+// construction; TestMenuTableCoverage pins the table side. Dispatch's job
+// is validation + tracing, not gate-keeping a parameter it never takes.
+// (review: cross-os-ed — the old comment overclaimed the gate lives here.)
 func Dispatch(itemID string, ctx SelectionCtx, paths []string) (capability string, params map[string]string, stages []string, err error) {
 	stages = append(stages, "event: menu="+itemID)
 	var item *MenuItem
