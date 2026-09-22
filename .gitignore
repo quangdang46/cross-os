@@ -25,3 +25,11 @@ tmp/
 xcuserdata/
 DerivedData/
 *.xcuserstate
+
+# Wails shell build outputs (regenerate: frontend `npm run build`,
+# bindings `wails3 generate bindings ./...`, Go `go build .` in app/).
+# Sources (src/, backend/, main.go, configs) are committed; outputs are not.
+app/frontend/node_modules/
+app/frontend/dist/
+app/frontend/bindings/
+app/bin/
