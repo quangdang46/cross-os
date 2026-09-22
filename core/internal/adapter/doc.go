@@ -11,6 +11,14 @@
 // into stable C-ABI calls whose implementations evolve behind them in
 // platform/darwin and platform/windows.
 //
+// Windows input paths (spike B box 4 — plan §4.2, COMPREHENSIVE_PLAN.md:671):
+// WH_KEYBOARD_LL (SetWindowsHookEx) is the ONLY intercept/suppress path —
+// the callback returns non-zero to suppress. Raw Input
+// (RegisterRawInputDevices, WM_INPUT) is observation/device identity ONLY,
+// never a suppression mechanism. The DLL exposes hook install/remove +
+// SendInput + UIPI status + Raw Input device-id query; suppression flows
+// exclusively through the LL callback's KeyAction return.
+//
 // Build/linking/signing notes (bead criterion 2, dev builds):
 //   - macOS: the C sources in platform/darwin/adapter compile to a static
 //     archive linked via #cgo CFLAGS/LDFLAGS below; the appex + tap require
