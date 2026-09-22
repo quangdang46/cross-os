@@ -78,6 +78,14 @@ type Core interface {
 	ConfirmTrial(pluginID string, confirmed, healthy bool) (string, error)
 	// RollbackTrial moves TRIAL → DISABLED (safety.rollbackTrial).
 	RollbackTrial(pluginID, reason string) (string, error)
+	// SetRuleEnabled toggles one matrix row by RuleID
+	// (config.setRuleEnabled). Unknown RuleIDs fail closed.
+	SetRuleEnabled(ruleID string, enabled bool) (bool, error)
+	// Shortcuts returns the current shortcut table (config.getShortcuts).
+	Shortcuts() ([]map[string]any, error)
+	// SetShortcuts replaces the shortcut table after validation
+	// (config.setShortcuts): [{action, modifiers, key}].
+	SetShortcuts(shortcuts []map[string]any) (int, error)
 }
 
 // App is the Wails-bound service (§7.3 shape: GetStatus, TogglePlugin,
@@ -200,4 +208,36 @@ func (a *App) RollbackTrial(pluginID, reason string) (string, error) {
 		return "", err
 	}
 	return state, nil
+}
+
+// SetRuleEnabled toggles one matrix row (Keyboard page matrix control).
+// Denials fail closed here AND in the UI log.
+func (a *App) SetRuleEnabled(ruleID string, enabled bool) (bool, error) {
+	ok, err := a.core.SetRuleEnabled(ruleID, enabled)
+	if err != nil {
+		a.log.Append("SetRuleEnabled " + ruleID + ": " + err.Error())
+		return false, err
+	}
+	return ok, nil
+}
+
+// Shortcuts serves the Windows page editor table.
+func (a *App) Shortcuts() ([]map[string]any, error) {
+	rows, err := a.core.Shortcuts()
+	if err != nil {
+		a.log.Append("Shortcuts: " + err.Error())
+		return nil, err
+	}
+	return rows, nil
+}
+
+// SetShortcuts replaces the shortcut table (Windows page zone/shortcut
+// editor). Validation failures fail closed here AND in the UI log.
+func (a *App) SetShortcuts(shortcuts []map[string]any) (int, error) {
+	n, err := a.core.SetShortcuts(shortcuts)
+	if err != nil {
+		a.log.Append("SetShortcuts: " + err.Error())
+		return 0, err
+	}
+	return n, nil
 }

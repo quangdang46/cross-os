@@ -283,3 +283,53 @@ func (c *IPCCore) RollbackTrial(pluginID, reason string) (string, error) {
 	}
 	return trialState(raw)
 }
+
+// SetRuleEnabled implements Core via config.setRuleEnabled.
+func (c *IPCCore) SetRuleEnabled(ruleID string, enabled bool) (bool, error) {
+	raw, err := c.call("config.setRuleEnabled", map[string]any{"ruleId": ruleID, "enabled": enabled})
+	if err != nil {
+		return false, err
+	}
+	var out struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return false, err
+	}
+	return out.Enabled, nil
+}
+
+// Shortcuts implements Core via config.getShortcuts.
+func (c *IPCCore) Shortcuts() ([]map[string]any, error) {
+	raw, err := c.call("config.getShortcuts", nil)
+	if err != nil {
+		return nil, err
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SetShortcuts implements Core via config.setShortcuts.
+func (c *IPCCore) SetShortcuts(shortcuts []map[string]any) (int, error) {
+	raw, err := c.call("config.setShortcuts", map[string]any{"shortcuts": shortcuts})
+	if err != nil {
+		return 0, err
+	}
+	var out struct {
+		Shortcuts int `json:"shortcuts"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		// Fallback: some servers return {"shortcuts": N} vs {"count": N}.
+		var alt struct {
+			Count int `json:"count"`
+		}
+		if jerr := json.Unmarshal(raw, &alt); jerr != nil {
+			return 0, err
+		}
+		return alt.Count, nil
+	}
+	return out.Shortcuts, nil
+}

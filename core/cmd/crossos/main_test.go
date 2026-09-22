@@ -413,3 +413,105 @@ func TestTrialLifecycle(t *testing.T) {
 		t.Fatal("rollback without trial must fail")
 	}
 }
+
+// TestConfigWriteToggles: setRuleEnabled disables a matrix row through the
+// decision path (Ctrl+C stops firing), re-enable restores it; unknown rules
+// and bad params fail closed.
+func TestConfigWriteToggles(t *testing.T) {
+	c, err := NewCore(builtin.All(), builtin.Grants())
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, true)
+	}
+	fire := func() string {
+		t.Helper()
+		res, rerr := c.handleKeyEvent(json.RawMessage(`{"keyCode":67,"modifiers":1,"appId":"com.apple.Finder","appMode":"native"}`))
+		if rerr != nil {
+			t.Fatalf("keyEvent: %v", rerr)
+		}
+		m, _ := res.(map[string]any)
+		s, _ := m["decision"].(string)
+		return s
+	}
+	if got := fire(); got != "REPLACE" {
+		t.Fatalf("baseline ctrl+c=%s, want REPLACE", got)
+	}
+	// Disable the copy row → Ctrl+C passes through.
+	res, rerr := c.handleSetRuleEnabled(json.RawMessage(`{"ruleId":"windows-keyboard.ctrl-c-copy","enabled":false}`))
+	if rerr != nil {
+		t.Fatalf("disable row: %v", rerr)
+	}
+	if m, _ := res.(map[string]any); m["enabled"] != false {
+		t.Fatalf("disable result: %+v", m)
+	}
+	if got := fire(); got != "PASS" {
+		t.Fatalf("disabled ctrl+c=%s, want PASS (no restart)", got)
+	}
+	// Re-enable → fires again immediately.
+	if _, rerr := c.handleSetRuleEnabled(json.RawMessage(`{"ruleId":"windows-keyboard.ctrl-c-copy","enabled":true}`)); rerr != nil {
+		t.Fatalf("re-enable: %v", rerr)
+	}
+	if got := fire(); got != "REPLACE" {
+		t.Fatalf("re-enabled ctrl+c=%s, want REPLACE", got)
+	}
+	// Unknown rule + bad params fail closed.
+	if _, rerr := c.handleSetRuleEnabled(json.RawMessage(`{"ruleId":"nope","enabled":false}`)); rerr == nil {
+		t.Fatal("unknown rule must fail")
+	}
+	if _, rerr := c.handleSetRuleEnabled(json.RawMessage(`{}`)); rerr == nil || rerr.Code != ipc.ErrBadParams {
+		t.Fatalf("empty params must be ErrBadParams, got %v", rerr)
+	}
+}
+
+// TestConfigShortcutsRoundTrip: get table → set valid edit → get reflects;
+// invalid edits (dup chord, unknown action) rejected, running set kept.
+func TestConfigShortcutsRoundTrip(t *testing.T) {
+	c, err := NewCore(builtin.All(), builtin.Grants())
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	res, rerr := c.handleGetShortcuts(nil)
+	if rerr != nil {
+		t.Fatalf("get: %v", rerr)
+	}
+	rows, _ := res.([]map[string]any)
+	if len(rows) != 10 {
+		t.Fatalf("shortcuts=%d, want 10 §6.2 rows", len(rows))
+	}
+	// Valid edit: same table minus one row still validates → stored.
+	var edit []map[string]any
+	for i, r := range rows {
+		if i == 0 {
+			continue
+		}
+		edit = append(edit, map[string]any{"action": r["action"], "modifiers": r["modifiers"], "key": r["key"]})
+	}
+	raw, _ := json.Marshal(map[string]any{"shortcuts": edit})
+	if _, rerr := c.handleSetShortcuts(raw); rerr != nil {
+		t.Fatalf("valid edit: %v", rerr)
+	}
+	res2, _ := c.handleGetShortcuts(nil)
+	if rows2, _ := res2.([]map[string]any); len(rows2) != 9 {
+		t.Fatalf("after edit=%d, want 9", len(rows2))
+	}
+	// Duplicate chord rejected, running set untouched.
+	dup := append(append([]map[string]any(nil), edit...), edit[0])
+	raw, _ = json.Marshal(map[string]any{"shortcuts": dup})
+	if _, rerr := c.handleSetShortcuts(raw); rerr == nil {
+		t.Fatal("duplicate chords must be rejected")
+	}
+	res3, _ := c.handleGetShortcuts(nil)
+	if rows3, _ := res3.([]map[string]any); len(rows3) != 9 {
+		t.Fatalf("rejected edit changed running set: %d", len(rows3))
+	}
+	// Unknown action rejected.
+	raw, _ = json.Marshal(map[string]any{"shortcuts": []map[string]any{{"action": "Nope", "modifiers": []string{"Ctrl"}, "key": "Left"}}})
+	if _, rerr := c.handleSetShortcuts(raw); rerr == nil {
+		t.Fatal("unknown action must be rejected")
+	}
+	if _, rerr := c.handleSetShortcuts(json.RawMessage(`{bad`)); rerr == nil || rerr.Code != ipc.ErrBadParams {
+		t.Fatalf("malformed must be ErrBadParams, got %v", rerr)
+	}
+}

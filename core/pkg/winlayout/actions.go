@@ -151,6 +151,18 @@ var AllActions = []Action{
 	NextDisplay, PreviousDisplay,
 }
 
+// ActionByName resolves a display name back to its Action (for the
+// config.setShortcuts IPC path, which speaks names, not enum values).
+// Unknown names fail closed (never a silent default action).
+func ActionByName(name string) (Action, bool) {
+	for _, a := range AllActions {
+		if ActionName(a) == name {
+			return a, true
+		}
+	}
+	return 0, false
+}
+
 // Fullscreen is §6.2's 19th-row "Fullscreen": it resolves through
 // window.move zone "fullscreen" (Adapter toggles kAXFullscreenAttribute;
 // geometry Frame() has no fullscreen rect — the Adapter owns it).

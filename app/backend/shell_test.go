@@ -123,6 +123,21 @@ func (s *stubCore) ConfirmTrial(pluginID string, confirmed, healthy bool) (strin
 	return "enabled", nil
 }
 func (s *stubCore) RollbackTrial(pluginID, reason string) (string, error) { return "disabled", nil }
+func (s *stubCore) SetRuleEnabled(ruleID string, enabled bool) (bool, error) {
+	if ruleID == "nope" {
+		return false, errors.New("shell: unknown rule")
+	}
+	return enabled, nil
+}
+func (s *stubCore) Shortcuts() ([]map[string]any, error) {
+	return []map[string]any{{"action": "Left Half", "modifiers": []string{"Ctrl", "Win"}, "key": "Left"}}, nil
+}
+func (s *stubCore) SetShortcuts(shortcuts []map[string]any) (int, error) {
+	if len(shortcuts) == 0 {
+		return 0, errors.New("shell: empty table rejected")
+	}
+	return len(shortcuts), nil
+}
 
 func TestBridge(t *testing.T) {
 	c := &stubCore{running: true, plugins: []PluginState{{ID: "win-kb", Enabled: true, Healthy: "healthy"}}, logs: []string{"e1"}}
@@ -190,5 +205,28 @@ func TestTrialBridgeSurfaced(t *testing.T) {
 	}
 	if st, err := app.RollbackTrial("plug", "cancel"); err != nil || st != "disabled" {
 		t.Fatalf("RollbackTrial=%q,%v, want disabled", st, err)
+	}
+}
+
+func TestConfigBridgeSurfaced(t *testing.T) {
+	app := NewApp(&stubCore{})
+	if ok, err := app.SetRuleEnabled("windows-keyboard.ctrl-c-copy", false); err != nil || ok != false {
+		t.Fatalf("SetRuleEnabled=%v,%v, want false,nil", ok, err)
+	}
+	if _, err := app.SetRuleEnabled("nope", false); err == nil {
+		t.Fatal("unknown rule must fail closed")
+	}
+	if len(app.UILogs()) == 0 {
+		t.Fatal("denied toggle must land in UI logs")
+	}
+	rows, err := app.Shortcuts()
+	if err != nil || len(rows) != 1 || rows[0]["action"] != "Left Half" {
+		t.Fatalf("Shortcuts=%v,%v", rows, err)
+	}
+	if n, err := app.SetShortcuts(rows); err != nil || n != 1 {
+		t.Fatalf("SetShortcuts=%d,%v, want 1", n, err)
+	}
+	if _, err := app.SetShortcuts(nil); err == nil {
+		t.Fatal("empty table must fail closed")
 	}
 }

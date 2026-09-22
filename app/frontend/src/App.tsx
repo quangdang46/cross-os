@@ -48,6 +48,52 @@ function parseControls(page: Page): Control[] {
   }
 }
 
+function MatrixControl() {
+  // Known builtin RuleIDs (mirror core/rules parity list — the daemon
+  // rejects unknown IDs, so this list can only address rows the daemon
+  // already knows, never invent them).
+  const ids = [
+    'windows-keyboard.alt-f4-close-window',
+    'windows-keyboard.ctrl-c-copy',
+    'windows-keyboard.win-left-snap',
+    'windows-keyboard.win-right-snap',
+    'windows-keyboard.win-up-maximize',
+    'windows-keyboard.win-down-minimize',
+    'developer.ctrl-shift-enter-terminal',
+    'developer.ctrl-shift-c-copypath',
+    'developer.ctrl-shift-p-editor',
+    'launcher.ctrl-space-launcher',
+  ];
+  const [states, setStates] = useState<Record<string, boolean>>({});
+  const [msg, setMsg] = useState<string>('');
+  const toggle = (id: string) => {
+    const next = !(states[id] ?? true);
+    AppService.SetRuleEnabled(id, next)
+      .then((ok: boolean | null) => {
+        setStates((s) => ({ ...s, [id]: ok ?? next }));
+        setMsg('');
+      })
+      .catch((e: any) => setMsg('Toggle failed: ' + String(e)));
+  };
+  return (
+    <div className="ctl">
+      <h3>Shortcut matrix</h3>
+      <p className="note">Toggle a row — takes effect immediately, no restart (config.setRuleEnabled). {msg}</p>
+      <ul className="actions">
+        {ids.map((id) => (
+          <li key={id}>
+            {id} — {states[id] === false ? 'disabled' : 'enabled'}
+            {' '}
+            <button className="btn" onClick={() => toggle(id)}>
+              {states[id] === false ? 'Enable' : 'Disable'}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function App() {
   const [pages, setPages] = useState<Page[]>([]);
   const [active, setActive] = useState<string>('');
@@ -186,13 +232,7 @@ function App() {
         );
       case 'matrix':
       case 'overrides':
-        return (
-          <div key={key} className="ctl">
-            <h3>{c.kind === 'matrix' ? 'Shortcut matrix' : 'App overrides'}</h3>
-            <p className="note">{c.note ?? ('Source: ' + (c.source ?? ''))}</p>
-            <p className="note">Edits take effect immediately (config.writeMatrix / config.writeOverride).</p>
-          </div>
-        );
+        return <MatrixControl key={key} />;
       case 'shortcutList':
         return (
           <div key={key} className="ctl">

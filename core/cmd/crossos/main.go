@@ -30,7 +30,9 @@ import (
 	"crossos/core/pkg/pluginapi"
 	"crossos/core/pkg/record"
 	"crossos/core/pkg/safety"
+	"crossos/core/pkg/settings"
 	"crossos/core/pkg/update"
+	"crossos/core/pkg/winlayout"
 	builtin "crossos/core/rules"
 )
 
@@ -52,12 +54,13 @@ func DefaultSocketPath() string {
 
 // Core owns the daemon state behind the IPC methods. One mutex guards the
 // plugin enable map + trial map (handlers run on independent connection
-// goroutines).
+// goroutines). The settings Store owns its own lock internally.
 type Core struct {
 	mu      sync.Mutex
 	daemon  *daemon.Daemon
 	router  *event.Router
 	rec     *record.Recorder
+	set     *settings.Store
 	plugins map[string]bool // id → enabled
 	trials  map[string]*safety.Trial
 	order   []string
@@ -65,17 +68,28 @@ type Core struct {
 
 // NewCore builds a Core with the daemon running and builtin matrices loaded.
 // rules/grants are injected so tests bind fixtures without plugin modules
-// (production passes loadBuiltin below).
+// (production passes loadBuiltin below). settingsPath "" = memory-only
+// store (tests); production passes the config.json path for persistence.
 func NewCore(rules []event.CompiledRule, grants map[string][]intent.Permission) (*Core, error) {
+	return NewCoreWithSettings(rules, grants, "")
+}
+
+// NewCoreWithSettings is NewCore with an explicit settings persistence path.
+func NewCoreWithSettings(rules []event.CompiledRule, grants map[string][]intent.Permission, settingsPath string) (*Core, error) {
 	d := daemon.New()
 	if err := d.Run(); err != nil {
 		return nil, err
 	}
 	reg := intent.DefaultRegistry()
+	set, err := settings.New(settingsPath)
+	if err != nil {
+		return nil, err
+	}
 	c := &Core{
 		daemon:  d,
 		router:  event.Compile(rules, reg, grants, nil),
 		rec:     record.NewRecorder(),
+		set:     set,
 		plugins: map[string]bool{},
 		trials:  map[string]*safety.Trial{},
 	}
@@ -142,10 +156,11 @@ func (c *Core) handlePluginSetEnabled(raw json.RawMessage) (any, *ipc.RPCError) 
 }
 
 // decideLocked runs one key event through the router + recorder tap and
-// returns the decision. Disabled plugins' rules never fire: the router is
-// rebuilt from enabled-only rules on every toggle (10 rules — recompile is
-// microseconds, and correctness beats caching here). Caller holds no lock;
-// this takes mu to snapshot the enable set.
+// returns the decision. Disabled plugins' rules never fire, and neither do
+// user-disabled matrix rows: the router is rebuilt from enabled-only rules
+// on every toggle (10 rules — recompile is microseconds, and correctness
+// beats caching here). Caller holds no lock; this takes mu to snapshot the
+// enable set.
 func (c *Core) decideLocked(ev event.Event, ctx event.FastContext) event.Outcome {
 	c.mu.Lock()
 	enabled := map[string]bool{}
@@ -153,9 +168,11 @@ func (c *Core) decideLocked(ev event.Event, ctx event.FastContext) event.Outcome
 		enabled[id] = on
 	}
 	c.mu.Unlock()
+	known := map[string]bool{}
 	var all []event.CompiledRule
 	for _, r := range builtin.All() {
-		if enabled[r.PluginID] {
+		known[r.RuleID] = true
+		if enabled[r.PluginID] && c.set.IsRuleEnabled(r.RuleID) {
 			all = append(all, r)
 		}
 	}
@@ -163,6 +180,77 @@ func (c *Core) decideLocked(ev event.Event, ctx event.FastContext) event.Outcome
 	out := rt.Decide(ev, ctx)
 	c.rec.OnOutcome(out)
 	return out
+}
+
+// knownRuleIDs reports the builtin RuleIDs (for settings toggle validation).
+func (c *Core) knownRuleIDs(ruleID string) bool {
+	for _, r := range builtin.All() {
+		if r.RuleID == ruleID {
+			return true
+		}
+	}
+	return false
+}
+
+// handleSetRuleEnabled serves config.setRuleEnabled: {ruleId, enabled}.
+// Unknown RuleIDs fail closed (never a silent no-op toggle).
+func (c *Core) handleSetRuleEnabled(raw json.RawMessage) (any, *ipc.RPCError) {
+	var p struct {
+		RuleID  string `json:"ruleId"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil || p.RuleID == "" {
+		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "need {ruleId, enabled}"}
+	}
+	if err := c.set.SetRuleEnabled(p.RuleID, p.Enabled, c.knownRuleIDs); err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInvalid, Message: err.Error()}
+	}
+	return map[string]any{"ruleId": p.RuleID, "enabled": p.Enabled}, nil
+}
+
+// handleGetShortcuts serves config.getShortcuts: the current shortcut table
+// (for the Windows page editor).
+func (c *Core) handleGetShortcuts(_ json.RawMessage) (any, *ipc.RPCError) {
+	return c.shortcutRows(), nil
+}
+
+// shortcutRows renders the table with action names (not runes).
+func (c *Core) shortcutRows() []map[string]any {
+	rows := make([]map[string]any, 0)
+	for _, s := range c.set.Shortcuts() {
+		rows = append(rows, map[string]any{
+			"action": winlayout.ActionName(s.Action), "modifiers": s.Modifiers, "key": s.Key,
+		})
+	}
+	return rows
+}
+
+// handleSetShortcuts serves config.setShortcuts: [{action, modifiers, key}]
+// validated by winlayout (duplicate chords + non-window capabilities
+// rejected before anything is stored or applied).
+func (c *Core) handleSetShortcuts(raw json.RawMessage) (any, *ipc.RPCError) {
+	var p struct {
+		Shortcuts []struct {
+			Action    string   `json:"action"`
+			Modifiers []string `json:"modifiers"`
+			Key       string   `json:"key"`
+		} `json:"shortcuts"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "need {shortcuts:[{action,modifiers,key}]}"}
+	}
+	set := make([]winlayout.Shortcut, 0, len(p.Shortcuts))
+	for _, s := range p.Shortcuts {
+		a, ok := winlayout.ActionByName(s.Action)
+		if !ok {
+			return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: fmt.Sprintf("unknown action %q", s.Action)}
+		}
+		set = append(set, winlayout.Shortcut{Action: a, Modifiers: s.Modifiers, Key: s.Key})
+	}
+	if err := c.set.SetShortcuts(set); err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInvalid, Message: err.Error()}
+	}
+	return map[string]any{"shortcuts": len(set)}, nil
 }
 
 // handleReset serves core.reset: audited plan steps (safety.PlanReset).
@@ -422,18 +510,21 @@ func (c *Core) handleRollbackTrial(raw json.RawMessage) (any, *ipc.RPCError) {
 func (c *Core) Serve(ln net.Listener) *ipc.Server {
 	srv := ipc.NewServer()
 	methods := map[string]ipc.Handler{
-		"core.status":          c.handleStatus,
-		"plugin.list":          c.handlePluginList,
-		"plugin.setEnabled":    c.handlePluginSetEnabled,
-		"core.keyEvent":        c.handleKeyEvent,
-		"core.reset":           c.handleReset,
-		"core.eventLogs":       c.handleEventLogs,
-		"safety.panicStop":     c.handlePanicStop,
-		"safety.beginTrial":    c.handleBeginTrial,
-		"safety.confirmTrial":  c.handleConfirmTrial,
-		"safety.rollbackTrial": c.handleRollbackTrial,
-		"core.checkForUpdate":  c.handleCheckForUpdate,
-		"core.applyUpdate":     c.handleApplyUpdate,
+		"core.status":           c.handleStatus,
+		"plugin.list":           c.handlePluginList,
+		"plugin.setEnabled":     c.handlePluginSetEnabled,
+		"core.keyEvent":         c.handleKeyEvent,
+		"core.reset":            c.handleReset,
+		"core.eventLogs":        c.handleEventLogs,
+		"safety.panicStop":      c.handlePanicStop,
+		"safety.beginTrial":     c.handleBeginTrial,
+		"safety.confirmTrial":   c.handleConfirmTrial,
+		"safety.rollbackTrial":  c.handleRollbackTrial,
+		"core.checkForUpdate":   c.handleCheckForUpdate,
+		"core.applyUpdate":      c.handleApplyUpdate,
+		"config.setRuleEnabled": c.handleSetRuleEnabled,
+		"config.getShortcuts":   c.handleGetShortcuts,
+		"config.setShortcuts":   c.handleSetShortcuts,
 	}
 	for name, h := range methods {
 		if err := srv.Register(name, h); err != nil {

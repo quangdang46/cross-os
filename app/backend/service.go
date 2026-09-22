@@ -66,3 +66,18 @@ func (s *Service) ConfirmTrial(pluginID string, confirmed, healthy bool) (string
 func (s *Service) RollbackTrial(pluginID, reason string) (string, error) {
 	return s.app.RollbackTrial(pluginID, reason)
 }
+
+// SetRuleEnabled toggles one matrix row (Keyboard page matrix control).
+func (s *Service) SetRuleEnabled(ruleID string, enabled bool) (bool, error) {
+	return s.app.SetRuleEnabled(ruleID, enabled)
+}
+
+// Shortcuts serves the Windows page editor table.
+func (s *Service) Shortcuts() ([]map[string]any, error) {
+	return s.app.Shortcuts()
+}
+
+// SetShortcuts replaces the shortcut table (Windows page editor).
+func (s *Service) SetShortcuts(shortcuts []map[string]any) (int, error) {
+	return s.app.SetShortcuts(shortcuts)
+}
