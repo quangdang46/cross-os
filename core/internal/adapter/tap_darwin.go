@@ -1,9 +1,9 @@
 //go:build darwin
 
-// Darwin tap/hook seam: install/remove go through the C-ABI bridge
-// (TapInstall/TapUninstall in platform/darwin/adapter, wired by the cgo
-// surface in tap_cgo.go). Until the C sources land, install returns a typed
-// not-implemented error — never nil success — so the gap is explicit.
+// Darwin tap seam: install/remove go through the live C-ABI bridge
+// (TapInstall/TapUninstall in tap_cgo.go over platform/darwin/adapter).
+// NULL from the bridge (no TCC input-monitoring consent) is the typed
+// denial — never nil success — so the gap stays explicit at runtime.
 package adapter
 
 import (
@@ -18,12 +18,16 @@ type darwinTap struct {
 func NewKeyboardTap(d *Driver) KeyboardTap { return &darwinTap{driver: d} }
 
 func (t *darwinTap) Install() error {
-	return t.driver.ReportError("tap", errTapNotWired)
+	if err := TapInstall(t.driver); err != nil {
+		return err // dual-surfaced inside TapInstall (caller + stage log)
+	}
+	t.installed = true
+	return nil
 }
 
 func (t *darwinTap) Uninstall() error {
 	t.installed = false
-	return nil
+	return TapUninstall(t.driver)
 }
 
 func (t *darwinTap) DecideOne(ev event.Event, ctx event.FastContext) KeyAction {
