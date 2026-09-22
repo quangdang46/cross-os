@@ -72,7 +72,16 @@ func NewRegistry(name string) *Registry {
 // gate — local/dev only. Production MUST use InstallManifest (fail-closed
 // apiVersion gate). Unversioned installs are marked by recording CoreVer as
 // "unversioned" in the pack, surfaced in HealthLine for audit.
-func (r *Registry) Install(id, repo, ref string, m PackManifest, trialTimeout time.Duration, ap Approval, now time.Time) (*InstalledPack, error) {
+//
+// Fail-closed (review: cross-os-ed): localDev MUST be true or Install
+// refuses — a doc comment alone cannot stop a future caller sleepwalking
+// into the permissive path. There are zero production callers today; the
+// first production caller uses InstallManifest (and passes
+// safety.TRIALTimeout — see the TODO there).
+func (r *Registry) Install(id, repo, ref string, m PackManifest, trialTimeout time.Duration, localDev bool, ap Approval, now time.Time) (*InstalledPack, error) {
+	if !localDev {
+		return nil, fmt.Errorf("marketplace: Install is local/dev-only (PackManifest carries no apiVersion); production uses InstallManifest")
+	}
 	if !ap.Granted {
 		return nil, fmt.Errorf("marketplace: install %q needs user approval (no silent installs)", id)
 	}
@@ -97,6 +106,8 @@ func (r *Registry) Install(id, repo, ref string, m PackManifest, trialTimeout ti
 // InstallManifest is the full install path with a real pluginapi.Manifest
 // (apiVersion gate enforced for real). Preferred over Install when the
 // caller has the manifest (always, in production).
+// TODO(jpr.1): the first production caller MUST pass safety.TRIALTimeout
+// (not a literal) — no callers exist yet, so nothing wires it today.
 func (r *Registry) InstallManifest(pm pluginapi.Manifest, repo, ref, coreVer string, trialTimeout time.Duration, ap Approval, now time.Time) (*InstalledPack, error) {
 	if !ap.Granted {
 		return nil, fmt.Errorf("marketplace: install %q needs user approval (no silent installs)", pm.ID)

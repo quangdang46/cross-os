@@ -1,11 +1,17 @@
 // Marketplace tests — bead cross-os-jpr.1.
 //
 // Pass criteria mapping:
-//  1. Git registry browse/install/enable/disable/update/uninstall →
-//     TestInstallFlow (+ TestUpdateUninstall).
+//  1. Git registry browse/install/enable/disable/uninstall →
+//     TestInstallFlow (end-to-end: install → confirm → healthy →
+//     disable → uninstall); update + uninstall-guards →
+//     TestUpdateNeedsApproval (unapproved update fails, approved
+//     re-enters TRIAL, enabled pack uninstall fails closed).
+//     (review: cross-os-ed — the old header named a phantom
+//     TestUpdateUninstall; coverage lives in these two real tests.)
 //  2. Health states tracked + shown → TestHealthStates.
 //  3. New installs enter TRIAL (Core constant) + confirm/rollback →
-//     TestTrialConfirmRollback.
+//     TestTrialConfirmRollback (+ TestInstallNeedsApproval for the
+//     approval gate).
 //  4. apiVersion gate rejects with clear UX → TestApiVersionGate.
 //  5. Updates need approval → TestUpdateNeedsApproval.
 package plugin
