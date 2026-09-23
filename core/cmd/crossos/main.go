@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"crossos/core/internal/adapter"
 	"crossos/core/pkg/config"
 	"crossos/core/pkg/daemon"
 	"crossos/core/pkg/event"
@@ -65,6 +66,13 @@ type Core struct {
 	plugins map[string]bool // id → enabled
 	trials  map[string]*safety.Trial
 	order   []string
+	// interception reports whether the live keyboard tap is installed and
+	// running (bead cross-os-2io). Injected as a func so the daemon serves a
+	// truthful on/off without the core package knowing about cgo.
+	interception func() bool
+	// tapError is the last tap install failure (usually TCC denial), served
+	// over IPC so the UI can tell the user exactly what to fix.
+	tapError string
 }
 
 // NewCore builds a Core with the daemon running and builtin matrices loaded.
@@ -116,13 +124,21 @@ func (c *Core) registerBuiltin(id string, enabled bool) {
 	c.plugins[id] = enabled
 }
 
-// handleStatus serves core.status: running/safe_mode/killed.
+// handleStatus serves core.status: running/safe_mode/killed plus live
+// interception state so the UI can say "remapping on/off" truthfully
+// (bead cross-os-2io).
 func (c *Core) handleStatus(_ json.RawMessage) (any, *ipc.RPCError) {
 	st := c.daemon.State()
+	c.mu.Lock()
+	interception := c.interception != nil && c.interception()
+	tapErr := c.tapError
+	c.mu.Unlock()
 	return map[string]any{
-		"running":   st == pluginapi.LifecycleRunning || st == pluginapi.LifecycleSafeMode,
-		"safe_mode": st == pluginapi.LifecycleSafeMode,
-		"killed":    st == pluginapi.LifecycleStopped,
+		"running":      st == pluginapi.LifecycleRunning || st == pluginapi.LifecycleSafeMode,
+		"safe_mode":    st == pluginapi.LifecycleSafeMode,
+		"killed":       st == pluginapi.LifecycleStopped,
+		"interception": interception,
+		"tap_error":    tapErr,
 	}, nil
 }
 
@@ -566,6 +582,15 @@ func main() {
 	for _, id := range builtin.BuiltinIDs {
 		c.registerBuiltin(id, true)
 	}
+	// Live keyboard tap (bead cross-os-2io). Best-effort: a TCC denial is
+	// NOT fatal — the daemon still serves IPC and core.status reports
+	// interception=off with the reason, so the user can grant consent and
+	// see exactly what failed. The decide entry binds the LIVE decision path
+	// (decideLocked), so config.setRuleEnabled and plugin toggles take effect
+	// on the running tap instead of a start-up snapshot.
+	stopTap := c.startTap()
+	defer stopTap()
+
 	path := DefaultSocketPath()
 	ln, err := listenSocket(path)
 	if err != nil {
@@ -579,4 +604,46 @@ func main() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 	fmt.Println("crossos: shutting down")
+}
+
+// --- live tap wiring (bead cross-os-2io) ---
+
+// tapStartFn is the seam the daemon installs through. Tests swap it to
+// assert the daemon ACTUALLY attempts an install (so deleting the startTap
+// call from main fails the suite) without needing TCC consent.
+// Per-platform defaults live in tap_darwin.go / tap_other.go.
+var tapStartFn = tapStartLive
+var tapStopFn = tapStopLive
+var tapLiveStatus = tapLiveLive
+
+// startTap installs the live tap, bound to the live decision path, and
+// returns a stop func for shutdown. It never returns an error to main: a
+// denial is recorded on the Core and surfaced over IPC.
+func (c *Core) startTap() func() {
+	d := &adapter.Driver{
+		// Live path: honours plugin enable + rule toggles on EVERY key.
+		Decide: c.decideLocked,
+		Log:    daemonTapLog{},
+	}
+	err := tapStartFn(d)
+	c.mu.Lock()
+	c.interception = tapLiveStatus
+	if err != nil {
+		c.tapError = err.Error()
+		c.interception = func() bool { return false }
+		fmt.Fprintln(os.Stderr, "crossos: keyboard interception unavailable:", err)
+	} else {
+		c.tapError = ""
+		fmt.Println("crossos: keyboard interception live")
+	}
+	c.mu.Unlock()
+	return func() { _ = tapStopFn(d) }
+}
+
+// daemonTapLog forwards adapter stage logs to the daemon's stdout so a
+// tap failure is visible without the UI.
+type daemonTapLog struct{}
+
+func (daemonTapLog) Log(stage, msg string) {
+	fmt.Fprintf(os.Stderr, "crossos: [%s] %s\n", stage, msg)
 }

@@ -9,15 +9,18 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"crossos/core/internal/adapter"
 	"crossos/core/pkg/event"
 	"crossos/core/pkg/intent"
 	"crossos/core/pkg/ipc"
+	"crossos/core/pkg/pluginapi"
 	builtin "crossos/core/rules"
 )
 
@@ -513,5 +516,100 @@ func TestConfigShortcutsRoundTrip(t *testing.T) {
 	}
 	if _, rerr := c.handleSetShortcuts(json.RawMessage(`{bad`)); rerr == nil || rerr.Code != ipc.ErrBadParams {
 		t.Fatalf("malformed must be ErrBadParams, got %v", rerr)
+	}
+}
+
+// --- live tap wiring (bead cross-os-2io) ---
+//
+// These are the tests that make the bead's central claim checkable: the
+// daemon MUST attempt a tap install, and the attempt must be non-fatal.
+
+func TestStartTapAttemptsInstall(t *testing.T) {
+	orig := tapStartFn
+	defer func() { tapStartFn = orig }()
+	var attempts int
+	tapStartFn = func(*adapter.Driver) error { attempts++; return nil }
+
+	c, err := NewCore(nil, nil)
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	stop := c.startTap()
+	defer stop()
+	if attempts != 1 {
+		t.Fatalf("tap install attempts=%d, want 1 (daemon must install the tap)", attempts)
+	}
+}
+
+func TestStartTapDenialIsNonFatalAndReported(t *testing.T) {
+	orig := tapStartFn
+	defer func() { tapStartFn = orig }()
+	tapStartFn = func(*adapter.Driver) error { return errors.New("input-monitoring consent missing") }
+
+	c, err := NewCore(nil, nil)
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	stop := c.startTap()
+	defer stop()
+
+	// The daemon must still be usable: status serves, interception is off,
+	// and the reason is surfaced so the UI can tell the user what to fix.
+	res, rerr := c.handleStatus(nil)
+	if rerr != nil {
+		t.Fatalf("status after denial: %v", rerr)
+	}
+	raw, _ := json.Marshal(res)
+	var st struct {
+		Running      bool   `json:"running"`
+		Interception bool   `json:"interception"`
+		TapError     string `json:"tap_error"`
+	}
+	if err := json.Unmarshal(raw, &st); err != nil {
+		t.Fatalf("status shape: %v", err)
+	}
+	if !st.Running {
+		t.Fatal("daemon must stay running after a tap denial")
+	}
+	if st.Interception {
+		t.Fatal("interception must report false when install failed")
+	}
+	if st.TapError == "" {
+		t.Fatal("tap denial reason must reach the UI (empty tap_error)")
+	}
+}
+
+func TestTapBindsLiveDecisionPath(t *testing.T) {
+	// The tap's decide entry must be the LIVE path, not a start-up snapshot:
+	// a rule disabled via config must change what the tap decides.
+	orig := tapStartFn
+	defer func() { tapStartFn = orig }()
+	var got *adapter.Driver
+	tapStartFn = func(d *adapter.Driver) error { got = d; return nil }
+
+	c, err := NewCoreWithSettings(builtin.All(), builtin.Grants(), "")
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, true)
+	}
+	stop := c.startTap()
+	defer stop()
+	if got == nil || got.Decide == nil {
+		t.Fatal("tap driver must carry a decide function")
+	}
+
+	ev := event.Event{Type: event.EventKeyDown, KeyCode: 0x43, Modifiers: 1}
+	ctx := event.FastContext{AppID: "com.apple.Finder", AppMode: event.AppModeNative}
+	if out := got.Decide(ev, ctx); out.Decision == pluginapi.DecisionPass {
+		t.Fatal("Ctrl+C in Finder must be claimed before the toggle")
+	}
+	// Disable the rule the way the UI would, then ask the SAME driver.
+	if _, rerr := c.handleSetRuleEnabled(json.RawMessage(`{"ruleId":"windows-keyboard.ctrl-c-copy","enabled":false}`)); rerr != nil {
+		t.Fatalf("disable rule: %v", rerr)
+	}
+	if out := got.Decide(ev, ctx); out.Decision != pluginapi.DecisionPass {
+		t.Fatal("disabled rule must pass through on the LIVE tap path (no stale snapshot)")
 	}
 }

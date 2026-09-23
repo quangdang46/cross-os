@@ -30,6 +30,7 @@ typedef int (*cxtap_cb_t)(uint16_t keycode, uint64_t flags, int keydown,
 typedef struct {
     CFMachPortRef tap;
     CFRunLoopSourceRef source;
+    CFRunLoopRef loop; // owning run loop, so stop() from another thread works
     cxtap_cb_t cb;
     void *ctx;
 } cxtap_t;
@@ -94,8 +95,26 @@ static cxtap_t *cxtap_create(cxtap_cb_t cb, void *ctx) {
     }
     CFRunLoopAddSource(CFRunLoopGetCurrent(), t->source,
                        kCFRunLoopCommonModes);
+    t->loop = CFRunLoopGetCurrent();
     CGEventTapEnable(t->tap, true);
     return t;
+}
+
+// cxtap_run pumps the tap's run loop until cxtap_stop. CGEventTap delivers
+// callbacks only while its run loop runs, so the Go owner pins this to a
+// dedicated locked OS thread and calls it there — the thread-local run loop
+// the source was attached to in cxtap_create.
+static void cxtap_run(cxtap_t *t) {
+    (void)t;
+    CFRunLoopRun();
+}
+
+// cxtap_stop wakes cxtap_run from any thread via the stored loop ref
+// (CFRunLoopGetCurrent would be the wrong loop off-thread).
+static void cxtap_stop(cxtap_t *t) {
+    if (t != NULL && t->loop != NULL) {
+        CFRunLoopStop(t->loop);
+    }
 }
 
 // cxtap_enable re-enables after kCGEventTapDisabledByTimeout

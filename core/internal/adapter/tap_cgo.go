@@ -27,6 +27,10 @@ import "C"
 
 import (
 	"errors"
+	"runtime"
+	"sync"
+	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"crossos/core/pkg/event"
@@ -40,13 +44,29 @@ var errTapDenied = errors.New("adapter: tap refused (input-monitoring consent mi
 const kCGControlFlag = uint64(1 << 18)
 
 // decideExport is the Go decide entry the C callback calls per key event.
-// Set at Install from the bound Driver; cleared at Uninstall. Single-tap
-// ownership: Install/Uninstall never race the callback.
-var decideExport *Driver
+// The C callback runs on the tap's run-loop thread while Install/Stop touch
+// it from other goroutines, so every access is under decideExportMu.
+var (
+	decideExport   *Driver
+	decideExportMu sync.RWMutex
+)
+
+func setDecideExport(d *Driver) {
+	decideExportMu.Lock()
+	decideExport = d
+	decideExportMu.Unlock()
+}
+
+func getDecideExport() *Driver {
+	decideExportMu.RLock()
+	defer decideExportMu.RUnlock()
+	return decideExport
+}
 
 //export crossosGoDecide
 func crossosGoDecide(keycode uint16, flags uint64, keyDown int32, ctx unsafe.Pointer) int32 {
-	if decideExport == nil {
+	d := getDecideExport()
+	if d == nil || d.Decide == nil {
 		return 0 // inert pass-through pre-init
 	}
 	typ := event.EventKeyUp
@@ -57,7 +77,7 @@ func crossosGoDecide(keycode uint16, flags uint64, keyDown int32, ctx unsafe.Poi
 			mods = 1 // modCtrl bit (matches builtin rules port)
 		}
 	}
-	out := decideExport.Decide(event.Event{
+	out := d.Decide(event.Event{
 		Type:      typ,
 		Source:    event.SourceKeyboard,
 		KeyCode:   uint32(keycode),
@@ -70,32 +90,145 @@ func crossosGoDecide(keycode uint16, flags uint64, keyDown int32, ctx unsafe.Poi
 }
 
 // TapInstall creates the live tap (NULL → typed denial, dual-surfaced).
+// Prefer TapStart, which also owns the run loop; this raw form is what the
+// seam tests and non-loop callers use.
 func TapInstall(d *Driver) error {
-	decideExport = d
+	setDecideExport(d) // BEFORE create: the source can fire the moment it is enabled
 	tap := C.cxtap_create(nil, nil)
 	if tap == nil {
-		decideExport = nil
+		setDecideExport(nil)
 		return d.ReportError("tap", errTapDenied)
 	}
+	tapMu.Lock()
 	tapHandle = tap
+	tapMu.Unlock()
 	return nil
 }
 
-// TapUninstall destroys the live tap (nil-safe, idempotent).
+// TapUninstall destroys the live tap (nil-safe, idempotent). It does NOT
+// stop the run loop — TapStop owns that; Uninstall is the raw teardown both
+// TapStop and the tests use.
 func TapUninstall(d *Driver) error {
-	if tapHandle != nil {
-		C.cxtap_destroy(tapHandle)
-		tapHandle = nil
+	tapMu.Lock()
+	tap := tapHandle
+	tapHandle = nil
+	tapMu.Unlock()
+	if tap != nil {
+		C.cxtap_destroy(tap)
 	}
+	decideExportMu.Lock()
 	decideExport = nil
+	decideExportMu.Unlock()
 	return nil
 }
+
+// --- run-loop ownership (bead cross-os-2io) ---
+//
+// CGEventTap delivery requires a live CFRunLoop: cxtap_create attaches the
+// Mach-port source to CFRunLoopGetCurrent(). Installing from a goroutine
+// that then blocks elsewhere (the daemon's signal wait) would never fire a
+// callback, so the tap gets its OWN locked OS thread that owns its run loop
+// for the process lifetime. TapStart/TapStop own that thread.
+
+var (
+	tapLoopStop chan struct{} // closed to stop the run loop
+	tapLoopDone chan struct{} // closed when the run loop goroutine exits
+	tapLive     atomic.Bool   // true between a successful install and stop
+	tapLoopMu   sync.Mutex    // guards tapLoopStop/tapLoopDone (TapStart/TapStop)
+	tapMu       sync.Mutex    // guards tapHandle across goroutines
+	tapStopOnce sync.Mutex    // serializes TapStop against a concurrent TapStart
+)
+
+// TapStart installs the tap on a dedicated locked OS thread and runs its
+// CFRunLoop there. It blocks only long enough to learn whether the install
+// succeeded (TCC consent) — the run loop itself keeps running in the
+// background and feeds crossosGoDecide.
+//
+// Denial is a typed error, never a panic: the caller (daemon) keeps serving
+// IPC and reports interception=off.
+func TapStart(d *Driver) error {
+	tapStopOnce.Lock()
+	defer tapStopOnce.Unlock()
+	tapLoopMu.Lock()
+	if tapLoopStop != nil {
+		tapLoopMu.Unlock()
+		return errors.New("adapter: tap already running")
+	}
+	install := make(chan error, 1)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	tapLoopStop, tapLoopDone = stop, done
+	tapLoopMu.Unlock()
+
+	go func() {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		defer close(done)
+
+		// Bind the decide entry BEFORE the source exists: cxtap_create
+		// enables the tap, so a callback can fire the moment it returns.
+		setDecideExport(d)
+		tap := C.cxtap_create(nil, nil)
+		if tap == nil {
+			setDecideExport(nil)
+			install <- d.ReportError("tap", errTapDenied)
+			return
+		}
+		tapMu.Lock()
+		tapHandle = tap
+		tapMu.Unlock()
+		install <- nil
+		tapLive.Store(true)
+
+		// Stop arrives on another goroutine; wake the run loop through the
+		// stored loop ref (CFRunLoopGetCurrent would be the wrong loop
+		// off-thread). The local `tap` avoids racing the global handle.
+		go func() {
+			<-stop
+			C.cxtap_stop(tap)
+		}()
+
+		C.cxtap_run(tap) // blocks until cxtap_stop
+		tapLive.Store(false)
+	}()
+
+	select {
+	case err := <-install:
+		return err
+	case <-time.After(2 * time.Second):
+		return errors.New("adapter: tap install timed out")
+	}
+}
+
+// TapStop stops the run loop and destroys the tap. Safe to call when no
+// tap is running (idempotent no-op) so shutdown paths need no guard.
+func TapStop(d *Driver) error {
+	tapStopOnce.Lock()
+	defer tapStopOnce.Unlock()
+	tapLoopMu.Lock()
+	stop, done := tapLoopStop, tapLoopDone
+	tapLoopStop, tapLoopDone = nil, nil
+	tapLoopMu.Unlock()
+	if stop == nil {
+		return nil
+	}
+	close(stop)
+	<-done
+	return TapUninstall(d)
+}
+
+// TapLive reports whether a tap is currently installed and running — the
+// daemon serves this over IPC so the UI can show interception on/off.
+func TapLive() bool { return tapLive.Load() }
 
 // TapReenable re-enables after kCGEventTapDisabledByTimeout (Go Recovery
 // loop owns the backoff + escalation — spike A recovery.go).
 func TapReenable() {
-	if tapHandle != nil {
-		C.cxtap_enable(tapHandle)
+	tapMu.Lock()
+	tap := tapHandle
+	tapMu.Unlock()
+	if tap != nil {
+		C.cxtap_enable(tap)
 	}
 }
 
@@ -105,5 +238,7 @@ func TapPostF9() {
 	C.cxpost_f9()
 }
 
-// tapHandle is the installed tap record, or NULL.
+// tapHandle is the installed tap record, or NULL. Guarded by tapMu: it is
+// written on the tap thread at install and read by TapStop/TapReenable on
+// other goroutines.
 var tapHandle *C.cxtap_t
