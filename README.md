@@ -57,6 +57,26 @@ crossos/
 └── tmp/research/    # read-only clones of reference OSS repos (gitignored, not committed)
 ```
 
+## Run it
+
+```bash
+./scripts/run.sh
+```
+
+That builds the daemon, starts it if one is not already serving, and opens
+the shell. It is safe to re-run: a second daemon never steals the socket from
+a running one. `--no-open` runs headless, `--rebuild-frontend` forces the
+frontend rebuild.
+
+**First run will say keyboard remapping is OFF.** That is macOS input
+monitoring, not a bug:
+
+> System Settings → Privacy & Security → Input Monitoring → add CrossOS →
+> enable → restart CrossOS
+
+Everything else — the window, settings pages, plugin trials, config — talks to
+the live daemon immediately.
+
 ## Safety principles (P0, on par with the input engine)
 
 - Intercept events only → disabling removes all effects; never patch Finder,

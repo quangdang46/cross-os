@@ -561,6 +561,10 @@ func listenSocket(path string) (net.Listener, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
+	if socketAlive(path) {
+		return nil, fmt.Errorf("another crossos daemon is already serving on %s — stop it first (scripts/run.sh reuses a running one)", path)
+	}
+	// Stale path only (a crashed daemon left the file behind): safe to rebind.
 	_ = os.Remove(path)
 	return net.Listen("unix", path)
 }
@@ -760,4 +764,24 @@ func (c *Core) watchFocusedApp(stop <-chan struct{}, cache *appCache) {
 			})
 		}
 	}
+}
+
+// socketAlive reports whether a live daemon already answers on path. Used to
+// refuse stealing the socket from a running instance (bead cross-os-jn1):
+// unlinking a live daemon's socket and binding our own orphans the first one,
+// and when IT exits, Go's default unlink-on-close deletes a path that now
+// belongs to the second — leaving a running but deaf daemon forever.
+func socketAlive(path string) bool {
+	conn, err := net.DialTimeout("unix", path, 300*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(500 * time.Millisecond))
+	if _, err := conn.Write([]byte(`{"jsonrpc":"2.0","method":"core.status","id":1}` + "\n")); err != nil {
+		return false
+	}
+	buf := make([]byte, 512)
+	n, err := conn.Read(buf)
+	return err == nil && n > 0
 }

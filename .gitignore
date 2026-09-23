@@ -39,3 +39,4 @@ app/build/linux/
 app/build/windows/info.json
 app/build/windows/nsis/
 app/build/windows/wails.exe.manifest
+.crossos/

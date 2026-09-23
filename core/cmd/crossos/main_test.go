@@ -788,3 +788,46 @@ func TestMacKeycodesDriveRules(t *testing.T) {
 		t.Fatalf("developer chord with a non-IDE focused app: verdict=%d, want 0 (app-scoped rule must not fire)", got)
 	}
 }
+
+// TestListenSocketRefusesLiveDaemon pins the anti-theft guard (bead
+// cross-os-jn1). A second daemon must fail loudly rather than unlink a
+// running instance's socket: that orphans the first, and when it exits Go
+// unlinks a path the second now owns — leaving a running but deaf daemon.
+func TestListenSocketRefusesLiveDaemon(t *testing.T) {
+	// Unix socket paths are capped near 104 bytes, so t.TempDir() is too long
+	// here; use a short path under TMPDIR like the other socket tests.
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("cx-steal-%d.sock", os.Getpid()))
+	_ = os.Remove(path)
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	// Serve core.status for every connection: the guard probes more than once
+	// (once to detect the live daemon, once to confirm it survived).
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			buf := make([]byte, 512)
+			if n, err := conn.Read(buf); err == nil && n > 0 {
+				conn.Write([]byte(`{"jsonrpc":"2.0","result":{"running":true},"id":1}` + "\n"))
+			}
+			conn.Close()
+		}
+	}()
+
+	if _, err := listenSocket(path); err == nil {
+		t.Fatalf("listenSocket stole a live daemon's socket at %s", path)
+	}
+	// The original listener still owns the path.
+	if !socketAlive(path) {
+		t.Fatal("live daemon stopped answering after a second instance tried to start")
+	}
+	ln.Close()
+	// Once it is gone the path is stale, and rebinding is correct.
+	if _, err := listenSocket(path); err != nil {
+		t.Fatalf("rebind over a stale socket should succeed: %v", err)
+	}
+}
