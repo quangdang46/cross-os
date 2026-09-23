@@ -27,6 +27,7 @@ import "C"
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -34,6 +35,7 @@ import (
 	"unsafe"
 
 	"crossos/core/pkg/event"
+	"crossos/core/pkg/intent"
 	"crossos/core/pkg/pluginapi"
 )
 
@@ -132,15 +134,12 @@ func crossosGoDecide(keycode uint16, flags uint64, keyDown int32, ctx unsafe.Poi
 			// Nothing can execute: never eat the key.
 			return 0
 		}
-		if err := d.Dispatch(*out.Request); err != nil {
-			// Action failed (permission denied, no adapter, ...): pass the
-			// original through so the OS still sees it, and log the reason.
-			if d.Log != nil {
-				d.Log.Log("action", "dispatch failed, passing key through: "+err.Error())
-			}
-			return 0
-		}
-		return 1 // action done — suppress the original
+		// Hand the action to the worker and return NOW. The capability
+		// implementations do synchronous AX work, and this callback has a
+		// sub-millisecond budget: running them inline is what makes macOS
+		// post kCGEventTapDisabledByTimeout and switch the tap off.
+		enqueueDispatch(d, *out.Request)
+		return 1 // the action is committed to the worker; suppress the original
 	}
 	// CONSUME with no request is a declared absorb: swallow with no action
 	// to run. That is the rule's stated behavior, not a failure.
@@ -167,13 +166,16 @@ func TapInstall(d *Driver) error {
 // stop the run loop — TapStop owns that; Uninstall is the raw teardown both
 // TapStop and the tests use.
 func TapUninstall(d *Driver) error {
+	// Destroy under the lock: every other user of the handle (the recovery
+	// goroutine, TapReenable) holds it across its C call, so holding it here
+	// is what makes the free safe.
 	tapMu.Lock()
 	tap := tapHandle
 	tapHandle = nil
-	tapMu.Unlock()
 	if tap != nil {
 		C.cxtap_destroy(tap)
 	}
+	tapMu.Unlock()
 	decideExportMu.Lock()
 	decideExport = nil
 	decideExportMu.Unlock()
@@ -252,11 +254,33 @@ func TapStart(d *Driver) error {
 
 	select {
 	case err := <-install:
+		if err != nil {
+			// Release the lifecycle slots: a failed install (TCC denial) must
+			// not make every later start report "tap already running" while
+			// nothing is running. The goroutine has already returned, so the
+			// channels are safe to clear.
+			tapLoopMu.Lock()
+			tapLoopStop, tapLoopDone = nil, nil
+			tapLoopMu.Unlock()
+		}
 		return err
-	case <-time.After(2 * time.Second):
-		return errors.New("adapter: tap install timed out")
+	case <-time.After(installTimeout):
+		// (6) Do not report failure while the install may still succeed in
+		// the background — saying "failed" and then having a live tap come
+		// up is the worst of both. Report it as still starting; the caller
+		// checks TapLive for the truth.
+		return errors.New("adapter: tap install still in progress (no response yet)")
 	}
 }
+
+// installTimeout bounds how long TapStart waits for the install reply. It is
+// generous because exceeding it is not a failure, just "still starting".
+const installTimeout = 5 * time.Second
+
+// stopTimeout bounds TapStop's wait for the run loop to exit. A wedged
+// callback must not hang shutdown: a daemon that cannot exit leaves a live
+// tap behind a socket nobody is serving, which is worse than a slow stop.
+const stopTimeout = 3 * time.Second
 
 // TapStop stops the run loop and destroys the tap. Safe to call when no
 // tap is running (idempotent no-op) so shutdown paths need no guard.
@@ -271,7 +295,15 @@ func TapStop(d *Driver) error {
 		return nil
 	}
 	close(stop)
-	<-done
+	select {
+	case <-done:
+	case <-time.After(stopTimeout):
+		// The run loop did not wind down in time. Tear the tap down anyway:
+		// an un-destroyed tap outlives the process, and the socket is
+		// about to close with nothing serving it.
+		_ = TapUninstall(d)
+		return fmt.Errorf("adapter: tap run loop did not stop within %s", stopTimeout)
+	}
 	return TapUninstall(d)
 }
 
@@ -283,10 +315,9 @@ func TapLive() bool { return tapLive.Load() }
 // loop owns the backoff + escalation — spike A recovery.go).
 func TapReenable() {
 	tapMu.Lock()
-	tap := tapHandle
-	tapMu.Unlock()
-	if tap != nil {
-		C.cxtap_enable(tap)
+	defer tapMu.Unlock() // held across the C call: destroy takes the same lock
+	if tapHandle != nil {
+		C.cxtap_enable(tapHandle)
 	}
 }
 
@@ -397,3 +428,53 @@ func resetTapRecoveryForTest() {
 	tapHealthState.reenables = 0
 	tapHealthState.Unlock()
 }
+
+// --- async dispatch ---
+//
+// The capability implementations do synchronous AX work (tens of ms per
+// call). The tap callback has a sub-millisecond budget, so dispatch runs on
+// a worker and the callback returns immediately.
+//
+// Trade this makes explicit: the callback can no longer wait for the action
+// to SUCCEED before suppressing, because waiting is what blows the budget.
+// Instead a failed dispatch is logged loudly and surfaced as a health
+// signal, rather than silently swallowed. The alternative — eating the key
+// only on success — is only achievable by blocking the tap, which is the
+// self-inflicted timeout this design exists to avoid.
+
+const dispatchQueue = 64
+
+var dispatchJobs = make(chan dispatchJob, dispatchQueue)
+
+type dispatchJob struct {
+	driver *Driver
+	req    intent.Request
+}
+
+// dispatchFailures counts actions that never ran, for the health signal.
+var dispatchFailures atomic.Int64
+
+// startDispatcher runs the single worker. Started lazily by enqueue.
+var dispatcherOnce sync.Once
+
+func enqueueDispatch(d *Driver, req intent.Request) {
+	dispatcherOnce.Do(func() { go dispatchWorker() })
+	select {
+	case dispatchJobs <- dispatchJob{driver: d, req: req}:
+	default:
+		// Queue full means the actions are slower than the keys arriving.
+		// Dropping keeps the callback fast; count it so it is not silent.
+		dispatchFailures.Add(1)
+	}
+}
+
+func dispatchWorker() {
+	for job := range dispatchJobs {
+		if err := job.driver.Dispatch(job.req); err != nil && job.driver.Log != nil {
+			job.driver.Log.Log("action", "dispatch failed after suppression: "+err.Error())
+		}
+	}
+}
+
+// DispatchFailures reports actions that were dropped or failed to run.
+func DispatchFailures() int64 { return dispatchFailures.Load() }

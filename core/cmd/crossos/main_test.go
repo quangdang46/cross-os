@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"crossos/core/internal/adapter"
 	"crossos/core/pkg/event"
@@ -246,12 +247,13 @@ func TestKeyEventDecision(t *testing.T) {
 	if got["decision"] != "PASS" {
 		t.Fatalf("f8: %+v, want PASS", got)
 	}
-	// Ctrl+Space → CONSUME launcher.open. The keyEvent diagnostic speaks the
-	// INTERNAL convention (Windows VK 0x20), not the macOS kVK_Space the tap
-	// receives — the tap translates at its own boundary (cross-os-uok).
+	// Ctrl+Space is reserved for the launcher but unclaimed while no palette
+	// exists, so it must PASS rather than be swallowed. The keyEvent
+	// diagnostic speaks the INTERNAL convention (Windows VK 0x20); the tap
+	// translates macOS kVK_Space at its own boundary (cross-os-uok).
 	got = key(`{"keyCode":32,"modifiers":1,"appId":"com.apple.Finder","appMode":"native"}`)
-	if got["decision"] != "CONSUME" || got["winner"] != "launcher.ctrl-space-launcher" {
-		t.Fatalf("ctrl+space: %+v, want CONSUME/launcher rule", got)
+	if got["decision"] != "PASS" {
+		t.Fatalf("ctrl+space: %+v, want PASS (no palette to honour it yet)", got)
 	}
 	// Terminal Ctrl+C → PASS (SIGINT passthrough, copy-only is native-only).
 	got = key(`{"keyCode":67,"modifiers":1,"appId":"com.apple.Terminal","appMode":"terminal"}`)
@@ -657,7 +659,12 @@ func TestDispatchRoutesWindowAndFailsClosed(t *testing.T) {
 // crossosGoDecide must return 0 (let the key through) rather than 1.
 // A future change that makes windowDispatch swallow denials and return nil
 // would flip this to 1 and fail here.
-func TestRealDispatchFailurePassesKeyThrough(t *testing.T) {
+func TestRealDispatchCommitsAndDoesNotBlock(t *testing.T) {
+	// The tap commits the action to the worker and returns immediately, so a
+	// capability that cannot run yet (no AX bridge on this path) must NOT
+	// change the verdict: the key is suppressed and the failure is surfaced
+	// through the daemon log, which the UI reads. Blocking here to learn the
+	// outcome is what makes macOS disable the tap.
 	c, err := NewCoreWithSettings(builtin.All(), builtin.Grants(), "")
 	if err != nil {
 		t.Fatalf("NewCore: %v", err)
@@ -665,36 +672,26 @@ func TestRealDispatchFailurePassesKeyThrough(t *testing.T) {
 	for _, id := range builtin.BuiltinIDs {
 		c.registerBuiltin(id, true)
 	}
-	d := &adapter.Driver{Decide: c.decideLocked, Dispatch: c.dispatch, Log: daemonTapLog{}}
+	focus := &appCache{}
+	focus.set(event.FastContext{AppID: "com.apple.Finder", AppMode: event.AppModeNative})
+	d := &adapter.Driver{
+		Decide:   c.decideLocked,
+		Dispatch: c.dispatch,
+		Context:  focus.get,
+		Log:      daemonTapLog{},
+	}
 	adapter.BindDecideForTest(d)
 	defer adapter.BindDecideForTest(nil)
 
-	fastCtx := event.FastContext{AppID: "com.apple.Finder", AppMode: event.AppModeNative}
-	chords := []event.Event{
-		{Type: event.EventKeyDown, KeyCode: 0x43, Modifiers: 1},      // Ctrl+C
-		{Type: event.EventKeyDown, KeyCode: 0x25, Modifiers: 1 << 3}, // Win+Left
-	}
-
-	// Negative control FIRST: with a dispatcher that succeeds, the same
-	// chords must be SUPPRESSED. This proves the rules really match, so the
-	// pass-through assertions below are about dispatch failure rather than
-	// a rule that never fired — a test that passes for the wrong reason is
-	// worse than no test.
-	ok := &adapter.Driver{Decide: c.decideLocked, Dispatch: func(intent.Request) error { return nil }, Log: daemonTapLog{}}
-	adapter.BindDecideForTest(ok)
-	for _, ev := range chords {
-		if got := adapter.DecideForTest(ev, fastCtx); got != 1 {
-			t.Fatalf("negative control key %#x: verdict=%d, want 1 (rule must match when dispatch succeeds)", ev.KeyCode, got)
+	done := make(chan int32, 1)
+	go func() { done <- adapter.DecideForMacTest(0x08, 1, event.FastContext{}) }()
+	select {
+	case got := <-done:
+		if got != 1 {
+			t.Fatalf("verdict=%d, want 1 (action committed, key suppressed)", got)
 		}
-	}
-
-	// Now the REAL dispatcher: the darwin seam cannot execute yet, so both
-	// chords must PASS THROUGH instead of being swallowed.
-	adapter.BindDecideForTest(d)
-	for _, ev := range chords {
-		if got := adapter.DecideForTest(ev, fastCtx); got != 0 {
-			t.Fatalf("key %#x: verdict=%d, want 0 (adapter cannot execute yet — pass through)", ev.KeyCode, got)
-		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("callback blocked on dispatch — this is the timeout-disable cause")
 	}
 }
 
@@ -757,7 +754,6 @@ func TestMacKeycodesDriveRules(t *testing.T) {
 		{"Alt+F4", 0x76, 1 << 2, "windows-keyboard.alt-f4-close-window"},
 		{"Ctrl+Shift+C", 0x08, 1<<0 | 1<<1, "developer.ctrl-shift-c-copypath"},
 		{"Ctrl+Shift+P", 0x23, 1<<0 | 1<<1, "developer.ctrl-shift-p-editor"},
-		{"Ctrl+Space", 0x31, 1 << 0, "launcher.ctrl-space-launcher"},
 	}
 	// The developer rules are scoped to IDE apps, so those chords must be
 	// evaluated with an IDE in focus; a Finder context legitimately misses.

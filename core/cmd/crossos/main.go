@@ -73,6 +73,13 @@ type Core struct {
 	// tapError is the last tap install failure (usually TCC denial), served
 	// over IPC so the UI can tell the user exactly what to fix.
 	tapError string
+	// killed latches on PANIC STOP: Decide passes everything through, so no
+	// rule can consume or replace a key while the kill switch is active.
+	killed bool
+	// tapStopped records that the tap was torn down by the kill switch.
+	tapStopped bool
+	// stopTapFn tears down the tap installed by startTap.
+	stopTapFn func()
 }
 
 // NewCore builds a Core with the daemon running and builtin matrices loaded.
@@ -141,7 +148,7 @@ func (c *Core) handleStatus(_ json.RawMessage) (any, *ipc.RPCError) {
 	return map[string]any{
 		"running":      st == pluginapi.LifecycleRunning || st == pluginapi.LifecycleSafeMode,
 		"safe_mode":    st == pluginapi.LifecycleSafeMode,
-		"killed":       st == pluginapi.LifecycleStopped,
+		"killed":       st == pluginapi.LifecycleStopped || c.killedState(),
 		"interception": interception,
 		"tap_error":    tapErr,
 		// Served so the shell's About block shows the real version instead of
@@ -201,7 +208,10 @@ func (c *Core) decideLocked(ev event.Event, ctx event.FastContext) event.Outcome
 			all = append(all, r)
 		}
 	}
-	rt := event.Compile(all, intent.DefaultRegistry(), builtin.Grants(), nil)
+	c.mu.Lock()
+	killed := c.killed
+	c.mu.Unlock()
+	rt := event.Compile(all, intent.DefaultRegistry(), builtin.Grants(), func() bool { return killed })
 	out := rt.Decide(ev, ctx)
 	c.rec.OnOutcome(out)
 	return out
@@ -439,8 +449,22 @@ func (c *Core) handleApplyUpdate(raw json.RawMessage) (any, *ipc.RPCError) {
 // via Re-enable). Result names what stopped — never a silent kill.
 func (c *Core) handlePanicStop(_ json.RawMessage) (any, *ipc.RPCError) {
 	res := safety.PanicStop()
+	// Actually stop. safety.PanicStop describes the outcome; it cannot
+	// perform it, and reporting success while the tap keeps swallowing keys
+	// is the worst possible lie here. The kill flag makes Decide pass every
+	// key through, and the tap is torn down so nothing is left intercepting.
+	c.mu.Lock()
+	c.killed = true
+	stop := c.stopTapFn
+	c.mu.Unlock()
+	if stop != nil {
+		stop()
+		c.mu.Lock()
+		c.tapStopped = true
+		c.mu.Unlock()
+	}
 	return map[string]any{
-		"interceptionDisabled": res.InterceptionDisabled,
+		"interceptionDisabled": true,
 		"pluginActionsStopped": res.PluginActionsStopped,
 		"buffersFlushed":       res.BuffersFlushed,
 		"loginItemKept":        res.LoginItemKept,
@@ -649,8 +673,10 @@ func (c *Core) startTap() func() {
 	// fresh by a watcher off the hot path.
 	cache := &appCache{}
 	cache.set(event.FastContext{AppMode: event.AppModeNative})
+	// The watcher lives until the daemon stops. A defer here would fire when
+	// startTap RETURNS — microseconds in — and freeze the cache at its seed
+	// value, which makes every app-scoped rule permanently unreachable.
 	watchStop := make(chan struct{})
-	defer close(watchStop)
 	go c.watchFocusedApp(watchStop, cache)
 
 	d := &adapter.Driver{
@@ -672,7 +698,17 @@ func (c *Core) startTap() func() {
 		fmt.Println("crossos: keyboard interception live")
 	}
 	c.mu.Unlock()
-	return func() { _ = tapStopFn(d) }
+
+	stop := func() {
+		// Stop the watcher BEFORE the tap: no more key events can arrive
+		// once the tap is gone, so there is nothing left to keep current.
+		close(watchStop)
+		_ = tapStopFn(d)
+	}
+	c.mu.Lock()
+	c.stopTapFn = stop
+	c.mu.Unlock()
+	return stop
 }
 
 // daemonTapLog forwards adapter stage logs to the daemon's stdout so a
@@ -770,15 +806,36 @@ func (c *Core) watchFocusedApp(stop <-chan struct{}, cache *appCache) {
 		case <-stop:
 			return
 		case <-tick.C:
+		}
+		// The AX focused-window call can block indefinitely when the target
+		// app is unresponsive or accessibility consent is missing, so it
+		// runs in its own goroutine with a budget. Without this the watcher
+		// would start a new blocked call every tick and leak a goroutine
+		// each time — a real cost on a machine without consent.
+		type result struct {
+			fw  adapter.FocusedWindow
+			err error
+		}
+		done := make(chan result, 1)
+		go func() {
 			fw, err := wq.Focused()
-			if err != nil {
+			done <- result{fw, err}
+		}()
+		select {
+		case <-stop:
+			return // abandon the query; it writes to a buffered channel
+		case r := <-done:
+			if r.err != nil {
 				continue // keep the last known app rather than blanking it
 			}
 			cache.set(event.FastContext{
-				AppID:    fw.BundleID,
+				AppID:    r.fw.BundleID,
 				AppMode:  event.AppModeNative,
-				WindowID: fw.Title,
+				WindowID: r.fw.Title,
 			})
+		case <-time.After(2 * time.Second):
+			// One query is still in flight. Skip this tick rather than
+			// stacking another behind it.
 		}
 	}
 }
@@ -801,4 +858,12 @@ func socketAlive(path string) bool {
 	buf := make([]byte, 512)
 	n, err := conn.Read(buf)
 	return err == nil && n > 0
+}
+
+// killedState reports whether PANIC STOP is latched. Read under the same
+// lock the handlers use so status and the decision path agree.
+func (c *Core) killedState() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.killed
 }

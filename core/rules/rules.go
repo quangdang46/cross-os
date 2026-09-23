@@ -125,12 +125,12 @@ func developerRules() []event.CompiledRule {
 
 // launcher HotkeyRule() port (1 rule): Ctrl+Space CONSUME.
 func launcherRules() []event.CompiledRule {
-	return []event.CompiledRule{
-		mkRule(vkSpace, modCtrl, nativeOnly, nil,
-			"launcher.ctrl-space-launcher", "launcher",
-			rule.PriorityGlobal, 1, rule.ScopeGlobal,
-			intent.Intent{ID: "launcher.open", Version: 1, Source: intent.SourceKeyboard}, false),
-	}
+	// Ctrl+Space is RESERVED for the launcher palette but deliberately not
+	// compiled: the palette does not exist yet, and a rule that consumes the
+	// key without a handler behind it is exactly the "swallowed key that
+	// does nothing" failure the tap path is built to avoid. The binding is
+	// re-added when a dispatcher can honour launcher.open.
+	return nil
 }
 
 // BuiltinIDs lists the builtin plugin IDs in registration order (matches
