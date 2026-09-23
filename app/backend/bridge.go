@@ -25,6 +25,15 @@ type Status struct {
 	SafeMode bool
 	Killed   bool
 	Plugins  []PluginState
+	// Interception reports whether the live keyboard tap is installed. The
+	// daemon owns the truth; the shell only displays it.
+	Interception bool
+	// TapError is the install failure (usually missing input-monitoring
+	// consent), shown so the user knows which permission to grant.
+	TapError string
+	// Version is the running daemon's version, so the About block cannot
+	// drift from a hardcoded literal.
+	Version string
 }
 
 // UILog is the shell's UI-visible log sink: bridge/IPC failures land here
@@ -70,6 +79,12 @@ type Core interface {
 	// interception + plugin actions, keeps the login item. Result names
 	// what stopped — never a silent kill.
 	PanicStop() (map[string]any, error)
+	// Interception reports whether the live keyboard tap is installed.
+	Interception() bool
+	// TapError is the last tap install failure, or "" when healthy.
+	TapError() string
+	// Version is the running daemon's version.
+	Version() string
 	// BeginTrial starts DISABLED → TRIAL for one plugin (safety.beginTrial).
 	// Idempotent: repeat calls return the in-flight trial.
 	BeginTrial(pluginID string) (string, error)
@@ -104,10 +119,13 @@ func (a *App) UILogs() []string { return a.log.Lines() }
 // GetStatus serves the Dashboard page.
 func (a *App) GetStatus() *Status {
 	return &Status{
-		Running:  a.core.IsRunning(),
-		SafeMode: a.core.InSafeMode(),
-		Killed:   a.core.IsKilled(),
-		Plugins:  a.core.Plugins(),
+		Running:      a.core.IsRunning(),
+		SafeMode:     a.core.InSafeMode(),
+		Killed:       a.core.IsKilled(),
+		Plugins:      a.core.Plugins(),
+		Interception: a.core.Interception(),
+		TapError:     a.core.TapError(),
+		Version:      a.core.Version(),
 	}
 }
 

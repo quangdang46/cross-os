@@ -76,17 +76,22 @@ func TestPluginRemoval(t *testing.T) {
 }
 
 type stubCore struct {
-	running  bool
-	safeMode bool
-	killed   bool
-	plugins  []PluginState
-	logs     []string
-	failSet  error
+	running   bool
+	safeMode  bool
+	killed    bool
+	intercept bool
+	tapErr    string
+	plugins   []PluginState
+	logs      []string
+	failSet   error
 }
 
 func (s *stubCore) IsRunning() bool        { return s.running }
 func (s *stubCore) InSafeMode() bool       { return s.safeMode }
 func (s *stubCore) IsKilled() bool         { return s.killed }
+func (s *stubCore) Interception() bool     { return s.intercept }
+func (s *stubCore) TapError() string       { return s.tapErr }
+func (s *stubCore) Version() string        { return "v0.1.0" }
 func (s *stubCore) Plugins() []PluginState { return s.plugins }
 func (s *stubCore) EventLogs() []string    { return s.logs }
 func (s *stubCore) Reset() []string {

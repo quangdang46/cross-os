@@ -105,34 +105,61 @@ func (c *IPCCore) call(method string, params any) (json.RawMessage, error) {
 	return resp.Result, nil
 }
 
-// IsRunning implements Core via core.status.
-func (c *IPCCore) IsRunning() bool {
+// statusPayload is one core.status response, decoded once and shared by the
+// accessors below (they all read the same object).
+type statusPayload struct {
+	Running      bool   `json:"running"`
+	SafeMode     bool   `json:"safe_mode"`
+	Killed       bool   `json:"killed"`
+	Interception bool   `json:"interception"`
+	TapError     string `json:"tap_error"`
+	Version      string `json:"version"`
+}
+
+func (c *IPCCore) status() (statusPayload, error) {
+	var st statusPayload
 	raw, err := c.call("core.status", nil)
 	if err != nil {
-		return false
+		return st, err
 	}
-	var st struct {
-		Running bool `json:"running"`
+	err = json.Unmarshal(raw, &st)
+	return st, err
+}
+
+// IsRunning implements Core via core.status.
+func (c *IPCCore) IsRunning() bool {
+	st, err := c.status()
+	return err == nil && st.Running
+}
+
+// Interception implements Core via core.status.
+func (c *IPCCore) Interception() bool {
+	st, err := c.status()
+	return err == nil && st.Interception
+}
+
+// TapError implements Core via core.status.
+func (c *IPCCore) TapError() string {
+	st, err := c.status()
+	if err != nil {
+		return ""
 	}
-	if err := json.Unmarshal(raw, &st); err != nil {
-		return false
+	return st.TapError
+}
+
+// Version implements Core via core.status.
+func (c *IPCCore) Version() string {
+	st, err := c.status()
+	if err != nil {
+		return ""
 	}
-	return st.Running
+	return st.Version
 }
 
 // InSafeMode implements Core via core.status.
 func (c *IPCCore) InSafeMode() bool {
-	raw, err := c.call("core.status", nil)
-	if err != nil {
-		return false
-	}
-	var st struct {
-		SafeMode bool `json:"safe_mode"`
-	}
-	if err := json.Unmarshal(raw, &st); err != nil {
-		return false
-	}
-	return st.SafeMode
+	st, err := c.status()
+	return err == nil && st.SafeMode
 }
 
 // IsKilled implements Core via core.status.

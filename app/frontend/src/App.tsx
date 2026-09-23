@@ -85,7 +85,9 @@ export default function App() {
         <p className="status">
           {status ? (status.Running ? 'Running' : 'Daemon not running') : 'Connecting…'}
           {status?.SafeMode ? ' · Safe mode' : ''}
+          {status && !status.Interception ? ' · Remapping off' : ''}
         </p>
+        {status?.TapError ? <p className="status is-error">{status.TapError}</p> : null}
       </header>
 
       <nav className="sections">
@@ -109,6 +111,7 @@ export default function App() {
                 key={ctl.id}
                 control={ctl}
                 status={status}
+                logs={logs}
                 onNote={setNote}
                 onDone={refresh}
               />
@@ -145,7 +148,9 @@ export default function App() {
       {/* About block: version plus the newest activity line, mirroring
           rectangle's version label and check-for-updates row. */}
       <footer className="about">
-        <span className="version">CrossOS 0.1.0</span>
+        {/* Version is served by the daemon (core.CurrentVersion); the
+            fallback only shows before the first status lands. */}
+        <span className="version">CrossOS {status?.Version || '—'}</span>
         {lastLog ? <span className="activity">{lastLog}</span> : null}
       </footer>
     </div>
@@ -157,6 +162,7 @@ export default function App() {
 function ControlRow(props: {
   control: Control
   status: Status | null
+  logs: string[]
   onNote: (s: string) => void
   onDone: () => void
 }) {
@@ -179,6 +185,10 @@ function ControlRow(props: {
                 .then((steps) => onNote(`Reset plan: ${(steps ?? []).join(' → ')}`))
                 .catch((e) => onNote(String(e)))
             } else if (c.action === 'safety.confirmTrial') {
+              // TODO(ui-port): a prompt is a stand-in, not a designed picker.
+              // The real control arrives from the schema once the Safety page
+              // declares a trialList control; until then the field name is
+              // the honest minimum.
               const id = window.prompt('Plugin to confirm?', 'launcher')
               if (id) {
                 Service.ConfirmTrial(id, true, true)
@@ -187,6 +197,7 @@ function ControlRow(props: {
                   .catch((e) => onNote(String(e)))
               }
             } else if (c.action === 'safety.rollbackTrial') {
+              // TODO(ui-port): see the confirmTrial note above.
               const id = window.prompt('Plugin to roll back?', 'launcher')
               if (id) {
                 Service.RollbackTrial(id, 'user rollback')
@@ -227,13 +238,21 @@ function ControlRow(props: {
     )
   }
 
-  if (c.kind === 'checklist' || c.kind === 'traceList') {
+  if (c.kind === 'traceList') {
+    // Activity wants the actual log lines, not the data-source label.
     return (
       <div className="row">
         <span className="row-label">{c.label ?? c.id}</span>
-        <span className="control is-text">
-          {(c.items ?? []).join(' · ') || c.source || ''}
-        </span>
+        <span className="control is-text">{props.logs.join(' · ') || c.source || ''}</span>
+      </div>
+    )
+  }
+
+  if (c.kind === 'checklist') {
+    return (
+      <div className="row">
+        <span className="row-label">{c.label ?? c.id}</span>
+        <span className="control is-text">{(c.items ?? []).join(' · ') || c.source || ''}</span>
       </div>
     )
   }

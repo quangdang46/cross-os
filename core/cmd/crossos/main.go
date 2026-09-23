@@ -139,6 +139,9 @@ func (c *Core) handleStatus(_ json.RawMessage) (any, *ipc.RPCError) {
 		"killed":       st == pluginapi.LifecycleStopped,
 		"interception": interception,
 		"tap_error":    tapErr,
+		// Served so the shell's About block shows the real version instead of
+		// a literal that drifts at release time.
+		"version": CurrentVersion,
 	}, nil
 }
 
