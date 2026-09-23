@@ -648,6 +648,31 @@ func (c *Core) Serve(ln net.Listener) *ipc.Server {
 // socketLockFile holds the process-lifetime flock; deliberately never closed.
 var socketLockFile *os.File
 
+// lockHolder reads the pid the owning daemon recorded in the lock file.
+// Returns "" when nobody recorded one.
+func lockHolder(lockPath string) string {
+	raw, err := os.ReadFile(lockPath)
+	if err != nil {
+		return ""
+	}
+	pid := strings.TrimSpace(string(raw))
+	if pid == "" {
+		return ""
+	}
+	return " (pid " + pid + ")"
+}
+
+// lockHolderCmd renders the stop command for the recorded pid.
+func lockHolderCmd(holder, sockPath string) string {
+	if i := strings.Index(holder, "pid "); i >= 0 {
+		rest := holder[i+4:]
+		if j := strings.Index(rest, ")"); j >= 0 {
+			return rest[:j]
+		}
+	}
+	return "the leftover process holding " + sockPath + ".lock"
+}
+
 // listenSocket binds the Unix socket (0600 dir per ipc doc.go security note),
 // removing a stale socket file first.
 func listenSocket(path string) (net.Listener, error) {
@@ -664,9 +689,14 @@ func listenSocket(path string) (net.Listener, error) {
 		return nil, err
 	}
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		holder := lockHolder(lockPath)
 		lockFile.Close()
-		return nil, fmt.Errorf("another crossos daemon holds %s — stop it first (scripts/run.sh reuses a running one)", lockPath)
+		return nil, fmt.Errorf("another crossos daemon holds %s%s — it is not serving, so it is a leftover. Stop it with: kill %s",
+			lockPath, holder, lockHolderCmd(holder, lockPath))
 	}
+	// Record the owner so a later starter can name the process to stop
+	// instead of reporting an anonymous "already running".
+	fmt.Fprintf(lockFile, "%d\n", os.Getpid())
 	// The lock is intentionally leaked for the process lifetime: closing the
 	// fd would release it and let a second daemon in.
 	socketLockFile = lockFile

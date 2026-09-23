@@ -93,7 +93,15 @@ else
     daemon_serving && break
     sleep 0.25
   done
-  daemon_serving || die "daemon did not come up — see $BIN/daemon.log"
+  if ! daemon_serving; then
+    # A leftover daemon that holds the lock but lost its socket is the
+    # common cause; its own message names the pid. Surface it rather than
+    # leaving the user with "start it" on one side and "already running"
+    # on the other.
+    echo
+    tail -n 3 "$BIN/daemon.log" >&2 || true
+    die "daemon did not come up — see $BIN/daemon.log"
+  fi
 fi
 
 # --- what the user needs to know --------------------------------------------
