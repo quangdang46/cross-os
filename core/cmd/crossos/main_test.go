@@ -634,10 +634,17 @@ func TestDispatchRoutesWindowAndFailsClosed(t *testing.T) {
 		Intent:     intent.Intent{ID: "window.move", Version: 1, Source: intent.SourceKeyboard, Parameters: json.RawMessage(`{"zone":"left-half"}`)},
 		Capability: intent.CapabilityDescriptor{ID: "window.move", Version: "1"},
 	}
-	// The zone must resolve through the daemon's dispatcher vocabulary; the
-	// darwin seam denies (no AX bridge yet), which is the SAFE outcome.
+	// The zone must resolve through the daemon's dispatcher vocabulary. With
+	// no cached window the dispatch fails fast and honestly instead of
+	// running a blocking AX query on the worker.
 	if err := c.dispatch(req); err == nil {
 		t.Skip("AX bridge landed: window.move now dispatches for real")
+	}
+	if c.windowCache == nil {
+		// startTap not run: the dispatcher refuses rather than guessing a window.
+		if err := c.dispatch(req); err == nil {
+			t.Fatal("window action without a cached window must fail, not act on a guess")
+		}
 	}
 	// An unknown capability must fail closed rather than silently no-op.
 	bad := req
@@ -825,5 +832,46 @@ func TestListenSocketRefusesLiveDaemon(t *testing.T) {
 	// Once it is gone the path is stale, and rebinding is correct.
 	if _, err := listenSocket(path); err != nil {
 		t.Fatalf("rebind over a stale socket should succeed: %v", err)
+	}
+}
+
+// Two bugs an audit probe caught in the round-2 fixes: a stop func that
+// panicked on the second call (PANIC STOP stops the tap, then the deferred
+// stop runs again at shutdown), and key-UP firing the action a second time.
+func TestStopIsIdempotent(t *testing.T) {
+	orig := tapStartFn
+	origStop := tapStopFn
+	defer func() { tapStartFn, tapStopFn = orig, origStop }()
+	tapStartFn = func(*adapter.Driver) error { return nil }
+	tapStopFn = func(*adapter.Driver) error { return nil }
+
+	c, err := NewCore(nil, nil)
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	stop := c.startTap()
+	stop()
+	stop() // must not panic: this is the PANIC STOP + deferred stop path
+	stop()
+}
+
+func TestKeyUpNeverActs(t *testing.T) {
+	c, err := NewCoreWithSettings(builtin.All(), builtin.Grants(), "")
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, true)
+	}
+	ctx := event.FastContext{AppID: "com.apple.Finder", AppMode: event.AppModeNative}
+
+	down := c.decideLocked(event.Event{Type: event.EventKeyDown, KeyCode: 0x25, Modifiers: 1 << 3}, ctx)
+	if down.WinnerRule == "" {
+		t.Fatal("Win+Left keydown must claim a rule")
+	}
+	up := c.decideLocked(event.Event{Type: event.EventKeyUp, KeyCode: 0x25, Modifiers: 1 << 3}, ctx)
+	if up.WinnerRule != "" || up.Decision != pluginapi.DecisionPass {
+		t.Fatalf("keyup acted: winner=%q decision=%v — releasing the chord must not fire the action again",
+			up.WinnerRule, up.Decision)
 	}
 }

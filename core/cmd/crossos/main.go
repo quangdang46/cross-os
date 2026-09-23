@@ -80,6 +80,9 @@ type Core struct {
 	tapStopped bool
 	// stopTapFn tears down the tap installed by startTap.
 	stopTapFn func()
+	// windowCache is the watcher-maintained focused-window snapshot that
+	// window actions read, so no action ever runs a blocking AX query.
+	windowCache *appCache
 }
 
 // NewCore builds a Core with the daemon running and builtin matrices loaded.
@@ -194,6 +197,14 @@ func (c *Core) handlePluginSetEnabled(raw json.RawMessage) (any, *ipc.RPCError) 
 // beats caching here). Caller holds no lock; this takes mu to snapshot the
 // enable set.
 func (c *Core) decideLocked(ev event.Event, ctx event.FastContext) event.Outcome {
+	// Only a key-down can be acted on. Acting on key-up would fire the
+	// same action a second time when the chord is released — pressing
+	// Win+Left would snap the window, then snap it again on release.
+	if ev.Type != event.EventKeyDown {
+		return event.Outcome{
+			Event: ev, Context: ctx, Decision: pluginapi.DecisionPass, At: time.Now(),
+		}
+	}
 	c.mu.Lock()
 	enabled := map[string]bool{}
 	for id, on := range c.plugins {
@@ -679,6 +690,10 @@ func (c *Core) startTap() func() {
 	watchStop := make(chan struct{})
 	go c.watchFocusedApp(watchStop, cache)
 
+	c.mu.Lock()
+	c.windowCache = cache
+	c.mu.Unlock()
+
 	d := &adapter.Driver{
 		// Live path: honours plugin enable + rule toggles on EVERY key.
 		Decide:   c.decideLocked,
@@ -699,11 +714,18 @@ func (c *Core) startTap() func() {
 	}
 	c.mu.Unlock()
 
+	var stopOnce sync.Once
 	stop := func() {
-		// Stop the watcher BEFORE the tap: no more key events can arrive
-		// once the tap is gone, so there is nothing left to keep current.
-		close(watchStop)
-		_ = tapStopFn(d)
+		// Idempotent: PANIC STOP stops the tap, and the deferred stop runs
+		// again at shutdown. Closing an already-closed channel panics, and a
+		// panic on the way out of a kill switch is the last thing anyone
+		// needs.
+		stopOnce.Do(func() {
+			// Stop the watcher BEFORE the tap: no more key events can
+			// arrive once the tap is gone, so nothing left to keep current.
+			close(watchStop)
+			_ = tapStopFn(d)
+		})
 	}
 	c.mu.Lock()
 	c.stopTapFn = stop
@@ -729,14 +751,14 @@ func (daemonTapLog) Log(stage, msg string) {
 func (c *Core) dispatch(req intent.Request) error {
 	switch req.Capability.ID {
 	case "window.move", "window.minimize", "window.maximize", "window.close":
-		return c.windowDispatch(req)
+		return c.windowDispatch(req, c.windowCache)
 	default:
 		return fmt.Errorf("core: no adapter for capability %q (not implemented yet)", req.Capability.ID)
 	}
 }
 
 // windowDispatch routes a window.* capability to the platform seam.
-func (c *Core) windowDispatch(req intent.Request) error {
+func (c *Core) windowDispatch(req intent.Request, cache *appCache) error {
 	var zone string
 	if len(req.Intent.Parameters) > 0 {
 		var p struct {
@@ -746,11 +768,18 @@ func (c *Core) windowDispatch(req intent.Request) error {
 			zone = p.Zone
 		}
 	}
-	wq := adapter.NewWindowQuery(&adapter.Driver{Log: daemonTapLog{}})
-	fw, err := wq.Focused()
-	if err != nil {
-		return err
+	// Read the CACHED focused window. A live AX query here would block for
+	// the life of the process when accessibility consent is missing, and it
+	// runs on the single dispatch worker — the first window action would
+	// wedge every later action.
+	if cache == nil {
+		return fmt.Errorf("core: no focused-window cache (the tap is not running)")
 	}
+	fw, ok := cache.window()
+	if !ok {
+		return fmt.Errorf("core: no focused window known yet (accessibility consent missing, or the watcher has not primed)")
+	}
+	wq := adapter.NewWindowQuery(&adapter.Driver{Log: daemonTapLog{}})
 	visible := winlayout.Rect{X: fw.X, Y: fw.Y, W: fw.W, H: fw.H}
 	m := adapter.MoveResize{ID: fw.ID}
 	switch req.Capability.ID {
@@ -775,8 +804,10 @@ func (c *Core) windowDispatch(req intent.Request) error {
 // it must never call AX; instead a background watcher refreshes this and the
 // callback reads the cached value.
 type appCache struct {
-	mu   sync.RWMutex
-	last event.FastContext
+	mu     sync.RWMutex
+	last   event.FastContext
+	win    adapter.FocusedWindow
+	hasWin bool
 }
 
 // get returns the cached context. Safe for the tap's hot path (one RWMutex
@@ -791,6 +822,25 @@ func (a *appCache) set(ctx event.FastContext) {
 	a.mu.Lock()
 	a.last = ctx
 	a.mu.Unlock()
+}
+
+// setWindow records the focused window alongside its context.
+func (a *appCache) setWindow(ctx event.FastContext, fw adapter.FocusedWindow) {
+	a.mu.Lock()
+	a.last = ctx
+	a.win = fw
+	a.hasWin = true
+	a.mu.Unlock()
+}
+
+// window returns the cached focused window. Window actions read this instead
+// of querying AX: the live AX call blocks indefinitely without accessibility
+// consent, so calling it on the action path wedges the dispatch worker for
+// the life of the daemon.
+func (a *appCache) window() (adapter.FocusedWindow, bool) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.win, a.hasWin
 }
 
 // watchFocusedApp keeps the cache fresh off the hot path. A bounded-interval
@@ -828,11 +878,11 @@ func (c *Core) watchFocusedApp(stop <-chan struct{}, cache *appCache) {
 			if r.err != nil {
 				continue // keep the last known app rather than blanking it
 			}
-			cache.set(event.FastContext{
+			cache.setWindow(event.FastContext{
 				AppID:    r.fw.BundleID,
 				AppMode:  event.AppModeNative,
 				WindowID: r.fw.Title,
-			})
+			}, r.fw)
 		case <-time.After(2 * time.Second):
 			// One query is still in flight. Skip this tick rather than
 			// stacking another behind it.
