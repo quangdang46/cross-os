@@ -82,7 +82,16 @@ func TestCrashIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(dir, "plugin.exe")
+	// The link is named for the host OS and the manifest entry matches it.
+	// The previous version always linked "plugin.exe" but set the manifest
+	// entry to "plugin" off Windows, so the spawn looked for a file that was
+	// never created — the test failed everywhere except Windows, which is
+	// why it was excluded from CI.
+	entry := "plugin"
+	if runtime.GOOS == "windows" {
+		entry = "plugin.exe"
+	}
+	link := filepath.Join(dir, entry)
 	if err := os.Link(self, link); err != nil {
 		t.Skipf("hardlink unavailable: %v", err)
 	}
@@ -90,11 +99,6 @@ func TestCrashIsolation(t *testing.T) {
 	// cleanup must not fail the test for that. Best-effort early unlink
 	// is attempted in cleanup; residual lock = environment, not product.
 	t.Cleanup(func() { _ = os.Remove(link) })
-	// Entry needs the OS executable suffix to spawn (".exe" on Windows).
-	entry := "plugin"
-	if os.Getenv("OS") != "" || runtime.GOOS == "windows" {
-		entry = "plugin.exe"
-	}
 	m := pluginapi.Manifest{ID: "fake", Entry: entry, Type: pluginapi.PluginExec,
 		Capabilities: []pluginapi.Capability{{Name: "fake.do", Owner: pluginapi.CapabilityOwnerPlugin}}}
 	// Env must be set before Start (child inherits at spawn).

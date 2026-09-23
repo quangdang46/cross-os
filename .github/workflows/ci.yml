@@ -9,11 +9,9 @@
 # crossos-keyboard-win.dll only (§12) — built from source on every push
 # (qhp.9: windows-dll job below), never committed as a binary.
 #
-# Known exclusions (pre-existing red on clean tree, verified via git stash):
-#   - core/pkg/config TestConfigPaths (windows-ish path expectation)
-#   - core/pkg/plugin TestCrashIsolation (missing fixture binary)
-# Both excluded with TODO(owner) until fixed — the workflow must be green
-# on merge, never knowingly red.
+# No test exclusions: the two long-standing failures (TestConfigPaths,
+# TestCrashIsolation) asserted the wrong platform's expectations and were
+# being skipped in CI. Both are fixed, so the whole module runs here.
 name: ci
 
 on:
@@ -39,9 +37,7 @@ jobs:
         # NOTE: repo root has no go.mod (multi-module: core, app,
         # platform/darwin/spike_*, extensions/finder-sync); per-module jobs below.
       - name: Vet + test core
-        # TODO(qhp.1): re-include ./pkg/config + ./pkg/plugin once
-        # TestConfigPaths and TestCrashIsolation are fixed on clean tree.
-        run: cd core && go vet ./... && go test -short $(go list ./... | grep -v 'pkg/config$' | grep -v 'pkg/plugin$')
+        run: cd core && go vet ./... && go test -short ./...
       - name: Vet + test app shell
         run: cd app && go vet ./... && go test -short ./...
       - name: Vet + test spikes + finder-sync

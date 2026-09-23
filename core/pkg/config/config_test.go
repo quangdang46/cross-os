@@ -83,20 +83,23 @@ func TestInvalidRejected(t *testing.T) {
 }
 
 func TestConfigPaths(t *testing.T) {
-	// Storage paths asserted per OS (bead criterion — not eyeballed).
-	win := ConfigPath(`C:\Users\u`, `ignored`)
-	if !strings.Contains(win, ".crossos") || !strings.HasSuffix(win, "config.json") {
-		t.Fatalf("windows-ish path wrong: %s", win)
-	}
-	mac := ConfigPath("/Users/u", "/Users/u/Library/Application Support")
+	// ConfigPath picks the layout by the running OS, so each assertion is
+	// made under the OS it describes. The previous version asserted the
+	// Windows layout unconditionally, which failed on every non-Windows
+	// machine and is why this test was excluded from CI.
 	if runtime.GOOS == "darwin" {
-		if !strings.Contains(mac, "CrossOS") {
-			t.Fatalf("darwin path wrong: %s", mac)
+		mac := ConfigPath("/Users/u", "/Users/u/Library/Application Support")
+		if mac != "/Users/u/Library/Application Support/CrossOS/config.json" {
+			t.Fatalf("darwin path = %q, want Application Support/CrossOS/config.json", mac)
+		}
+	} else {
+		win := ConfigPath(`C:\Users\u`, `ignored`)
+		if !strings.Contains(win, ".crossos") || !strings.HasSuffix(win, "config.json") {
+			t.Fatalf("windows-ish path wrong: %s", win)
 		}
 	}
-	d := DefaultConfigPath()
-	if !strings.HasSuffix(d, "config.json") {
-		t.Fatalf("default path wrong: %s", d)
+	if d := DefaultConfigPath(); !strings.HasSuffix(d, "config.json") {
+		t.Fatalf("default path = %q, want a config.json suffix", d)
 	}
 }
 
