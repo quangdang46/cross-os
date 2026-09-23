@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  CrossOS daemon login item (bead cross-os-2aj).
+
+  This file is the SOURCE: it is embedded by the daemon and written to
+  ~/Library/LaunchAgents by `crossos install-autostart`, which substitutes
+  __CROSSOS_BIN__ with the installed binary path. Edit it here, not in
+  ~/Library/LaunchAgents — an edit there is overwritten on reinstall.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.crossos.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__CROSSOS_BIN__</string>
+        <string>serve</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>__CROSSOS_STATE__/daemon.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__CROSSOS_STATE__/daemon.err.log</string>
+</dict>
+</plist>

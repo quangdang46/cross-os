@@ -109,7 +109,10 @@ printf '\n'
 say "Socket:    $SOCKET"
 say "Daemon:    running (pid $(cat "$BIN/daemon.pid" 2>/dev/null || echo 'started earlier'))"
 
-if grep -q '"interception": *false' <<<"$status"; then
+# Two different "off" states, and they need different advice:
+#   interception:false + no tap_error  → never granted consent
+#   tap_error mentioning timing out     → tap installed but degraded
+if grep -q '"interception": *false' <<<"$status" && ! grep -q '"tap_error":""' <<<"$status"; then
   cat <<'EOF'
 
 Keyboard remapping is OFF until you grant input monitoring:
@@ -120,7 +123,23 @@ Keyboard remapping is OFF until you grant input monitoring:
 Everything else works meanwhile: the window, the settings pages, plugin
 trials and config all talk to the live daemon.
 EOF
+elif grep -q 'timing out' <<<"$status"; then
+  cat <<'EOF'
+
+WARNING: the keyboard tap keeps timing out and macOS has disabled it, so
+remapping is degraded. The window and settings still work. If it does not
+recover on its own, restart the daemon — and if it keeps happening, the
+daemon log below will say why.
+EOF
 fi
+
+# Autostart is opt-in and never installed implicitly (§8.4): point at the
+# command rather than running it.
+cat <<'EOF'
+
+Start at login:  ./.crossos/crossos install-autostart
+                 (remove with: ./.crossos/crossos uninstall-autostart)
+EOF
 
 if [[ "$OPEN_APP" == "1" ]]; then
   say "Opening the shell"

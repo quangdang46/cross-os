@@ -77,6 +77,17 @@ monitoring, not a bug:
 Everything else — the window, settings pages, plugin trials, config — talks to
 the live daemon immediately.
 
+**Start at login** (optional, never installed implicitly):
+
+```bash
+./.crossos/crossos install-autostart      # writes the launchd agent
+./.crossos/crossos uninstall-autostart    # removes it
+```
+
+The agent comes from `core/cmd/crossos/dev.crossos.daemon.plist`, which the
+installer copies with the real binary path substituted — there is no file to
+edit by hand.
+
 ## Safety principles (P0, on par with the input engine)
 
 - Intercept events only → disabling removes all effects; never patch Finder,
