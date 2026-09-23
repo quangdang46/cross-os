@@ -613,3 +613,84 @@ func TestTapBindsLiveDecisionPath(t *testing.T) {
 		t.Fatal("disabled rule must pass through on the LIVE tap path (no stale snapshot)")
 	}
 }
+
+// TestDispatchRoutesWindowAndFailsClosed: the daemon's dispatcher reaches
+// the adapter for window capabilities, and reports honestly for what the
+// adapter does not implement yet (bead cross-os-vx9). Until the AX bridge
+// lands the darwin seam denies, so a Win+Left press passes the ORIGINAL key
+// through instead of eating it.
+func TestDispatchRoutesWindowAndFailsClosed(t *testing.T) {
+	c, err := NewCore(nil, nil)
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	req := intent.Request{
+		PluginID:   "windows-keyboard",
+		Intent:     intent.Intent{ID: "window.move", Version: 1, Source: intent.SourceKeyboard, Parameters: json.RawMessage(`{"zone":"left-half"}`)},
+		Capability: intent.CapabilityDescriptor{ID: "window.move", Version: "1"},
+	}
+	// The zone must resolve through the daemon's dispatcher vocabulary; the
+	// darwin seam denies (no AX bridge yet), which is the SAFE outcome.
+	if err := c.dispatch(req); err == nil {
+		t.Skip("AX bridge landed: window.move now dispatches for real")
+	}
+	// An unknown capability must fail closed rather than silently no-op.
+	bad := req
+	bad.Capability.ID = "clipboard.copy"
+	if err := c.dispatch(bad); err == nil {
+		t.Fatal("capability without an adapter route must report an error")
+	}
+	// A zone with no geometry is an error, not a silent default action.
+	noGeom := req
+	noGeom.Intent.Parameters = json.RawMessage(`{"zone":"center"}`)
+	if err := c.dispatch(noGeom); err == nil {
+		t.Fatal("adapter-side zone without geometry must report an error")
+	}
+}
+
+// TestRealDispatchFailurePassesKeyThrough binds the tap's decide entry to
+// the daemon's REAL dispatcher and asserts the end-to-end safety property
+// (bead cross-os-vx9): with no AX bridge the darwin seam denies, so
+// crossosGoDecide must return 0 (let the key through) rather than 1.
+// A future change that makes windowDispatch swallow denials and return nil
+// would flip this to 1 and fail here.
+func TestRealDispatchFailurePassesKeyThrough(t *testing.T) {
+	c, err := NewCoreWithSettings(builtin.All(), builtin.Grants(), "")
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, true)
+	}
+	d := &adapter.Driver{Decide: c.decideLocked, Dispatch: c.dispatch, Log: daemonTapLog{}}
+	adapter.BindDecideForTest(d)
+	defer adapter.BindDecideForTest(nil)
+
+	fastCtx := event.FastContext{AppID: "com.apple.Finder", AppMode: event.AppModeNative}
+	chords := []event.Event{
+		{Type: event.EventKeyDown, KeyCode: 0x43, Modifiers: 1},      // Ctrl+C
+		{Type: event.EventKeyDown, KeyCode: 0x25, Modifiers: 1 << 3}, // Win+Left
+	}
+
+	// Negative control FIRST: with a dispatcher that succeeds, the same
+	// chords must be SUPPRESSED. This proves the rules really match, so the
+	// pass-through assertions below are about dispatch failure rather than
+	// a rule that never fired — a test that passes for the wrong reason is
+	// worse than no test.
+	ok := &adapter.Driver{Decide: c.decideLocked, Dispatch: func(intent.Request) error { return nil }, Log: daemonTapLog{}}
+	adapter.BindDecideForTest(ok)
+	for _, ev := range chords {
+		if got := adapter.DecideForTest(ev, fastCtx); got != 1 {
+			t.Fatalf("negative control key %#x: verdict=%d, want 1 (rule must match when dispatch succeeds)", ev.KeyCode, got)
+		}
+	}
+
+	// Now the REAL dispatcher: the darwin seam cannot execute yet, so both
+	// chords must PASS THROUGH instead of being swallowed.
+	adapter.BindDecideForTest(d)
+	for _, ev := range chords {
+		if got := adapter.DecideForTest(ev, fastCtx); got != 0 {
+			t.Fatalf("key %#x: verdict=%d, want 0 (adapter cannot execute yet — pass through)", ev.KeyCode, got)
+		}
+	}
+}

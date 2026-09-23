@@ -21,6 +21,7 @@ package winlayout
 import (
 	"fmt"
 	"math"
+	"strings"
 )
 
 // CapabilityFor maps an Action to its window.* capability + zone parameter.
@@ -245,4 +246,44 @@ func (e *Executor) Confirm(action Action, winID string, ok bool, observed Rect, 
 
 func (e *Executor) log(stage, detail string) {
 	e.Stages = append(e.Stages, Stage{Stage: stage, Detail: detail})
+}
+
+// ActionForZone resolves a window.move zone parameter to its Action.
+// Tolerant of the vocabularies in play: the plugin matrices emit
+// "left-half"/"right-half" (§6.1) while ZoneName returns "leftHalf"
+// (§3.12 capability params), and user config may use either. Comparison
+// ignores case and -/_ separators so all three spellings resolve;
+// unknown zones fail closed (no silent default action).
+func ActionForZone(zone string) (Action, bool) {
+	norm := func(s string) string {
+		s = strings.ToLower(strings.TrimSpace(s))
+		s = strings.ReplaceAll(s, "-", "")
+		s = strings.ReplaceAll(s, "_", "")
+		s = strings.ReplaceAll(s, " ", "")
+		return s
+	}
+	want := norm(zone)
+	if want == "" {
+		return 0, false
+	}
+	for _, a := range AllActions {
+		if norm(ZoneName(a)) == want {
+			return a, true
+		}
+	}
+	return 0, false
+}
+
+// FrameForZone returns the target frame for a zone parameter on the given
+// visible area. ok=false for zones with no geometry (center/restore/
+// fullscreen/display moves are adapter-side).
+func FrameForZone(zone string, visible Rect) (Rect, bool) {
+	a, ok := ActionForZone(zone)
+	if !ok {
+		return Rect{}, false
+	}
+	if r := Frame(a, visible); r != nil {
+		return *r, true
+	}
+	return Rect{}, false
 }

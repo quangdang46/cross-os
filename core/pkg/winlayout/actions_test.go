@@ -155,3 +155,28 @@ func TestLiveAXFrames(t *testing.T) {
 	}
 	t.Skip("live AX frame assertions land with the ab4 C-ABI link; Tier-1 resolution+tolerance+history math is the sandbox proof")
 }
+
+// The zone vocabulary must resolve across the spellings in play: plugin
+// matrices emit "left-half" (§6.1) while ZoneName returns "leftHalf"
+// (§3.12), and user config may use either (bead cross-os-vx9).
+func TestActionForZoneToleratesVocabularies(t *testing.T) {
+	for _, spelling := range []string{"left-half", "leftHalf", "LEFT_HALF", " left half "} {
+		a, ok := ActionForZone(spelling)
+		if !ok || a != LeftHalf {
+			t.Fatalf("ActionForZone(%q) = %v,%v; want LeftHalf,true", spelling, a, ok)
+		}
+	}
+	if _, ok := ActionForZone("nonsense"); ok {
+		t.Fatal("unknown zone must fail closed")
+	}
+	if _, ok := ActionForZone(""); ok {
+		t.Fatal("empty zone must fail closed")
+	}
+	// Geometry zones resolve to a frame; adapter-side ones report no frame.
+	if r, ok := FrameForZone("right-half", Rect{W: 1920, H: 1080}); !ok || r.X != 960 {
+		t.Fatalf("right-half frame=%+v ok=%v, want X=960", r, ok)
+	}
+	if _, ok := FrameForZone("center", Rect{W: 1920, H: 1080}); ok {
+		t.Fatal("center is adapter-side and must report no geometry")
+	}
+}

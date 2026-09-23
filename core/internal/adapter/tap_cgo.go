@@ -40,8 +40,36 @@ import (
 // errTapDenied marks TCC input-monitoring denial (bridge returned NULL).
 var errTapDenied = errors.New("adapter: tap refused (input-monitoring consent missing?)")
 
-// kCGControlFlag is kCGEventFlagMaskControl (NX_CONTROLMASK = 1<<18).
-const kCGControlFlag = uint64(1 << 18)
+// CGEvent modifier flag bits → internal keyboard.Mod* bits. Mapping ALL of
+// them matters: the Windows-muscle-memory rules are Win+Arrow (ModMeta) and
+// Ctrl+Shift combos, so a tap that only understood Control would silently
+// never fire them (bead cross-os-vx9 — found by the negative control in
+// TestRealDispatchFailurePassesKeyThrough).
+const (
+	cgFlagShift = 1 << 0
+	cgFlagCtrl  = 1 << 18
+	cgFlagAlt   = 1 << 19
+	cgFlagMeta  = 1 << 20
+)
+
+// modsFromFlags translates CGEventFlags into the internal modifier mask the
+// router matches against (keyboard.ModCtrl/Shift/Alt/Meta).
+func modsFromFlags(flags uint64) uint32 {
+	var m uint32
+	if flags&cgFlagCtrl != 0 {
+		m |= 1 << 0 // ModCtrl
+	}
+	if flags&cgFlagShift != 0 {
+		m |= 1 << 1 // ModShift
+	}
+	if flags&cgFlagAlt != 0 {
+		m |= 1 << 2 // ModAlt (Option)
+	}
+	if flags&cgFlagMeta != 0 {
+		m |= 1 << 3 // ModMeta (Command = the Windows key)
+	}
+	return m
+}
 
 // decideExport is the Go decide entry the C callback calls per key event.
 // The C callback runs on the tap's run-loop thread while Install/Stop touch
@@ -70,13 +98,10 @@ func crossosGoDecide(keycode uint16, flags uint64, keyDown int32, ctx unsafe.Poi
 		return 0 // inert pass-through pre-init
 	}
 	typ := event.EventKeyUp
-	mods := uint32(0)
 	if keyDown != 0 {
 		typ = event.EventKeyDown
-		if flags&kCGControlFlag != 0 {
-			mods = 1 // modCtrl bit (matches builtin rules port)
-		}
 	}
+	mods := modsFromFlags(flags)
 	out := d.Decide(event.Event{
 		Type:      typ,
 		Source:    event.SourceKeyboard,
@@ -86,7 +111,28 @@ func crossosGoDecide(keycode uint16, flags uint64, keyDown int32, ctx unsafe.Poi
 	if out.Decision == pluginapi.DecisionPass {
 		return 0
 	}
-	return 1 // CONSUME/REPLACE both suppress; REPLACE injects via TapPostF9
+	// Decide said "handle this key". Before swallowing it, make sure the
+	// action actually HAPPENED — suppressing a key whose action failed
+	// leaves the user with a key that does nothing, which is worse than
+	// passing it through (bead cross-os-vx9).
+	if out.Request != nil {
+		if d.Dispatch == nil {
+			// Nothing can execute: never eat the key.
+			return 0
+		}
+		if err := d.Dispatch(*out.Request); err != nil {
+			// Action failed (permission denied, no adapter, ...): pass the
+			// original through so the OS still sees it, and log the reason.
+			if d.Log != nil {
+				d.Log.Log("action", "dispatch failed, passing key through: "+err.Error())
+			}
+			return 0
+		}
+		return 1 // action done — suppress the original
+	}
+	// CONSUME with no request is a declared absorb: swallow with no action
+	// to run. That is the rule's stated behavior, not a failure.
+	return 1
 }
 
 // TapInstall creates the live tap (NULL → typed denial, dual-surfaced).

@@ -647,3 +647,52 @@ type daemonTapLog struct{}
 func (daemonTapLog) Log(stage, msg string) {
 	fmt.Fprintf(os.Stderr, "crossos: [%s] %s\n", stage, msg)
 }
+
+// dispatch executes an authorized capability through the adapter seam
+// (bead cross-os-vx9). The tap calls it between Decide and suppress, so a
+// key is only swallowed when its action actually ran.
+//
+// The darwin window seam still answers ErrPermissionDenied until the AX
+// bridge lands (bead qhp AX) — that is CORRECT behaviour for now: the
+// original key passes through and the user keeps a working keyboard.
+func (c *Core) dispatch(req intent.Request) error {
+	switch req.Capability.ID {
+	case "window.move", "window.minimize", "window.maximize", "window.close":
+		return c.windowDispatch(req)
+	default:
+		return fmt.Errorf("core: no adapter for capability %q (not implemented yet)", req.Capability.ID)
+	}
+}
+
+// windowDispatch routes a window.* capability to the platform seam.
+func (c *Core) windowDispatch(req intent.Request) error {
+	var zone string
+	if len(req.Intent.Parameters) > 0 {
+		var p struct {
+			Zone string `json:"zone"`
+		}
+		if err := json.Unmarshal(req.Intent.Parameters, &p); err == nil {
+			zone = p.Zone
+		}
+	}
+	wq := adapter.NewWindowQuery(&adapter.Driver{Log: daemonTapLog{}})
+	fw, err := wq.Focused()
+	if err != nil {
+		return err
+	}
+	visible := winlayout.Rect{X: fw.X, Y: fw.Y, W: fw.W, H: fw.H}
+	m := adapter.MoveResize{ID: fw.ID}
+	switch req.Capability.ID {
+	case "window.move":
+		r, ok := winlayout.FrameForZone(zone, visible)
+		if !ok {
+			return fmt.Errorf("core: window zone %q has no adapter geometry yet", zone)
+		}
+		m = adapter.MoveResize{ID: fw.ID, X: r.X, Y: r.Y, W: r.W, H: r.H, Move: true, Resize: true}
+	case "window.minimize", "window.maximize", "window.close":
+		// Geometry actions need a real AX action (not yet bridged); report
+		// honestly instead of pretending.
+		return fmt.Errorf("core: %s not implemented in the adapter yet", req.Capability.ID)
+	}
+	return wq.MoveResize(m)
+}

@@ -57,13 +57,13 @@ func TestTapDecideExportRouting(t *testing.T) {
 	}}
 	decideExport = d
 	defer func() { decideExport = nil }()
-	if got := crossosGoDecide(0x08, kCGControlFlag, 1, nil); got != 1 {
+	if got := crossosGoDecide(0x08, cgFlagCtrl, 1, nil); got != 1 {
 		t.Fatalf("ctrl+c keydown export=%d, want 1 (suppress)", got)
 	}
 	if got := crossosGoDecide(0x08, 0, 1, nil); got != 0 {
 		t.Fatalf("bare c export=%d, want 0 (pass)", got)
 	}
-	if got := crossosGoDecide(0x08, kCGControlFlag, 0, nil); got != 0 {
+	if got := crossosGoDecide(0x08, cgFlagCtrl, 0, nil); got != 0 {
 		t.Fatalf("key-up export=%d, want 0 (pass)", got)
 	}
 	_ = intent.DefaultRegistry
