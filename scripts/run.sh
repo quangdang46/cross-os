@@ -39,6 +39,9 @@ need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not on PATH 
 need go "install Go from https://go.dev"
 need node "install Node.js 18+"
 need npm "ships with Node.js"
+# wails3 generates frontend/bindings, which are gitignored: without them
+# `npm run build` cannot typecheck the shell at all.
+need wails3 "install with: go install github.com/wailsapp/wails/v3/cmd/wails3@latest"
 
 mkdir -p "$BIN"
 
@@ -56,15 +59,27 @@ frontend_stale() {
   [[ -n "$newest" ]]
 }
 
-if [[ "$REBUILD" == "1" ]] || { [[ -d app/frontend/node_modules ]] && frontend_stale; }; then
-  say "Frontend sources changed — rebuilding"
+# A fresh clone has neither node_modules nor a bundle. Rebuild whenever the
+# bundle is missing, the sources moved, or the caller insists — reusing a
+# bundle that was never built left a new user with a "run some task
+# command you have not heard of" dead end.
+if [[ "$REBUILD" == "1" ]] || [[ ! -d "$SHELL_APP" ]] || frontend_stale; then
+  if [[ ! -d app/frontend/node_modules ]]; then
+    say "Installing frontend dependencies (first run)"
+    npm --prefix app/frontend ci >/dev/null
+  fi
+  say "Building the shell bundle"
+  if [[ ! -d app/frontend/bindings ]]; then
+    say "Generating the Wails bindings"
+    (cd app && wails3 generate bindings -f "" -clean=true -ts -i ./... >/dev/null)
+  fi
   npm --prefix app/frontend run build >/dev/null
   task --taskfile app/Taskfile.yml darwin:package >/dev/null
 else
   say "Reusing the existing shell bundle (--rebuild-frontend forces a rebuild)"
 fi
 
-[[ -d "$SHELL_APP" ]] || die "shell bundle missing at $SHELL_APP — run: task --taskfile app/Taskfile.yml darwin:package"
+[[ -d "$SHELL_APP" ]] || die "the shell bundle is still missing at $SHELL_APP — the build output above is where to look"
 
 # --- daemon lifecycle -------------------------------------------------------
 # A second daemon must NOT be started: it would unlink the running daemon's
