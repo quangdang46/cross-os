@@ -1,7 +1,6 @@
 package launcher
 
 import (
-	"runtime"
 	"testing"
 
 	"crossos/core/pkg/event"
@@ -10,16 +9,16 @@ import (
 )
 
 // TestHotkeyOpens: Ctrl+Space resolves through the standard rule path
-// (CONSUME — palette opens, conflict-visible like any rule). Uses
-// runtime.GOOS so the test proves whatever platform it runs on (review:
-// cross-os-ed — a hardcoded macOS keycode used to silently listen on the
-// wrong key on Windows; TestSpaceVKPerPlatform below pins both branches).
+// (CONSUME — palette opens, conflict-visible like any rule). The rule uses
+// the internal Windows VK code on every host; the macOS kVK_Space is
+// translated once, at the tap boundary (bead cross-os-uok), so a
+// host-specific literal here can only ever be wrong.
 func TestHotkeyOpens(t *testing.T) {
 	reg := intent.DefaultRegistry()
 	rt := event.Compile([]event.CompiledRule{HotkeyRule()}, reg,
 		map[string][]intent.Permission{pluginID: Grants()}, nil)
 	out := rt.Decide(
-		event.Event{Type: event.EventKeyDown, Source: event.SourceKeyboard, KeyCode: spaceVK(runtime.GOOS), Modifiers: modCtrl},
+		event.Event{Type: event.EventKeyDown, Source: event.SourceKeyboard, KeyCode: vkSpace, Modifiers: modCtrl},
 		event.FastContext{AppID: "Finder", AppMode: event.AppModeNative})
 	if out.Decision != pluginapi.DecisionConsume {
 		t.Fatalf("hotkey decision=%v, want CONSUME (palette opens)", out.Decision)
@@ -35,17 +34,16 @@ func TestHotkeyOpens(t *testing.T) {
 	}
 }
 
-// TestSpaceVKPerPlatform pins bead cross-os-jpr.7: Windows gets VK_SPACE
-// (0x20), every other GOOS gets kVK_Space (0x31) — no silent wrong-key
-// registration on either OS.
-func TestSpaceVKPerPlatform(t *testing.T) {
-	if got := spaceVK("windows"); got != 0x20 {
-		t.Fatalf("windows vk=%#x, want 0x20 (VK_SPACE)", got)
+// TestSpaceVKIsHostIndependent pins the internal convention: the rule table
+// carries ONE code for Space on every host (bead cross-os-uok replaced the
+// per-GOOS branch, which made the rule unreachable once the tap started
+// translating macOS keycodes to the internal convention).
+func TestSpaceVKIsHostIndependent(t *testing.T) {
+	if vkSpace != 0x20 {
+		t.Fatalf("vkSpace=%#x, want 0x20 (internal Windows VK convention)", vkSpace)
 	}
-	for _, goos := range []string{"darwin", "linux", "unknown"} {
-		if got := spaceVK(goos); got != 0x31 {
-			t.Fatalf("%s vk=%#x, want 0x31 (kVK_Space)", goos, got)
-		}
+	if got := HotkeyRule().KeyCode; got != 0x20 {
+		t.Fatalf("hotkey rule key=%#x, want 0x20", got)
 	}
 }
 

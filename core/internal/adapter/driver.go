@@ -41,6 +41,12 @@ type Driver struct {
 	// action actually ran. A nil Dispatch means nothing can execute, so the
 	// tap passes keys through rather than eating them.
 	Dispatch func(intent.Request) error
+	// Context supplies the focused app for the decision (bead cross-os-heu).
+	// It MUST return a cached snapshot: the tap callback is on the hot path
+	// and an AX query per keystroke would blow the <1ms budget. Nil falls
+	// back to AppModeNative with an empty AppID, which is honest but makes
+	// every app-scoped rule unreachable.
+	Context func() event.FastContext
 }
 
 // DecideOne implements KeyboardTap.DecideOne: Core decides, the bridge maps.
@@ -93,4 +99,33 @@ func DecideForTest(ev event.Event, _ event.FastContext) int32 {
 		keyDown = 1
 	}
 	return crossosGoDecide(uint16(ev.KeyCode), flags, keyDown, nil)
+}
+
+// MustWinKeycodeForTest resolves a macOS keycode for tests that build events
+// directly, failing the test when it is unmapped.
+func MustWinKeycodeForTest(t interface{ Fatalf(string, ...any) }, mac uint16) uint16 {
+	win, ok := ToWinKeycode(mac)
+	if !ok {
+		t.Fatalf("macOS keycode %#x has no Windows VK mapping", mac)
+	}
+	return win
+}
+
+// DecideForMacTest runs one chord through the bound tap entry using macOS
+// keycodes, as the real C callback would. mods are internal Mod* bits.
+func DecideForMacTest(macKey uint16, mods uint32, _ event.FastContext) int32 {
+	var flags uint64
+	if mods&(1<<0) != 0 {
+		flags |= cgFlagCtrl
+	}
+	if mods&(1<<1) != 0 {
+		flags |= cgFlagShift
+	}
+	if mods&(1<<2) != 0 {
+		flags |= cgFlagAlt
+	}
+	if mods&(1<<3) != 0 {
+		flags |= cgFlagMeta
+	}
+	return crossosGoDecide(macKey, flags, 1, nil)
 }

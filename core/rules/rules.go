@@ -34,7 +34,7 @@ const (
 	vkRight  = 0x27
 	vkDown   = 0x28
 	vkF4     = 0x73
-	vkSpace  = 0x31 // macOS kVK_Space (launcher; Windows 0x20 is jpr.7 scope)
+	vkSpace  = 0x20 // Windows VK_SPACE; the macOS kVK_Space (0x31) is translated at the tap boundary (cross-os-uok)
 	vkReturn = 0x0D
 	vkF8     = 0x77
 
@@ -123,7 +123,7 @@ func developerRules() []event.CompiledRule {
 	}
 }
 
-// launcher HotkeyRule() port (1 rule, macOS keycode): Ctrl+Space CONSUME.
+// launcher HotkeyRule() port (1 rule): Ctrl+Space CONSUME.
 func launcherRules() []event.CompiledRule {
 	return []event.CompiledRule{
 		mkRule(vkSpace, modCtrl, nativeOnly, nil,

@@ -2,7 +2,6 @@ package launcher
 
 import (
 	"encoding/json"
-	"runtime"
 	"sort"
 	"strings"
 
@@ -14,24 +13,15 @@ import (
 // Hotkey: Ctrl+Space (distinct from Spotlight/Alfred defaults; user-editable
 // via the Shortcuts page — this rule is the default registration, not a
 // side-channel hook).
+// Space is the INTERNAL Windows VK (0x20), like every rule in the table.
+// The host-specific code is handled once, at the tap boundary, by the
+// macOS→VK translation (core/internal/adapter, bead cross-os-uok) — a rule
+// authored with a host code here could never match the translated event.
 const (
-	vkSpaceDarwin  = 0x31 // macOS kVK_Space
-	vkSpaceWindows = 0x20 // Windows VK_SPACE
-	modCtrl        = 1 << 0
-	pluginID       = "launcher"
+	vkSpace  = 0x20 // Windows VK_SPACE
+	modCtrl  = 1 << 0
+	pluginID = "launcher"
 )
-
-// spaceVK resolves the platform-correct virtual keycode for Space (bead
-// cross-os-jpr.7: HotkeyRule carried no platform restriction, so a hardcoded
-// macOS keycode silently listened on the wrong key on Windows). goos is
-// injected so the branch is unit-testable without cross-compiling; HotkeyRule
-// calls this with runtime.GOOS.
-func spaceVK(goos string) uint32 {
-	if goos == "windows" {
-		return vkSpaceWindows
-	}
-	return vkSpaceDarwin
-}
 
 // App is one discoverable application (re-expressed discovery shape: name +
 // bundle ID + path — the FileManager-enumeration + running-apps merge from
@@ -126,7 +116,7 @@ func LaunchIntent(a App) intent.Intent {
 // to OPEN the palette; app.launch fires on selection).
 func HotkeyRule() event.CompiledRule {
 	return event.CompiledRule{
-		KeyCode: spaceVK(runtime.GOOS), Modifiers: modCtrl,
+		KeyCode: vkSpace, Modifiers: modCtrl,
 		AppModes:    []event.AppMode{event.AppModeNative},
 		RuleID:      pluginID + ".ctrl-space-launcher",
 		PluginID:    pluginID,

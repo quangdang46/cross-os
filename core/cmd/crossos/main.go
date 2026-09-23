@@ -620,10 +620,21 @@ var tapLiveStatus = tapLiveLive
 // returns a stop func for shutdown. It never returns an error to main: a
 // denial is recorded on the Core and surfaced over IPC.
 func (c *Core) startTap() func() {
+	// Focused-app cache for the tap's decision path (cross-os-heu). Seeded
+	// before install so the very first keystroke has a context, then kept
+	// fresh by a watcher off the hot path.
+	cache := &appCache{}
+	cache.set(event.FastContext{AppMode: event.AppModeNative})
+	watchStop := make(chan struct{})
+	defer close(watchStop)
+	go c.watchFocusedApp(watchStop, cache)
+
 	d := &adapter.Driver{
 		// Live path: honours plugin enable + rule toggles on EVERY key.
-		Decide: c.decideLocked,
-		Log:    daemonTapLog{},
+		Decide:   c.decideLocked,
+		Dispatch: c.dispatch,
+		Context:  cache.get,
+		Log:      daemonTapLog{},
 	}
 	err := tapStartFn(d)
 	c.mu.Lock()
@@ -695,4 +706,55 @@ func (c *Core) windowDispatch(req intent.Request) error {
 		return fmt.Errorf("core: %s not implemented in the adapter yet", req.Capability.ID)
 	}
 	return wq.MoveResize(m)
+}
+
+// --- focused-app cache (bead cross-os-heu) ---
+
+// appCache holds the most recent focused-app snapshot the tap's decision
+// path reads. The CGEventTap callback is on the hot path (<1ms budget), so
+// it must never call AX; instead a background watcher refreshes this and the
+// callback reads the cached value.
+type appCache struct {
+	mu   sync.RWMutex
+	last event.FastContext
+}
+
+// get returns the cached context. Safe for the tap's hot path (one RWMutex
+// read; no syscall, no cgo, no allocation beyond the struct copy).
+func (a *appCache) get() event.FastContext {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.last
+}
+
+func (a *appCache) set(ctx event.FastContext) {
+	a.mu.Lock()
+	a.last = ctx
+	a.mu.Unlock()
+}
+
+// watchFocusedApp keeps the cache fresh off the hot path. A bounded-interval
+// poll is deliberate: an AX observer per focused-window change would be
+// tidier, but the poll is off the callback path, costs one AX call per
+// interval, and keeps the tap free of notification handling.
+func (c *Core) watchFocusedApp(stop <-chan struct{}, cache *appCache) {
+	wq := adapter.NewWindowQuery(&adapter.Driver{Log: daemonTapLog{}})
+	tick := time.NewTicker(500 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-tick.C:
+			fw, err := wq.Focused()
+			if err != nil {
+				continue // keep the last known app rather than blanking it
+			}
+			cache.set(event.FastContext{
+				AppID:    fw.BundleID,
+				AppMode:  event.AppModeNative,
+				WindowID: fw.Title,
+			})
+		}
+	}
 }

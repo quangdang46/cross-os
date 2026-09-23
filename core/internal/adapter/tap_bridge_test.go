@@ -48,9 +48,11 @@ func TestTapDecideExportRouting(t *testing.T) {
 	// The C callback routes through crossosGoDecide → bound Driver.Decide.
 	// Exercised in-process (no tap needed): bind, call the export, unbind.
 	// The stub Decide suppresses Ctrl+C keydown only (spike A semantics);
-	// everything else passes.
+	// everything else passes. It matches on the TRANSLATED keycode (0x43),
+	// which is the point: the tap receives macOS 0x08 and Decide must see
+	// the internal Windows-VK code the rule table is written in.
 	d := &Driver{Decide: func(ev event.Event, ctx event.FastContext) event.Outcome {
-		if ev.Type == event.EventKeyDown && ev.KeyCode == 0x08 && ev.Modifiers == 1 {
+		if ev.Type == event.EventKeyDown && ev.KeyCode == 0x43 && ev.Modifiers == 1 {
 			return event.Outcome{Decision: pluginapi.DecisionReplace}
 		}
 		return event.Outcome{Decision: pluginapi.DecisionPass}

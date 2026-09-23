@@ -43,7 +43,7 @@ func TestBuiltinParity(t *testing.T) {
 		"developer.ctrl-shift-enter-terminal":  {0x0D, 3, "terminal.openAt", true},
 		"developer.ctrl-shift-c-copypath":      {0x43, 3, "clipboard.copyPath", true},
 		"developer.ctrl-shift-p-editor":        {0x50, 3, "app.open", true},
-		"launcher.ctrl-space-launcher":         {0x31, 1 << 0, "launcher.open", false},
+		"launcher.ctrl-space-launcher":         {0x20, 1 << 0, "launcher.open", false},
 	}
 	seen := map[string]bool{}
 	for _, r := range All() {
@@ -87,8 +87,11 @@ func TestBuiltinDecisionPath(t *testing.T) {
 	if out.Decision != 0 { // DecisionPass: F8 unclaimed
 		t.Fatalf("f8 decision=%v, want pass (unclaimed)", out.Decision)
 	}
+	// Space is the internal Windows VK (0x20); the macOS kVK_Space 0x31 is
+	// translated at the tap boundary (cross-os-uok), so the rule table uses
+	// the internal convention like every other rule.
 	out = rt.Decide(
-		event.Event{Type: event.EventKeyDown, Source: event.SourceKeyboard, KeyCode: 0x31, Modifiers: 1},
+		event.Event{Type: event.EventKeyDown, Source: event.SourceKeyboard, KeyCode: 0x20, Modifiers: 1},
 		native)
 	if out.WinnerRule != "launcher.ctrl-space-launcher" {
 		t.Fatalf("ctrl+space winner=%q", out.WinnerRule)

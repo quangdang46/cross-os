@@ -102,12 +102,24 @@ func crossosGoDecide(keycode uint16, flags uint64, keyDown int32, ctx unsafe.Poi
 		typ = event.EventKeyDown
 	}
 	mods := modsFromFlags(flags)
+	// CGEvent reports macOS virtual keycodes; the rule table is authored in
+	// Windows VK. Translate here, at the only boundary that sees a mac keycode
+	// (bead cross-os-uok). The core.keyEvent diagnostic IPC does NOT go
+	// through this path — it already speaks the internal convention, so its
+	// meaning is unchanged. Unmapped codes pass through and match nothing.
+	win, _ := ToWinKeycode(keycode)
+	// Focused-app context comes from a CACHED snapshot owned by the caller
+	// (bead cross-os-heu) — never an AX query on this hot path.
+	fastCtx := event.FastContext{AppMode: event.AppModeNative}
+	if d.Context != nil {
+		fastCtx = d.Context()
+	}
 	out := d.Decide(event.Event{
 		Type:      typ,
 		Source:    event.SourceKeyboard,
-		KeyCode:   uint32(keycode),
+		KeyCode:   uint32(win),
 		Modifiers: mods,
-	}, event.FastContext{AppMode: event.AppModeNative})
+	}, fastCtx)
 	if out.Decision == pluginapi.DecisionPass {
 		return 0
 	}
