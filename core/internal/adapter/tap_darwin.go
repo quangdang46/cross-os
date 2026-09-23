@@ -38,17 +38,29 @@ type darwinQuery struct{ driver *Driver }
 
 func NewWindowQuery(d *Driver) WindowQuery { return &darwinQuery{driver: d} }
 
-// Focused maps the consent-denied C-ABI result to ErrPermissionDenied so
-// Core's cache serves stale/empty instead of hanging.
+// Focused reads the frontmost app + its focused window over the real AX
+// bridge. A consent denial maps to ErrPermissionDenied so Core's cache
+// serves stale/empty instead of hanging; other AX errors keep their own
+// identity in the stage log.
 func (q *darwinQuery) Focused() (FocusedWindow, error) {
-	return FocusedWindow{}, q.driver.ReportError("query", ErrPermissionDenied)
+	fw, err := axFocusedWindow()
+	if err != nil {
+		return FocusedWindow{}, q.driver.ReportError("query", err)
+	}
+	return fw, nil
 }
 
+// MoveResize moves/resizes the focused window. A request with no move and
+// no resize is rejected up front (nothing to do). The AX path resolves the
+// frontmost app's focused window itself, so ID is used for reporting only.
 func (q *darwinQuery) MoveResize(m MoveResize) error {
-	if m.ID == 0 {
+	if !m.Move && !m.Resize {
 		return q.driver.ReportError("move", errZeroWindow)
 	}
-	return q.driver.ReportError("move", ErrPermissionDenied)
+	if err := axMoveResize(m); err != nil {
+		return q.driver.ReportError("move", err)
+	}
+	return nil
 }
 
 type darwinProbe struct{ driver *Driver }
