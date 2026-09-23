@@ -14,3 +14,8 @@ var tapStartLive = func(d *adapter.Driver) error { return adapter.TapStart(d) }
 var tapStopLive = func(d *adapter.Driver) error { return adapter.TapStop(d) }
 
 var tapLiveLive = func() bool { return adapter.TapLive() }
+
+// unhealthyTap reports whether the live tap escalated after repeated
+// timeout-disables (audit blocker: a silently dead tap used to leave
+// remapping broken with no signal).
+func unhealthyTap() bool { return adapter.TapUnhealthy() }

@@ -133,6 +133,11 @@ func (c *Core) handleStatus(_ json.RawMessage) (any, *ipc.RPCError) {
 	interception := c.interception != nil && c.interception()
 	tapErr := c.tapError
 	c.mu.Unlock()
+	// A tap that keeps timing out is disabled by macOS; say so instead of
+	// reporting a healthy-looking "running" that no longer remaps anything.
+	if unhealthyTap() && tapErr == "" {
+		tapErr = "keyboard tap keeps timing out — remapping degraded"
+	}
 	return map[string]any{
 		"running":      st == pluginapi.LifecycleRunning || st == pluginapi.LifecycleSafeMode,
 		"safe_mode":    st == pluginapi.LifecycleSafeMode,

@@ -300,3 +300,100 @@ func TapPostF9() {
 // written on the tap thread at install and read by TapStop/TapReenable on
 // other goroutines.
 var tapHandle *C.cxtap_t
+
+// --- timeout-disable recovery (audit blocker) ---
+//
+// macOS disables an event tap whenever its callback overruns the system
+// budget and posts kCGEventTapDisabledByTimeout. Before this the C callback
+// returned the event and nothing re-enabled the tap: remapping stopped
+// working with no error, no log line, and no recovery but a daemon restart.
+//
+// Recovery is a LOOP with a bound, not a one-shot: one re-enable treats a
+// symptom, while repeated disables mean the callback is systematically too
+// slow. Past the bound the tap is declared unhealthy and the health signal
+// is surfaced over IPC rather than pretending remapping still works.
+
+// Bounds mirror the spike A recovery harness (platform/darwin/spike_a).
+const (
+	RecoveryWindow  = 30 * time.Second
+	MaxReenables    = 5
+	ReenableBackoff = 100 * time.Millisecond
+)
+
+// tapHealthState guards the recovery counters: the C callback runs on the
+// run-loop thread while re-enables and status reads happen elsewhere.
+var tapHealthState struct {
+	sync.Mutex
+	disables  []time.Time
+	escalated bool
+	reenables int
+}
+
+// crossosGoTapDisabled is called by the C callback on
+// kCGEventTapDisabledByTimeout. It schedules the re-enable on its own
+// goroutine so the callback returns immediately — running recovery inline
+// would blow the budget that caused the disable.
+//
+//export crossosGoTapDisabled
+func crossosGoTapDisabled() {
+	now := time.Now()
+	tapHealthState.Lock()
+	cutoff := now.Add(-RecoveryWindow)
+	kept := tapHealthState.disables[:0]
+	for _, t := range tapHealthState.disables {
+		if t.After(cutoff) {
+			kept = append(kept, t)
+		}
+	}
+	tapHealthState.disables = append(kept, now)
+	escalated := len(tapHealthState.disables) > MaxReenables
+	if escalated {
+		tapHealthState.escalated = true
+	}
+	tapHealthState.Unlock()
+
+	if escalated {
+		// Repeated disables: the callback is too slow to run this way. Stop
+		// poking a dead tap and let the health signal surface instead.
+		return
+	}
+	go func() {
+		time.Sleep(ReenableBackoff)
+		tapMu.Lock()
+		tap := tapHandle
+		tapMu.Unlock()
+		if tap == nil {
+			return
+		}
+		C.cxtap_enable(tap)
+		tapHealthState.Lock()
+		tapHealthState.reenables++
+		tapHealthState.Unlock()
+	}()
+}
+
+// TapUnhealthy reports whether the tap gave up after repeated
+// timeout-disables. The daemon serves this so the UI can say remapping
+// degraded instead of silently doing nothing.
+func TapUnhealthy() bool {
+	tapHealthState.Lock()
+	defer tapHealthState.Unlock()
+	return tapHealthState.escalated
+}
+
+// TapRecoveryStats reports disables seen and re-enables performed.
+func TapRecoveryStats() (disables, reenables int) {
+	tapHealthState.Lock()
+	defer tapHealthState.Unlock()
+	return len(tapHealthState.disables), tapHealthState.reenables
+}
+
+// resetTapRecoveryForTest clears the recovery counters so a test starts from
+// the same state a fresh install has.
+func resetTapRecoveryForTest() {
+	tapHealthState.Lock()
+	tapHealthState.disables = nil
+	tapHealthState.escalated = false
+	tapHealthState.reenables = 0
+	tapHealthState.Unlock()
+}

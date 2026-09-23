@@ -19,3 +19,6 @@ var tapStartLive = func(d *adapter.Driver) error { return errTapUnsupported }
 var tapStopLive = func(d *adapter.Driver) error { return nil }
 
 var tapLiveLive = func() bool { return false }
+
+// unhealthyTap is a no-op where there is no live tap to disable.
+func unhealthyTap() bool { return false }

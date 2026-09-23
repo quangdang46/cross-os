@@ -43,7 +43,12 @@ static CGEventRef cxtap_proc(CGEventTapProxy proxy, CGEventType type,
     (void)proxy;
     cxtap_t *t = (cxtap_t *)refcon;
     if (type == kCGEventTapDisabledByTimeout) {
-        // Owner re-enables via cxtap_enable (Go Recovery loop).
+        // The callback overran the system budget, so the tap is now OFF.
+        // Hand recovery to Go (bounded re-enable loop + health escalation);
+        // returning here keeps this callback short, which is the whole
+        // point — a slow recovery callback is what caused the disable.
+        extern void crossosGoTapDisabled(void);
+        crossosGoTapDisabled();
         return event;
     }
     if (type != kCGEventKeyDown && type != kCGEventKeyUp) {

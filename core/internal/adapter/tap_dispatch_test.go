@@ -80,3 +80,31 @@ func TestTapConsumeWithoutRequestStillSuppresses(t *testing.T) {
 		t.Fatalf("consume with no request: verdict=%d, want 1", got)
 	}
 }
+
+// The timeout-disable path must actually recover, and must give up loudly
+// rather than poking a dead tap forever (audit blocker: the tap used to die
+// silently, leaving remapping broken with no signal).
+func TestTimeoutDisableRecoversThenEscalates(t *testing.T) {
+	// No live tap installed, so a scheduled re-enable finds a nil handle and
+	// no-ops — the accounting is what this pins.
+	for i := 0; i < MaxReenables; i++ {
+		crossosGoTapDisabled()
+	}
+	if TapUnhealthy() {
+		t.Fatalf("tap unhealthy after %d disables, want healthy below the bound", MaxReenables)
+	}
+	disables, _ := TapRecoveryStats()
+	if disables != MaxReenables {
+		t.Fatalf("disables=%d, want %d", disables, MaxReenables)
+	}
+	// Past the bound it escalates and stops scheduling.
+	crossosGoTapDisabled()
+	if !TapUnhealthy() {
+		t.Fatal("sustained timeout-disables must escalate, never spin forever")
+	}
+	// A fresh install resets the state.
+	resetTapRecoveryForTest()
+	if TapUnhealthy() {
+		t.Fatal("a fresh install must start from a clean recovery state")
+	}
+}
