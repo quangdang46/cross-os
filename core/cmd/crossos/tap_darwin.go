@@ -19,3 +19,8 @@ var tapLiveLive = func() bool { return adapter.TapLive() }
 // timeout-disables (audit blocker: a silently dead tap used to leave
 // remapping broken with no signal).
 func unhealthyTap() bool { return adapter.TapUnhealthy() }
+
+// droppedDispatches reports actions the worker never ran. Surfaced on
+// core.status: the key was suppressed at decide time, so without this the
+// user has no way to learn the action did nothing.
+func droppedDispatches() int64 { return adapter.DispatchFailures() }

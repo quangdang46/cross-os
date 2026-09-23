@@ -22,3 +22,6 @@ var tapLiveLive = func() bool { return false }
 
 // unhealthyTap is a no-op where there is no live tap to disable.
 func unhealthyTap() bool { return false }
+
+// droppedDispatches is always zero where there is no live tap.
+func droppedDispatches() int64 { return 0 }
