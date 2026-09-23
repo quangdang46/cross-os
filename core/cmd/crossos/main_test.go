@@ -964,3 +964,30 @@ func TestResumeClearsLatchedPanicStop(t *testing.T) {
 		t.Fatal("resume must clear both the persisted latch and the kill flag")
 	}
 }
+
+// TestEveryShellMethodIsRegistered guards the failure mode where a handler is
+// written and the shell binds to it, but it is missing from the daemon's
+// method table — direct-call tests still pass while every real client gets
+// "no such method". safety.resume shipped exactly that way once.
+func TestEveryShellMethodIsRegistered(t *testing.T) {
+	c, err := NewCore(nil, nil)
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	reg := c.methods()
+	// Every method app/backend calls over the socket.
+	// Taken from the method names app/backend/ipc_client.go actually calls.
+	shellCalls := []string{
+		"core.status", "plugin.list", "plugin.setEnabled",
+		"safety.panicStop", "safety.resume",
+		"safety.beginTrial", "safety.confirmTrial", "safety.rollbackTrial",
+		"core.reset", "core.eventLogs", "core.checkForUpdate",
+		"core.applyUpdate", "config.setRuleEnabled", "config.getShortcuts",
+		"config.setShortcuts",
+	}
+	for _, name := range shellCalls {
+		if _, ok := reg[name]; !ok {
+			t.Errorf("shell calls %q but the daemon never registers it", name)
+		}
+	}
+}

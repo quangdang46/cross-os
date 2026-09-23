@@ -619,7 +619,21 @@ func (c *Core) handleRollbackTrial(raw json.RawMessage) (any, *ipc.RPCError) {
 // tests cannot drive it.
 func (c *Core) Serve(ln net.Listener) *ipc.Server {
 	srv := ipc.NewServer()
-	methods := map[string]ipc.Handler{
+	for name, h := range c.methods() {
+		if err := srv.Register(name, h); err != nil {
+			panic("core: duplicate IPC method " + name)
+		}
+	}
+	go srv.Serve(ln)
+	return srv
+}
+
+// methods is the single IPC method table. It is a named function, not an
+// inline literal, so the test can assert that every method the shell calls
+// is actually registered: a handler written but left out of this map is
+// dead code that only direct-call tests can see.
+func (c *Core) methods() map[string]ipc.Handler {
+	return map[string]ipc.Handler{
 		"core.status":           c.handleStatus,
 		"plugin.list":           c.handlePluginList,
 		"plugin.setEnabled":     c.handlePluginSetEnabled,
@@ -627,6 +641,7 @@ func (c *Core) Serve(ln net.Listener) *ipc.Server {
 		"core.reset":            c.handleReset,
 		"core.eventLogs":        c.handleEventLogs,
 		"safety.panicStop":      c.handlePanicStop,
+		"safety.resume":         c.handleResume,
 		"safety.beginTrial":     c.handleBeginTrial,
 		"safety.confirmTrial":   c.handleConfirmTrial,
 		"safety.rollbackTrial":  c.handleRollbackTrial,
@@ -636,13 +651,6 @@ func (c *Core) Serve(ln net.Listener) *ipc.Server {
 		"config.getShortcuts":   c.handleGetShortcuts,
 		"config.setShortcuts":   c.handleSetShortcuts,
 	}
-	for name, h := range methods {
-		if err := srv.Register(name, h); err != nil {
-			panic("core: duplicate IPC method " + name)
-		}
-	}
-	go srv.Serve(ln)
-	return srv
 }
 
 // socketLockFile holds the process-lifetime flock; deliberately never closed.
