@@ -259,6 +259,19 @@ func (c *IPCCore) ApplyUpdate(manifestVersion, platform, url, sha256 string, app
 	return out.Installed, nil
 }
 
+// Resume implements Core via safety.resume.
+func (c *IPCCore) Resume() (map[string]any, error) {
+	raw, err := c.call("safety.resume", nil)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PanicStop implements Core via safety.panicStop.
 func (c *IPCCore) PanicStop() (map[string]any, error) {
 	raw, err := c.call("safety.panicStop", nil)

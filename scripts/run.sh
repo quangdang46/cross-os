@@ -107,7 +107,13 @@ PY
 
 printf '\n'
 say "Socket:    $SOCKET"
-say "Daemon:    running (pid $(cat "$BIN/daemon.pid" 2>/dev/null || echo 'started earlier'))"
+if [[ -f "$BIN/daemon.pid" ]] && kill -0 "$(cat "$BIN/daemon.pid")" 2>/dev/null; then
+  say "Daemon:    running (pid $(cat "$BIN/daemon.pid"))"
+else
+  # No verified pid: the socket probe above already proved it answers, so
+  # it was started by an earlier run or by launchd.
+  say "Daemon:    running (started earlier — no pid from this run)"
+fi
 
 # Two different "off" states, and they need different advice:
 #   interception:false + no tap_error  → never granted consent

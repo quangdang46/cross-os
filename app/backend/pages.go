@@ -50,11 +50,12 @@ func SafetyPage() pluginapi.UIContribution {
 		"trialTimeoutNote": "Countdown uses the Core TRIAL timeout (safety.TRIALTimeout); the page never hardcodes it.",
 		"controls": []any{
 			map[string]any{"kind": "button", "id": "panicStop", "label": "PANIC STOP — disable interception + plugin actions", "action": "safety.panicStop", "note": "Login item stays. Reversible via Re-enable."},
+			map[string]any{"kind": "button", "id": "resume", "label": "Re-enable interception", "action": "safety.resume", "note": "Clears a latched PANIC STOP and installs the tap again."},
 			map[string]any{"kind": "button", "id": "reset", "label": "Reset Everything…", "action": "safety.reset", "confirm": "Remove login item, disable extension, clean CrossOS-owned state, verify no process remains?"},
 			map[string]any{"kind": "trial", "id": "trialCountdown", "label": "New integration trial", "source": "core:trialCountdown", "actions": []string{"safety.confirmTrial", "safety.rollbackTrial"}},
 			map[string]any{"kind": "auditList", "id": "ownership", "label": "What CrossOS created", "source": "core:ownershipAudit", "rowAction": "safety.rollback"},
 		},
-	}, []string{"safety.panicStop", "safety.reset", "safety.confirmTrial", "safety.rollbackTrial", "safety.rollback"}, "true")
+	}, []string{"safety.panicStop", "safety.resume", "safety.reset", "safety.confirmTrial", "safety.rollbackTrial", "safety.rollback"}, "true")
 }
 
 // AboutPage (ymh.4, §7.2 MVP 0): version, MIT license, repository credits

@@ -180,6 +180,11 @@ function ControlRow(props: {
                 .then(() => onNote('Interception and plugin actions stopped.'))
                 .then(onDone)
                 .catch((e) => onNote(String(e)))
+            } else if (c.action === 'safety.resume') {
+              Service.Resume()
+                .then(() => onNote('PANIC STOP cleared — re-installing the keyboard tap.'))
+                .then(onDone)
+                .catch((e) => onNote(String(e)))
             } else if (c.action === 'safety.reset') {
               Service.ResetEverything()
                 .then((steps) => onNote(`Reset plan: ${(steps ?? []).join(' → ')}`))

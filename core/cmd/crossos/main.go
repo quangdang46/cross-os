@@ -148,6 +148,11 @@ func (c *Core) handleStatus(_ json.RawMessage) (any, *ipc.RPCError) {
 	if unhealthyTap() && tapErr == "" {
 		tapErr = "keyboard tap keeps timing out — remapping degraded"
 	}
+	// Actions the worker could not run. The key was already suppressed, so
+	// this is the ONLY way the user learns the action silently did nothing.
+	if n := droppedDispatches(); n > 0 && tapErr == "" {
+		tapErr = fmt.Sprintf("%d shortcut action(s) could not run — remapping degraded", n)
+	}
 	return map[string]any{
 		"running":      st == pluginapi.LifecycleRunning || st == pluginapi.LifecycleSafeMode,
 		"safe_mode":    st == pluginapi.LifecycleSafeMode,
@@ -468,6 +473,17 @@ func (c *Core) handlePanicStop(_ json.RawMessage) (any, *ipc.RPCError) {
 	c.killed = true
 	stop := c.stopTapFn
 	c.mu.Unlock()
+	// Latch it. A crash-loop respawn would otherwise re-arm the tap and
+	// undo the user's emergency stop without a word.
+	if err := c.set.SetPanicStopped(true); err != nil {
+		fmt.Fprintln(os.Stderr, "crossos: could not persist the kill switch:", err)
+	}
+	// Report the real reason interception is off. Leaving the previous
+	// "consent missing" text in place would send the user to a permission
+	// screen for a problem they already solved.
+	c.mu.Lock()
+	c.tapError = "interception stopped by PANIC STOP — re-enable from the Safety page"
+	c.mu.Unlock()
 	if stop != nil {
 		stop()
 		c.mu.Lock()
@@ -480,6 +496,40 @@ func (c *Core) handlePanicStop(_ json.RawMessage) (any, *ipc.RPCError) {
 		"buffersFlushed":       res.BuffersFlushed,
 		"loginItemKept":        res.LoginItemKept,
 	}, nil
+}
+
+// handleResume clears a latched PANIC STOP and re-installs the tap. Without
+// it the latch is a one-way door: status tells the user to re-enable from
+// the Safety page and no such control exists.
+func (c *Core) handleResume(_ json.RawMessage) (any, *ipc.RPCError) {
+	if err := c.set.SetPanicStopped(false); err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInternal, Message: err.Error()}
+	}
+	c.mu.Lock()
+	c.killed = false
+	c.tapError = ""
+	stop := c.stopTapFn
+	c.stopTapFn = nil
+	c.mu.Unlock()
+	if stop != nil {
+		stop() // release the old stop func so it is not called twice
+	}
+	// startTap installs a fresh watcher + tap; replace the stop func.
+	stop = c.startTap()
+	c.mu.Lock()
+	c.mu.Unlock()
+	if !c.killedState() {
+		return map[string]any{"resumed": true, "interception": tapLiveStatus()}, nil
+	}
+	return map[string]any{"resumed": true, "interception": false,
+		"note": "tap still unavailable: " + c.tapErrorText()}, nil
+}
+
+// tapErrorText reads the last tap failure for reporting.
+func (c *Core) tapErrorText() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.tapError
 }
 
 // handleBeginTrial serves safety.beginTrial: {pluginId} → TRIAL (idempotent:
@@ -595,12 +645,32 @@ func (c *Core) Serve(ln net.Listener) *ipc.Server {
 	return srv
 }
 
+// socketLockFile holds the process-lifetime flock; deliberately never closed.
+var socketLockFile *os.File
+
 // listenSocket binds the Unix socket (0600 dir per ipc doc.go security note),
 // removing a stale socket file first.
 func listenSocket(path string) (net.Listener, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
+	// An exclusive lock, not just a probe. Probing and then binding is a
+	// TOCTOU window: two daemons starting together both see "dead" and both
+	// bind, and a live-but-slow daemon reads as dead. Hold the lock for the
+	// process lifetime so the check and the bind cannot be interleaved.
+	lockPath := path + ".lock"
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		lockFile.Close()
+		return nil, fmt.Errorf("another crossos daemon holds %s — stop it first (scripts/run.sh reuses a running one)", lockPath)
+	}
+	// The lock is intentionally leaked for the process lifetime: closing the
+	// fd would release it and let a second daemon in.
+	socketLockFile = lockFile
+
 	if socketAlive(path) {
 		return nil, fmt.Errorf("another crossos daemon is already serving on %s — stop it first (scripts/run.sh reuses a running one)", path)
 	}
@@ -647,18 +717,23 @@ func main() {
 	// see exactly what failed. The decide entry binds the LIVE decision path
 	// (decideLocked), so config.setRuleEnabled and plugin toggles take effect
 	// on the running tap instead of a start-up snapshot.
-	stopTap := c.startTap()
-	defer stopTap()
-
+	// Own the socket BEFORE touching the keyboard. A process that cannot
+	// serve must never install a tap: on a crash-loop respawn that printed
+	// "interception live" and then exited, leaving launchd to respawn
+	// forever and the log full of misleading lines.
 	path := DefaultSocketPath()
 	ln, err := listenSocket(path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "crossos: listen:", err)
-		os.Exit(1)
+		return
 	}
 	srv := c.Serve(ln)
 	defer srv.Close()
 	fmt.Println("crossos: serving on", path)
+
+	stopTap := c.startTap()
+	defer stopTap()
+
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
@@ -700,6 +775,16 @@ func (c *Core) startTap() func() {
 		Dispatch: c.dispatch,
 		Context:  cache.get,
 		Log:      daemonTapLog{},
+	}
+	// A persisted PANIC STOP outranks everything: do not touch the keyboard.
+	if c.set.PanicStopped() {
+		c.mu.Lock()
+		c.killed = true
+		c.interception = func() bool { return false }
+		c.tapError = "interception stopped by PANIC STOP (re-enable from the Safety page)"
+		c.mu.Unlock()
+		fmt.Println("crossos: PANIC STOP is latched — not installing the keyboard tap")
+		return func() {}
 	}
 	err := tapStartFn(d)
 	c.mu.Lock()
@@ -851,20 +936,26 @@ func (c *Core) watchFocusedApp(stop <-chan struct{}, cache *appCache) {
 	wq := adapter.NewWindowQuery(&adapter.Driver{Log: daemonTapLog{}})
 	tick := time.NewTicker(500 * time.Millisecond)
 	defer tick.Stop()
+	// The AX focused-window call is a synchronous IPC to the frontmost app
+	// with no timeout, so it blocks indefinitely when that app is
+	// unresponsive or consent is missing. Exactly ONE query may be in
+	// flight: starting a new one per tick would pin an OS thread per
+	// blocked call, forever.
+	inFlight := make(chan struct{}, 1)
+	type result struct {
+		fw  adapter.FocusedWindow
+		err error
+	}
 	for {
 		select {
 		case <-stop:
 			return
 		case <-tick.C:
 		}
-		// The AX focused-window call can block indefinitely when the target
-		// app is unresponsive or accessibility consent is missing, so it
-		// runs in its own goroutine with a budget. Without this the watcher
-		// would start a new blocked call every tick and leak a goroutine
-		// each time — a real cost on a machine without consent.
-		type result struct {
-			fw  adapter.FocusedWindow
-			err error
+		select {
+		case inFlight <- struct{}{}:
+		default:
+			continue // a query is still outstanding; do not stack another
 		}
 		done := make(chan result, 1)
 		go func() {
@@ -875,6 +966,7 @@ func (c *Core) watchFocusedApp(stop <-chan struct{}, cache *appCache) {
 		case <-stop:
 			return // abandon the query; it writes to a buffered channel
 		case r := <-done:
+			<-inFlight
 			if r.err != nil {
 				continue // keep the last known app rather than blanking it
 			}
@@ -884,8 +976,10 @@ func (c *Core) watchFocusedApp(stop <-chan struct{}, cache *appCache) {
 				WindowID: r.fw.Title,
 			}, r.fw)
 		case <-time.After(2 * time.Second):
-			// One query is still in flight. Skip this tick rather than
-			// stacking another behind it.
+			// Still blocked. Release the slot anyway: the abandoned call
+			// will finish eventually and write to its buffered channel, and
+			// one stuck query at a time is the bound we can hold.
+			<-inFlight
 		}
 	}
 }

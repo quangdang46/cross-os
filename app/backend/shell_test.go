@@ -86,10 +86,13 @@ type stubCore struct {
 	failSet   error
 }
 
-func (s *stubCore) IsRunning() bool        { return s.running }
-func (s *stubCore) InSafeMode() bool       { return s.safeMode }
-func (s *stubCore) IsKilled() bool         { return s.killed }
-func (s *stubCore) Interception() bool     { return s.intercept }
+func (s *stubCore) IsRunning() bool    { return s.running }
+func (s *stubCore) InSafeMode() bool   { return s.safeMode }
+func (s *stubCore) IsKilled() bool     { return s.killed }
+func (s *stubCore) Interception() bool { return s.intercept }
+func (s *stubCore) Resume() (map[string]any, error) {
+	return map[string]any{"resumed": true, "interception": s.intercept}, nil
+}
 func (s *stubCore) TapError() string       { return s.tapErr }
 func (s *stubCore) Version() string        { return "v0.1.0" }
 func (s *stubCore) Plugins() []PluginState { return s.plugins }

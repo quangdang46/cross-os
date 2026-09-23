@@ -28,6 +28,7 @@ type Store struct {
 	// Absent = enabled. Keyed by RuleID (stable across restarts).
 	disabledRules map[string]bool
 	shortcuts     []winlayout.Shortcut
+	panicStop     bool
 	cfg           *config.Manager
 	cfgPath       string
 }
@@ -38,8 +39,15 @@ type Store struct {
 // kept).
 func ShortcutSchema() config.Schema {
 	return config.Schema{
-		"shortcuts":     {Type: "object", Required: false},
+		// shortcuts is a LIST of {Action, Modifiers, Key} rows, not an
+		// object — the schema said "object" only because nothing persisted
+		// the field before, so the mismatch never surfaced.
+		"shortcuts":     {Type: "array", Required: false},
 		"disabledRules": {Type: "array", Required: false},
+		// panicStop latches the kill switch across restarts. A control that
+		// un-latches on the next crash-loop iteration is worse than none:
+		// the user believes their keyboard is safe while the tap is live.
+		"panicStop": {Type: "bool", Required: false},
 	}
 }
 
@@ -47,7 +55,9 @@ func ShortcutSchema() config.Schema {
 // "" (no persistence — tests); otherwise the user layer loads from disk
 // when present (absent file = defaults, never an error).
 func New(cfgPath string) (*Store, error) {
-	defaults, _ := json.Marshal(map[string]any{"shortcuts": map[string]any{}, "disabledRules": []string{}})
+	defaults, _ := json.Marshal(map[string]any{
+		"shortcuts": []any{}, "disabledRules": []string{}, "panicStop": false,
+	})
 	cfg, err := config.New(defaults, ShortcutSchema())
 	if err != nil {
 		return nil, err
@@ -60,11 +70,13 @@ func New(cfgPath string) (*Store, error) {
 			if jerr := cfg.SetUser(raw); jerr == nil {
 				var doc struct {
 					DisabledRules []string `json:"disabledRules"`
+					PanicStop     bool     `json:"panicStop"`
 				}
 				if uerr := json.Unmarshal(raw, &doc); uerr == nil {
 					for _, id := range doc.DisabledRules {
 						s.disabledRules[id] = true
 					}
+					s.panicStop = doc.PanicStop
 				}
 			}
 		}
@@ -77,6 +89,17 @@ func New(cfgPath string) (*Store, error) {
 
 // IsRuleEnabled reports whether ruleID fires (plugin-gating happens above
 // this layer in decideLocked — this is the USER toggle only).
+// PanicStopped reports whether the user latched PANIC STOP. It survives
+// restarts: a daemon that re-arms the tap after a crash would otherwise
+// undo the emergency control without telling anyone.
+func (s *Store) PanicStopped() bool { return s.panicStop }
+
+// SetPanicStopped latches (or clears) the kill switch and persists it.
+func (s *Store) SetPanicStopped(stopped bool) error {
+	s.panicStop = stopped
+	return s.persistLocked()
+}
+
 func (s *Store) IsRuleEnabled(ruleID string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -133,8 +156,15 @@ func (s *Store) persistLocked() error {
 	for id := range s.disabledRules {
 		disabled = append(disabled, id)
 	}
+	// shortcuts + panicStop travel with the same atomic write.
+	snapshot := s.shortcuts
+	panicStop := s.panicStop
 	s.mu.RUnlock()
-	doc, err := json.Marshal(map[string]any{"disabledRules": disabled})
+	doc, err := json.Marshal(map[string]any{
+		"disabledRules": disabled,
+		"shortcuts":     snapshot,
+		"panicStop":     panicStop,
+	})
 	if err != nil {
 		return err
 	}

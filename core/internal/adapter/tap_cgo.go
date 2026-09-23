@@ -470,8 +470,12 @@ func enqueueDispatch(d *Driver, req intent.Request) {
 
 func dispatchWorker() {
 	for job := range dispatchJobs {
-		if err := job.driver.Dispatch(job.req); err != nil && job.driver.Log != nil {
-			job.driver.Log.Log("action", "dispatch failed after suppression: "+err.Error())
+		if err := job.driver.Dispatch(job.req); err != nil {
+			// The key is already gone; count it so the daemon can say so.
+			dispatchFailures.Add(1)
+			if job.driver.Log != nil {
+				job.driver.Log.Log("action", "dispatch failed after suppression: "+err.Error())
+			}
 		}
 	}
 }

@@ -79,6 +79,8 @@ type Core interface {
 	// interception + plugin actions, keeps the login item. Result names
 	// what stopped — never a silent kill.
 	PanicStop() (map[string]any, error)
+	// Resume clears a latched PANIC STOP and re-installs the tap.
+	Resume() (map[string]any, error)
 	// Interception reports whether the live keyboard tap is installed.
 	Interception() bool
 	// TapError is the last tap install failure, or "" when healthy.
@@ -184,6 +186,16 @@ func (a *App) ApplyUpdate(manifestVersion, platform, url, sha256 string, approve
 		return "", err
 	}
 	return installed, nil
+}
+
+// Resume clears a latched PANIC STOP (the Safety page re-enable control).
+func (a *App) Resume() (map[string]any, error) {
+	res, err := a.core.Resume()
+	if err != nil {
+		a.log.Append("Resume: " + err.Error())
+		return nil, err
+	}
+	return res, nil
 }
 
 // PanicStop executes the kill switch (Safety page button): stops CrossOS

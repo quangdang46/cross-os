@@ -15,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -829,10 +831,22 @@ func TestListenSocketRefusesLiveDaemon(t *testing.T) {
 		t.Fatal("live daemon stopped answering after a second instance tried to start")
 	}
 	ln.Close()
-	// Once it is gone the path is stale, and rebinding is correct.
+	// Release the lock this test's first listenSocket took, so the rebind
+	// below exercises a stale socket rather than our own lock. In
+	// production the lock is held for the process lifetime, which is what
+	// makes the check-and-bind atomic.
+	if socketLockFile != nil {
+		socketLockFile.Close()
+		socketLockFile = nil
+	}
 	if _, err := listenSocket(path); err != nil {
 		t.Fatalf("rebind over a stale socket should succeed: %v", err)
 	}
+	if socketLockFile != nil {
+		socketLockFile.Close()
+		socketLockFile = nil
+	}
+	_ = os.Remove(path + ".lock")
 }
 
 // Two bugs an audit probe caught in the round-2 fixes: a stop func that
@@ -873,5 +887,80 @@ func TestKeyUpNeverActs(t *testing.T) {
 	if up.WinnerRule != "" || up.Decision != pluginapi.DecisionPass {
 		t.Fatalf("keyup acted: winner=%q decision=%v — releasing the chord must not fire the action again",
 			up.WinnerRule, up.Decision)
+	}
+}
+
+// Two daemons starting at once must not both bind: the lock makes the
+// check-and-bind atomic, which a bare probe never was (round-3 audit).
+func TestListenSocketIsExclusiveUnderConcurrency(t *testing.T) {
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("cx-lock-%d.sock", os.Getpid()))
+	_ = os.Remove(path)
+	_ = os.Remove(path + ".lock")
+	defer func() {
+		if socketLockFile != nil {
+			socketLockFile.Close()
+			socketLockFile = nil
+		}
+		_ = os.Remove(path)
+		_ = os.Remove(path + ".lock")
+	}()
+
+	var wg sync.WaitGroup
+	var bound int32
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ln, err := listenSocket(path)
+			if err == nil && ln != nil {
+				atomic.AddInt32(&bound, 1)
+				ln.Close()
+			}
+		}()
+	}
+	wg.Wait()
+	if got := atomic.LoadInt32(&bound); got > 1 {
+		t.Fatalf("%d daemons bound the same socket — the lock is not exclusive", got)
+	}
+}
+
+// The kill switch must be a loop, not a one-way door: status tells the user
+// to re-enable from the Safety page, so that control has to exist and
+// actually clear the latch.
+func TestResumeClearsLatchedPanicStop(t *testing.T) {
+	origStart := tapStartFn
+	defer func() { tapStartFn = origStart }()
+	tapStartFn = func(*adapter.Driver) error { return nil } // no tap in tests
+
+	c, err := NewCoreWithSettings(builtin.All(), builtin.Grants(), "")
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, true)
+	}
+
+	res, rerr := c.handlePanicStop(nil)
+	if rerr != nil {
+		t.Fatalf("panicStop: %v", rerr)
+	}
+	if m, _ := res.(map[string]any); m["interceptionDisabled"] != true {
+		t.Fatalf("panicStop result=%+v, want interceptionDisabled", m)
+	}
+	if !c.killedState() || !c.set.PanicStopped() {
+		t.Fatal("panicStop must latch the kill flag AND persist it")
+	}
+	out := c.decideLocked(
+		event.Event{Type: event.EventKeyDown, KeyCode: 0x43, Modifiers: 1},
+		event.FastContext{AppID: "com.apple.Finder", AppMode: event.AppModeNative})
+	if out.Decision != 0 {
+		t.Fatalf("latched: decision=%v, want PASS (keys must not be eaten)", out.Decision)
+	}
+
+	if _, rerr := c.handleResume(nil); rerr != nil {
+		t.Fatalf("resume: %v", rerr)
+	}
+	if c.set.PanicStopped() || c.killedState() {
+		t.Fatal("resume must clear both the persisted latch and the kill flag")
 	}
 }

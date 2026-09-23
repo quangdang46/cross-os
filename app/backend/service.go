@@ -52,6 +52,9 @@ func (s *Service) PanicStop() (map[string]any, error) {
 	return s.app.PanicStop()
 }
 
+// Resume clears a latched PANIC STOP (Safety page re-enable).
+func (s *Service) Resume() (map[string]any, error) { return s.app.Resume() }
+
 // BeginTrial starts the enable trial (Safety page countdown).
 func (s *Service) BeginTrial(pluginID string) (string, error) {
 	return s.app.BeginTrial(pluginID)
