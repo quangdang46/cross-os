@@ -127,6 +127,16 @@ func matrixAction(r event.CompiledRule) string {
 			return winlayout.ActionName(a)
 		}
 	}
+	// The switcher names its two halves the way the user performs them.
+	// winlayout does not own window.switcher (its action vocabulary is the
+	// snap set), so without this the matrix would show the same raw
+	// "window.switcher" on both rows and the user could not tell which one
+	// is the press and which is the release.
+	if r.Intent.ID == "window.switcher" {
+		if action := switcherAction(r.Intent); action != "" {
+			return action
+		}
+	}
 	return r.Intent.ID
 }
 
@@ -164,8 +174,22 @@ func ruleContexts(r event.CompiledRule) []string {
 	return append(out, r.AppIDs...)
 }
 
-// chord renders a rule's physical binding.
-func chord(r event.CompiledRule) string { return chordOf(r.KeyCode, r.Modifiers) }
+// chord renders a rule's physical binding. A rule that declares a phase
+// other than the key-down default carries it in the rendering ("Alt+Tab on
+// release"), because two rules on one chord that differ only by phase are not
+// the same binding and the matrix has to show which half fires when.
+func chord(r event.CompiledRule) string {
+	c := chordOf(r.KeyCode, r.Modifiers)
+	for _, t := range r.EventTypes {
+		switch t {
+		case event.EventKeyUp:
+			return c + " on release"
+		case event.EventFlagsChanged:
+			return c + " on flags"
+		}
+	}
+	return c
+}
 
 // chordOf renders a keycode + modifier mask as the chord the pages show. The
 // rule table is authored in Windows virtual-key codes (core/rules header) and

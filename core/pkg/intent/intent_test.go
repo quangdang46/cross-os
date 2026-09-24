@@ -15,9 +15,10 @@ func TestCanonicalV1Count(t *testing.T) {
 	// §3.12 lists 19 capabilities + clipboard.copy (added for the s4i
 	// Ctrl+C→COPY mapping; review: cross-os-c0 — copyPath is file-paths
 	// copy, not selection copy) + launcher.open (shell-owned palette
-	// action, bead cross-os-jpr.4).
-	if got := len(r.IDs()); got != 21 {
-		t.Fatalf("canonical v1: got %d IDs, want 21: %v", got, r.IDs())
+	// action, bead cross-os-jpr.4) + window.switcher (the Alt+Tab
+	// gesture's one capability, carrying both its summon and its commit).
+	if got := len(r.IDs()); got != 22 {
+		t.Fatalf("canonical v1: got %d IDs, want 22: %v", got, r.IDs())
 	}
 }
 
@@ -26,6 +27,7 @@ func TestCanonicalV1IDs(t *testing.T) {
 	for _, id := range []string{
 		"input.observe", "input.intercept",
 		"window.read", "window.move", "window.close", "window.minimize", "window.maximize",
+		"window.switcher",
 		"clipboard.read", "clipboard.write", "clipboard.copy", "clipboard.copyPath",
 		"filesystem.read", "filesystem.write", "filesystem.createFile",
 		"filesystem.createFolder", "file.moveToTrash",

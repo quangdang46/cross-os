@@ -194,6 +194,9 @@ func TestEveryPageDataMethodIsRegistered(t *testing.T) {
 		"core.readiness",
 		"core.profiles", "core.profileApply", "core.conflicts",
 		"core.traces", "core.pluginMeta", "core.onboardingState",
+		// The Alt+Tab switcher's three sources: the list, the long-poll the
+		// shell parks on, and the focus a commit performs.
+		"core.windows", "core.switcherWait", "core.switcherFocus",
 	} {
 		if _, ok := reg[name]; !ok {
 			t.Errorf("page data source %q is not in the method table", name)

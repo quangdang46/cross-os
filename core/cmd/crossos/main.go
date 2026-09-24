@@ -97,6 +97,12 @@ type Core struct {
 	// §3.10 rollback scope — the audit names nothing else, because CrossOS
 	// never rolls back state it did not make.
 	owned []safety.IntegrationRecord
+	// switcher is the Alt+Tab switcher's daemon state: the open session, the
+	// unread triggers, and the platform window seam. Built here rather than
+	// on first use so core.windows answers before any chord has been
+	// pressed — a source that only appears once the gesture has fired cannot
+	// render the list the gesture is about to choose from.
+	switcher *switcherService
 }
 
 // NewCore builds a Core with the daemon running and builtin matrices loaded.
@@ -124,6 +130,7 @@ func NewCoreWithSettings(rules []event.CompiledRule, grants map[string][]intent.
 	}
 	c := &Core{
 		daemon:    d,
+		switcher:  newSwitcherService(adapter.NewWindowLister(&adapter.Driver{Log: daemonTapLog{}})),
 		router:    event.Compile(rules, reg, grants, nil),
 		rec:       record.NewRecorder(),
 		set:       set,
@@ -249,14 +256,12 @@ func (c *Core) handlePluginSetEnabled(raw json.RawMessage) (any, *ipc.RPCError) 
 // recompile is microseconds, and correctness beats caching here). Caller holds
 // no lock; this takes mu to snapshot the enable set.
 func (c *Core) decideLocked(ev event.Event, ctx event.FastContext) event.Outcome {
-	// Only a key-down can be acted on. Acting on key-up would fire the
-	// same action a second time when the chord is released — pressing
-	// Win+Left would snap the window, then snap it again on release.
-	if ev.Type != event.EventKeyDown {
-		return event.Outcome{
-			Event: ev, Context: ctx, Decision: pluginapi.DecisionPass, At: time.Now(),
-		}
-	}
+	// Which phase of a key may be acted on is the RULE's declaration now, not
+	// a blanket drop here: a rule that says nothing claims key-down only, and
+	// a rule that declares EventKeyUp claims the release. Dropping every
+	// non-key-down event before matching is what made the release half of a
+	// gesture unreachable — the reason Alt+Tab could not commit on the chord
+	// the user actually let go of.
 	c.mu.Lock()
 	enabled := map[string]bool{}
 	for id, on := range c.plugins {
@@ -827,6 +832,11 @@ func (c *Core) methods() map[string]ipc.Handler {
 		"core.pluginMeta":      c.handlePluginMeta,
 		"core.onboardingState": c.handleOnboardingState,
 		"core.apps":            c.handleApps,
+		// The Alt+Tab switcher (ws-3): the list the switcher page draws, the
+		// bounded long-poll it waits on, and the focus a commit performs.
+		"core.windows":       c.handleWindows,
+		"core.switcherWait":  c.handleSwitcherWait,
+		"core.switcherFocus": c.handleSwitcherFocus,
 		// The user-rule table (w2-userrules). The handlers live on
 		// userRuleService in userules.go, so these four entries are
 		// the whole of that file's publishing.
@@ -1094,6 +1104,8 @@ func (c *Core) dispatch(req intent.Request) error {
 	switch req.Capability.ID {
 	case "window.move", "window.minimize", "window.maximize", "window.close":
 		return c.windowDispatch(req, c.windowCache)
+	case "window.switcher":
+		return c.applySwitcher(req)
 	case "clipboard.copyPath":
 		return copyPaths(req.Intent.Parameters)
 	case "filesystem.createFile":

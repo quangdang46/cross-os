@@ -28,6 +28,7 @@ import (
 // literals in sync by test, not import — same convention as the plugins).
 const (
 	vkC      = 0x43
+	vkTab    = 0x09
 	vkP      = 0x50
 	vkLeft   = 0x25
 	vkUp     = 0x26
@@ -133,13 +134,39 @@ func launcherRules() []event.CompiledRule {
 	return nil
 }
 
+// The Alt+Tab switcher gesture: two rules, one chord. Alt+Tab's release is
+// what commits the highlight (ShortcutAction.swift:39-49 — acting on a tile
+// is a commitment), so the down and the up are DIFFERENT intentions and the
+// router has to be able to see which half fired. That is what the two
+// EventTypes below are for: without them the pair shares a keycode and a
+// modifier mask, collapses to one winner, and the other reads as a chord
+// conflict in the editor.
+//
+// The chord itself is the Windows-profile one (winlayout Windows11Shortcuts
+// "Alt / Tab / App Switcher"), and these rules are the capability that row
+// said it did not have yet.
+func switcherRules() []event.CompiledRule {
+	summon := mkRule(vkTab, modAlt, nativeTerminal, nil,
+		"windows-keyboard.alt-tab-summon-switcher", "windows-keyboard",
+		rule.PriorityGlobal, 1, rule.ScopeGlobal,
+		mkIntent("window.switcher", `{"action":"summon"}`), true)
+	summon.EventTypes = []event.EventType{event.EventKeyDown}
+	commit := mkRule(vkTab, modAlt, nativeTerminal, nil,
+		"windows-keyboard.alt-tab-commit-switcher", "windows-keyboard",
+		rule.PriorityGlobal, 1, rule.ScopeGlobal,
+		mkIntent("window.switcher", `{"action":"commit"}`), true)
+	commit.EventTypes = []event.EventType{event.EventKeyUp}
+	return []event.CompiledRule{summon, commit}
+}
+
 // BuiltinIDs lists the builtin plugin IDs in registration order (matches
 // the daemon's registerBuiltin order and the shell's plugin list).
 var BuiltinIDs = []string{"windows-keyboard", "developer", "launcher"}
 
-// All returns every builtin rule (6 + 3 + 1 = 10).
+// All returns every builtin rule (6 keyboard + 2 switcher + 3 developer).
 func All() []event.CompiledRule {
 	out := keyboardRules()
+	out = append(out, switcherRules()...)
 	out = append(out, developerRules()...)
 	out = append(out, launcherRules()...)
 	return out

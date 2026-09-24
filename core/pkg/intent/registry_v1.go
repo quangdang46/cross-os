@@ -72,6 +72,23 @@ func canonicalV1() []CapabilityDescriptor {
 			Reversible:  true,
 		},
 		{
+			ID: "window.switcher", Version: "1",
+			Description: "Drive the window switcher over the MRU list: summon it, or commit the selection",
+			// access.control, not input.intercept: committing raises another
+			// app's window, which is the same "control other apps" consent
+			// window.move already asks for. The summon half only draws shell
+			// UI, but the capability covers both and the wider consent is the
+			// honest one to gate the pair on.
+			Permission: PermAccessControl,
+			InputSchema: Schema{
+				Required:   []string{"action"},
+				Properties: map[string]string{"action": "string"},
+			},
+			Platforms:   []Platform{PlatformMacOS, PlatformWindows},
+			SideEffects: []SideEffect{SideEffectInjectsInput},
+			Reversible:  true,
+		},
+		{
 			ID: "clipboard.read", Version: "1",
 			Description: "Read clipboard content",
 			Permission:  PermAccessControl,

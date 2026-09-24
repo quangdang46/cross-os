@@ -8,6 +8,7 @@
 package rules
 
 import (
+	"encoding/json"
 	"testing"
 
 	"crossos/core/pkg/event"
@@ -17,11 +18,11 @@ import (
 
 func TestBuiltinCount(t *testing.T) {
 	all := All()
-	// 9 live rules: 6 keyboard + 3 developer. The launcher's Ctrl+Space is
-	// reserved but not compiled — no palette exists to honour it, and
-	// claiming a key with no handler is a swallowed no-op.
-	if len(all) != 9 {
-		t.Fatalf("builtin rules=%d, want 9 (6 keyboard + 3 developer; launcher key reserved, not claimed)", len(all))
+	// 11 live rules: 6 keyboard + 2 switcher + 3 developer. The launcher's
+	// Ctrl+Space is reserved but not compiled — no palette exists to honour
+	// it, and claiming a key with no handler is a swallowed no-op.
+	if len(all) != 11 {
+		t.Fatalf("builtin rules=%d, want 11 (6 keyboard + 2 switcher + 3 developer; launcher key reserved, not claimed)", len(all))
 	}
 	if len(BuiltinIDs) != 3 {
 		t.Fatalf("builtin ids=%v, want 3", BuiltinIDs)
@@ -43,9 +44,13 @@ func TestBuiltinParity(t *testing.T) {
 		"windows-keyboard.win-right-snap":      {0x27, 1 << 3, "window.move", true},
 		"windows-keyboard.win-up-maximize":     {0x26, 1 << 3, "window.maximize", true},
 		"windows-keyboard.win-down-minimize":   {0x28, 1 << 3, "window.minimize", true},
-		"developer.ctrl-shift-enter-terminal":  {0x0D, 3, "terminal.openAt", true},
-		"developer.ctrl-shift-c-copypath":      {0x43, 3, "clipboard.copyPath", true},
-		"developer.ctrl-shift-p-editor":        {0x50, 3, "app.open", true},
+		// The Alt+Tab gesture. One chord, two phases: what differs is the
+		// key's phase, so the parity pin below checks it alongside the key.
+		"windows-keyboard.alt-tab-summon-switcher": {0x09, 1 << 2, "window.switcher", true},
+		"windows-keyboard.alt-tab-commit-switcher": {0x09, 1 << 2, "window.switcher", true},
+		"developer.ctrl-shift-enter-terminal":      {0x0D, 3, "terminal.openAt", true},
+		"developer.ctrl-shift-c-copypath":          {0x43, 3, "clipboard.copyPath", true},
+		"developer.ctrl-shift-p-editor":            {0x50, 3, "app.open", true},
 	}
 	seen := map[string]bool{}
 	for _, r := range All() {
@@ -63,12 +68,37 @@ func TestBuiltinParity(t *testing.T) {
 		if r.Emit != w.emit {
 			t.Fatalf("rule %s: emit=%v, want %v", r.RuleID, r.Emit, w.emit)
 		}
+		// A rule that names a phase is pinned on it. Left unchecked, the two
+		// Alt+Tab rows could both drift to the same phase and the parity test
+		// would still pass on the keycode, while the gesture stopped being
+		// two halves.
+		if phases, ok := switcherPhases[r.RuleID]; ok {
+			if len(r.EventTypes) != len(phases) {
+				t.Fatalf("rule %s: %d phases declared, want %d", r.RuleID, len(r.EventTypes), len(phases))
+			}
+			for i, p := range phases {
+				if r.EventTypes[i] != p {
+					t.Fatalf("rule %s: phase %d is %v, want %v", r.RuleID, i, r.EventTypes[i], p)
+				}
+			}
+		} else if len(r.EventTypes) != 0 {
+			t.Fatalf("rule %s declares phase(s) %v; the pin above has no entry for it", r.RuleID, r.EventTypes)
+		}
 	}
 	for id := range want {
 		if !seen[id] {
 			t.Fatalf("missing rule %q (plugin matrix row not ported)", id)
 		}
 	}
+}
+
+// switcherPhases pins the phase each phase-bearing rule must declare. It is
+// its own table because the keycode parity cannot tell the two Alt+Tab rules
+// apart: both drift to the same phase, the keycode check still passes, and
+// the gesture silently stops being two halves.
+var switcherPhases = map[string][]event.EventType{
+	"windows-keyboard.alt-tab-summon-switcher": {event.EventKeyDown},
+	"windows-keyboard.alt-tab-commit-switcher": {event.EventKeyUp},
 }
 
 func TestBuiltinDecisionPath(t *testing.T) {
@@ -99,4 +129,43 @@ func TestBuiltinDecisionPath(t *testing.T) {
 		t.Fatalf("ctrl+space decision=%v, want pass (no palette to honour it yet)", out.Decision)
 	}
 	var _ = rule.PriorityGlobal
+}
+
+// The two halves of the Alt+Tab gesture resolve to DIFFERENT intents through
+// the real router — the same discipline f41bc56 applied to the conflict
+// dialog. A fabricated table could "prove" the pair by looking each rule up
+// by name; these go through event.Compile over the whole builtin table and
+// the real grant set, so the answer is the one the keyboard gives. The
+// release is what commits, which is the reason the phase exists at all
+// (ShortcutAction.swift:39-49).
+func TestSwitcherGestureResolvesThroughTheRealRouter(t *testing.T) {
+	rt := event.Compile(All(), intent.DefaultRegistry(), Grants(), nil)
+	native := event.FastContext{AppID: "com.apple.Finder", AppMode: event.AppModeNative}
+	for _, tc := range []struct {
+		phase  event.EventType
+		winner string
+		action string
+	}{
+		{event.EventKeyDown, "windows-keyboard.alt-tab-summon-switcher", "summon"},
+		{event.EventKeyUp, "windows-keyboard.alt-tab-commit-switcher", "commit"},
+	} {
+		out := rt.Decide(
+			event.Event{Type: tc.phase, Source: event.SourceKeyboard, KeyCode: vkTab, Modifiers: modAlt},
+			native)
+		if out.WinnerRule != tc.winner {
+			t.Fatalf("Alt+Tab phase %v: winner=%q, want %q", tc.phase, out.WinnerRule, tc.winner)
+		}
+		if out.Intent.ID != "window.switcher" {
+			t.Fatalf("Alt+Tab phase %v: intent=%q, want window.switcher", tc.phase, out.Intent.ID)
+		}
+		var p struct {
+			Action string `json:"action"`
+		}
+		if err := json.Unmarshal(out.Intent.Parameters, &p); err != nil {
+			t.Fatalf("Alt+Tab phase %v: params: %v", tc.phase, err)
+		}
+		if p.Action != tc.action {
+			t.Fatalf("Alt+Tab phase %v: action=%q, want %q", tc.phase, p.Action, tc.action)
+		}
+	}
 }

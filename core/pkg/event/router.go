@@ -20,6 +20,15 @@ type CompiledRule struct {
 	AppIDs    []string  // empty = any app
 	DeviceIDs []string  // empty = any device
 
+	// EventTypes are the phases of the key this rule acts on; an empty list
+	// means key-down only (see matches). The phase is part of the match
+	// because a chord and its release are two intentions made with the same
+	// fingers: Alt+Tab down opens the window switcher, Alt+Tab up commits it.
+	// A matcher that saw only keycode+modifiers could not tell those rules
+	// apart, so the pair collapsed into one arbitrary winner and the other
+	// was reported as a conflict it never was.
+	EventTypes []EventType
+
 	// Claim (feeds rule.Candidate).
 	RuleID      string
 	PluginID    string
@@ -37,6 +46,28 @@ type CompiledRule struct {
 // matches reports whether the rule claims the event under the context.
 // Pure, branch-light, no syscalls — safe for the callback path.
 func (r CompiledRule) matches(ev Event, ctx FastContext) bool {
+	// A rule claims the key-down phase unless it says otherwise. Defaulting
+	// to key-down rather than "any phase" is what keeps every rule written
+	// before phases existed behaving exactly as it did: the daemon used to
+	// drop every non-key-down event before matching, so a key-down rule must
+	// still not match a key-up or releasing the chord fires the action
+	// twice. A rule that acts on release declares EventKeyUp.
+	if len(r.EventTypes) == 0 {
+		if ev.Type != EventKeyDown {
+			return false
+		}
+	} else {
+		claimed := false
+		for _, t := range r.EventTypes {
+			if t == ev.Type {
+				claimed = true
+				break
+			}
+		}
+		if !claimed {
+			return false
+		}
+	}
 	if r.KeyCode != ev.KeyCode {
 		return false
 	}
