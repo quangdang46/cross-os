@@ -83,6 +83,12 @@ type Core struct {
 	// windowCache is the watcher-maintained focused-window snapshot that
 	// window actions read, so no action ever runs a blocking AX query.
 	windowCache *appCache
+	// owned is the ledger behind safety.ownershipAudit: the system resources
+	// this daemon created, recorded at the moment of creation (see
+	// pagedata.go). Together with the files the daemon has written it is the
+	// §3.10 rollback scope — the audit names nothing else, because CrossOS
+	// never rolls back state it did not make.
+	owned []safety.IntegrationRecord
 }
 
 // NewCore builds a Core with the daemon running and builtin matrices loaded.
@@ -145,13 +151,11 @@ func (c *Core) handleStatus(_ json.RawMessage) (any, *ipc.RPCError) {
 	c.mu.Unlock()
 	// A tap that keeps timing out is disabled by macOS; say so instead of
 	// reporting a healthy-looking "running" that no longer remaps anything.
-	if unhealthyTap() && tapErr == "" {
-		tapErr = "keyboard tap keeps timing out — remapping degraded"
-	}
-	// Actions the worker could not run. The key was already suppressed, so
-	// this is the ONLY way the user learns the action silently did nothing.
-	if n := droppedDispatches(); n > 0 && tapErr == "" {
-		tapErr = fmt.Sprintf("%d shortcut action(s) could not run — remapping degraded", n)
+	// A dropped action is reported for the same reason: the key was already
+	// suppressed, so this is the ONLY way the user learns it did nothing.
+	// Shared with core.readiness (tapDegraded) so the two never disagree.
+	if degraded := tapDegraded(); degraded != "" && tapErr == "" {
+		tapErr = degraded
 	}
 	return map[string]any{
 		"running":      st == pluginapi.LifecycleRunning || st == pluginapi.LifecycleSafeMode,
@@ -197,10 +201,10 @@ func (c *Core) handlePluginSetEnabled(raw json.RawMessage) (any, *ipc.RPCError) 
 
 // decideLocked runs one key event through the router + recorder tap and
 // returns the decision. Disabled plugins' rules never fire, and neither do
-// user-disabled matrix rows: the router is rebuilt from enabled-only rules
-// on every toggle (10 rules — recompile is microseconds, and correctness
-// beats caching here). Caller holds no lock; this takes mu to snapshot the
-// enable set.
+// user-disabled matrix rows or rules the focused app has overridden off: the
+// router is rebuilt from enabled-only rules on every toggle (10 rules —
+// recompile is microseconds, and correctness beats caching here). Caller holds
+// no lock; this takes mu to snapshot the enable set.
 func (c *Core) decideLocked(ev event.Event, ctx event.FastContext) event.Outcome {
 	// Only a key-down can be acted on. Acting on key-up would fire the
 	// same action a second time when the chord is released — pressing
@@ -220,7 +224,20 @@ func (c *Core) decideLocked(ev event.Event, ctx event.FastContext) event.Outcome
 	var all []event.CompiledRule
 	for _, r := range builtin.All() {
 		known[r.RuleID] = true
-		if enabled[r.PluginID] && c.set.IsRuleEnabled(r.RuleID) {
+		if !enabled[r.PluginID] {
+			continue
+		}
+		// A stored per-app verdict SHADOWS the global toggle: absent, the
+		// global decides; present, the focused app's own opinion wins. This is
+		// the read that makes config.setOverride a real edit rather than a
+		// row in config.json — the Keyboard page promises the toggle takes
+		// effect immediately. Plugin enablement above is NOT shadowable: an
+		// override is a verdict about a rule, not a permission to run it.
+		fires := c.set.IsRuleEnabled(r.RuleID)
+		if on, ok := c.set.Override(ctx.AppID, r.RuleID); ok {
+			fires = on
+		}
+		if fires {
 			all = append(all, r)
 		}
 	}
@@ -650,6 +667,18 @@ func (c *Core) methods() map[string]ipc.Handler {
 		"config.setRuleEnabled": c.handleSetRuleEnabled,
 		"config.getShortcuts":   c.handleGetShortcuts,
 		"config.setShortcuts":   c.handleSetShortcuts,
+		// The ten settings-page data sources (cross-os-jzj). One method per
+		// page control `source` string; see pagedata.go.
+		"config.getMatrix":      c.handleGetMatrix,
+		"config.getOverrides":   c.handleGetOverrides,
+		"config.setOverride":    c.handleSetOverride,
+		"config.getZones":       c.handleGetZones,
+		"config.setZones":       c.handleSetZones,
+		"core.commands":         c.handleCoreCommands,
+		"core.pluginSchemas":    c.handlePluginSchemas,
+		"safety.ownershipAudit": c.handleOwnershipAudit,
+		"safety.trialState":     c.handleTrialState,
+		"core.readiness":        c.handleReadiness,
 	}
 }
 
@@ -836,6 +865,20 @@ func (c *Core) startTap() func() {
 		fmt.Println("crossos: keyboard interception live")
 	}
 	c.mu.Unlock()
+	if err == nil {
+		// The tap is a real OS resource (an event tap, or a low-level hook on
+		// Windows) that exists only because CrossOS installed it, so it
+		// belongs in the ownership ledger. The process is its identity: there
+		// is no other handle to name.
+		c.own(safety.IntegrationRecord{
+			PluginID:    "core",
+			Type:        safety.IntegrationAccessTap,
+			Identifier:  fmt.Sprintf("pid:%d", os.Getpid()),
+			StateBefore: "no keyboard interception",
+			Rollback:    "safety.panicStop stops interception and removes the tap",
+			CreatedAt:   time.Now(),
+		})
+	}
 
 	var stopOnce sync.Once
 	stop := func() {

@@ -984,6 +984,14 @@ func TestEveryShellMethodIsRegistered(t *testing.T) {
 		"core.reset", "core.eventLogs", "core.checkForUpdate",
 		"core.applyUpdate", "config.setRuleEnabled", "config.getShortcuts",
 		"config.setShortcuts",
+		// The ten settings-page data sources (cross-os-72g/jzj). They travel
+		// the same socket and a page source missing here is the same failure
+		// safety.resume shipped as: every direct-call test passes while the
+		// window reports "no such method".
+		"config.getMatrix", "config.getOverrides", "config.setOverride",
+		"config.getZones", "config.setZones", "core.commands",
+		"core.pluginSchemas", "safety.ownershipAudit", "safety.trialState",
+		"core.readiness",
 	}
 	for _, name := range shellCalls {
 		if _, ok := reg[name]; !ok {
