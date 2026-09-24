@@ -638,6 +638,14 @@ func (c *Core) readinessRows() []readinessRow {
 	out = append(out, surfaceRow("windows", "Windows shortcuts", profilePlugins(), enabled, killed))
 	out = append(out, surfaceRow("finder", "Finder shortcuts", finderPlugins(), enabled, killed))
 
+	// The profile row sits with the product rows and above the plugin rows it is
+	// made of: it answers whether the pick landed, the rows below report the
+	// switches. It goes red for the same plugin the windows row names, and that
+	// overlap is the point — one row says the switch is off, the other says the
+	// profile behind it is not in force, and the windows row keeps its own
+	// meaning either way, because a switch is the user's to flip.
+	out = append(out, c.profileReadinessRow(enabled, killed))
+
 	// The plugin ID doubles as the label: no manifest is loaded at runtime
 	// (see core.pluginSchemas), so there is no display name to read and a
 	// prettified guess would be a second source of truth to keep in sync.
@@ -672,6 +680,56 @@ func surfaceRow(id, label string, plugins []string, enabled map[string]bool, kil
 				row.Detail = p + " is not switched on"
 				break
 			}
+		}
+	}
+	row.Ready = row.Detail == ""
+	return row
+}
+
+// profileReadinessRow reports on the profile the user picked: ready only when
+// the stored id names a bundle this build ships AND every capability that
+// bundle delivers is live. The verdict is capabilityRollup's, the one the
+// profile card already draws, so the checklist beside the card cannot say the
+// pick landed while the card says it did not.
+//
+// The detail names which half is unmet — "you never chose" and "you chose and a
+// switch is off" are different work, and "not ready" alone leaves the user
+// guessing between them. A stored id that names no bundle is a third case: the
+// field is free text, so a profile from a build that shipped one this one does
+// not can be sitting in the document, and a row that went ready for a bundle it
+// cannot enumerate would be green for nothing.
+func (c *Core) profileReadinessRow(enabled map[string]bool, killed bool) readinessRow {
+	row := readinessRow{ID: "profile", Label: "Profile"}
+	if killed {
+		row.Detail = "plugin actions stopped by PANIC STOP"
+		return row
+	}
+	active := c.set.ActiveProfile()
+	if active == "" {
+		row.Detail = "no profile is chosen yet"
+		return row
+	}
+	bundle, ok := profileByID(active)
+	if !ok {
+		row.Detail = "no profile bundle is named " + strconv.Quote(active)
+		return row
+	}
+	row.Label = bundle.Label
+	for _, cap := range bundle.Capabilities {
+		if !cap.Available {
+			continue // a gap the bundle declares, not a switch the user can flip
+		}
+		st := c.capabilityRollup(cap, enabled)
+		switch {
+		case st.Live:
+		case !enabled[cap.Plugin]:
+			row.Detail = cap.Plugin + " is not switched on"
+		default:
+			row.Detail = fmt.Sprintf("%s has %d of %d shortcuts switched off",
+				cap.Label, st.Total-st.Enabled, st.Total)
+		}
+		if row.Detail != "" {
+			break // the first gap is the one to fix
 		}
 	}
 	row.Ready = row.Detail == ""

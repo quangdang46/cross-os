@@ -605,6 +605,129 @@ func TestReadinessReportsLiveState(t *testing.T) {
 	}
 }
 
+// readinessRowByID reads one row the way the shell does: through the handler, so
+// the json tags are part of what the test holds.
+func readinessRowByID(t *testing.T, c *Core, id string) readinessRow {
+	t.Helper()
+	res, rerr := c.handleReadiness(nil)
+	for _, r := range decodeRows[readinessRow](t, res, rerr) {
+		if r.ID == id {
+			return r
+		}
+	}
+	t.Fatalf("the readiness list has no %q row", id)
+	return readinessRow{}
+}
+
+// awaitReadiness polls a row to a deadline instead of trusting the write that
+// should have changed it — pcfy-my-mac/cmd/task/task.go confirms an install by
+// polling common.Exists for exactly this reason: the call returning is not the
+// thing landing, and the row is the only witness to whether it did.
+func awaitReadiness(t *testing.T, c *Core, id string, want bool) readinessRow {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		row := readinessRowByID(t, c, id)
+		if row.Ready == want {
+			return row
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s row=%+v, want ready=%v", id, row, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestProfileReadinessRowProvesThePickLanded: the readiness list has to say the
+// profile the user picked is in force, not merely that its plugin is on — the
+// windows row already answers the second question, and a checklist whose
+// profile row could not tell the two apart would go green on a profile the user
+// never applied.
+func TestProfileReadinessRowProvesThePickLanded(t *testing.T) {
+	c, err := NewCoreWithSettings(builtin.All(), builtin.Grants(),
+		filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatalf("NewCoreWithSettings: %v", err)
+	}
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, false)
+	}
+
+	fresh := readinessRowByID(t, c, "profile")
+	if fresh.Ready || fresh.Detail != "no profile is chosen yet" {
+		t.Errorf("fresh profile row=%+v, want not ready naming the missing pick", fresh)
+	}
+	// The windows row keeps its own meaning: it reports the switch that is off,
+	// with nothing about a profile in the sentence.
+	windows := readinessRowByID(t, c, "windows")
+	if windows.Ready || !strings.Contains(windows.Detail, "windows-keyboard is not switched on") {
+		t.Errorf("windows row=%+v on a fresh daemon, want the plugin toggle and no profile talk", windows)
+	}
+
+	if _, perr := c.handleProfileApply(json.RawMessage(`{"profile":"windows-11-experience"}`)); perr != nil {
+		t.Fatalf("profileApply: %v", perr)
+	}
+	if row := awaitReadiness(t, c, "profile", true); row.Detail != "" {
+		t.Errorf("a ready profile row still carries a detail: %q", row.Detail)
+	}
+
+	// Switching the plugin back off is the profile going out of force, and the
+	// row has to name the switch that did it.
+	if _, perr := c.handlePluginSetEnabled(
+		json.RawMessage(`{"id":"windows-keyboard","enabled":false}`)); perr != nil {
+		t.Fatalf("plugin.setEnabled: %v", perr)
+	}
+	off := awaitReadiness(t, c, "profile", false)
+	if !strings.Contains(off.Detail, "windows-keyboard") {
+		t.Errorf("profile row=%+v with its plugin off, want the plugin named", off)
+	}
+	if !strings.Contains(off.Detail, "not switched on") {
+		t.Errorf("profile row=%+v does not say the switch is off", off)
+	}
+	if row := readinessRowByID(t, c, "windows"); row.Ready {
+		t.Errorf("windows row=%+v reports ready with its plugin off", row)
+	}
+
+	// A capability whose plugin is on but whose shortcuts are not all lit is
+	// the same red row: capabilityRollup counts rules, so a half-applied
+	// profile must not read as a landed one.
+	if _, perr := c.handlePluginSetEnabled(
+		json.RawMessage(`{"id":"windows-keyboard","enabled":true}`)); perr != nil {
+		t.Fatalf("plugin.setEnabled: %v", perr)
+	}
+	if row := awaitReadiness(t, c, "profile", true); !row.Ready {
+		t.Fatalf("profile row=%+v after switching the plugin back on", row)
+	}
+	const shortcut = "windows-keyboard.win-left-snap"
+	if _, rerr := c.handleSetRuleEnabled(
+		json.RawMessage(`{"ruleId":"` + shortcut + `","enabled":false}`)); rerr != nil {
+		t.Fatalf("setRuleEnabled: %v", rerr)
+	}
+	half := awaitReadiness(t, c, "profile", false)
+	if label := profileCapabilityLabel(shortcut); !strings.Contains(half.Detail, label) ||
+		!strings.Contains(half.Detail, "shortcuts switched off") {
+		t.Errorf("profile row=%+v with one shortcut off, want %q named with its count", half, label)
+	}
+}
+
+// profileCapabilityLabel is the bundle's own label for the capability carrying a
+// rule, so the assertion follows the bundle instead of a copy of its numbers.
+func profileCapabilityLabel(ruleID string) string {
+	for _, p := range profiles.All() {
+		for _, cap := range p.Capabilities {
+			if !cap.Available {
+				continue
+			}
+			for _, id := range cap.RuleIDs {
+				if id == ruleID {
+					return cap.Label
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // TestCommandAndSchemaSourcesAreHonestAboutBeingEmpty: the two sources with
 // no runtime source behind them answer [], not an invented row. This pins the
 // emptiness so a placeholder command cannot be committed by accident.
