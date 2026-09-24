@@ -39,13 +39,24 @@ interface Control {
 }
 
 function controlsOf(page: Page): Control[] {
-  try {
-    const raw = (page as unknown as { Schema?: string }).Schema
-    const schema = JSON.parse(raw ?? '{}')
-    return Array.isArray(schema.controls) ? (schema.controls as Control[]) : []
-  } catch {
-    return []
+  // Schema crosses the Wails bridge as json.RawMessage, which arrives
+  // already decoded (an object) — the previous version assumed a string
+  // and called JSON.parse on it, so every page threw into the catch and
+  // rendered with no controls at all. Accept either shape.
+  const raw = (page as unknown as { Schema?: unknown }).Schema
+  let schema: unknown = raw
+  if (typeof raw === 'string') {
+    try {
+      schema = JSON.parse(raw)
+    } catch {
+      return []
+    }
   }
+  if (schema && typeof schema === 'object') {
+    const controls = (schema as { controls?: Control[] }).controls
+    return Array.isArray(controls) ? controls : []
+  }
+  return []
 }
 
 export default function App() {
