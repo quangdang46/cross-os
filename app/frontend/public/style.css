@@ -458,6 +458,36 @@ body {
   background: var(--bg-sunken);
 }
 
+/* --- the disabled state ----------------------------------------------------
+ *
+ * A control mid-write is disabled, and a disabled control that still takes the
+ * hover background is worse than one that does not: it looks live to a pointer
+ * and refuses to a click. The webview's own disabled rendering is not
+ * dependable across hosts, so the state is stated here — the cursor stops
+ * pointing and the fill drops back. The word beside it ("Saving…", "Working…")
+ * is what actually says why, so this is never the only signal.
+ */
+
+.ctl-actions button:disabled,
+.ctl-button:disabled,
+.ctl-input:disabled,
+.ctl-select:disabled,
+.ctl-toggle:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.ctl-actions button:disabled:hover,
+.ctl-button:disabled:hover {
+  background: var(--bg);
+}
+
+/* The chevron is drawn from borders on the background, so a dimmed select
+   would otherwise keep a full-strength arrow pointing at a closed door. */
+.ctl-select:disabled {
+  background-image: none;
+}
+
 /* Tabular digits: a countdown must not reflow its own width on every tick. */
 .ctl-countdown {
   font-variant-numeric: tabular-nums;

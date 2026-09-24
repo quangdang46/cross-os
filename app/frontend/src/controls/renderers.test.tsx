@@ -1,16 +1,21 @@
 // The renderers and the action registry, asserted against the daemon's own
 // declarations (bead w6-frontend-setup-renderers).
 //
-// Two jobs, both of which used to be true by accident rather than by test:
+// Three jobs, the first two of which used to be true by accident rather than
+// by test:
 //
 //   1. Every action id a served page declares has an entry in the action
 //      registry — runnable, or named in the unbound table with the bound call
 //      it is waiting on. This reads the Go page declarations off disk, so a page
 //      that gains an action id and no command fails HERE rather than as a button
 //      that does nothing when somebody clicks it.
-//   2. Each new renderer draws what the daemon sent: the wizard's steps, the
+//   2. Every control KIND a served page declares has a renderer. Same source,
+//      same reason: a page gaining a kind nobody drew is §3.6c's acceptance test
+//      failing, and it should fail here rather than in front of a user.
+//   3. Each renderer draws what the daemon sent — the wizard's steps, the
 //      profile rollup, the pipeline stages, the manifest facts, the three
-//      declared readiness items.
+//      declared readiness items — and no renderer ever draws a blank section,
+//      whether the daemon answered with nothing or with a failure.
 //
 // Fixtures use invented ids on purpose (the rule harness.tsx states): a page id
 // is daemon vocabulary (§3.6c), so pasting a real one into a test would put a
@@ -30,6 +35,7 @@ import type {
 } from '../types/controls'
 import { ACTION_COMMANDS, UNBOUND_ACTIONS, commandFor } from './actions'
 import { renderControl, rendererKinds, type ControlContext } from './index'
+import { reset, stub } from '../test/fixtures'
 import type { Control } from '../types/controls'
 
 afterEach(() => cleanup())
@@ -99,11 +105,35 @@ function goFiles(dir: string): string[] {
  * ones that can hold one today (Core pages, plugin packs, platform extensions).
  */
 function declaredActions(): Set<string> {
+  const found = new Set<string>()
+  for (const text of pageDeclarations()) {
+    // A []string{...} list is a page's action list, a control's actions or
+    // its rowActions; "action" and "rowAction" name one id each.
+    for (const [, list] of text.matchAll(/\[\]string\{([^}]*)\}/g)) {
+      for (const raw of list.split(',')) {
+        const id = raw.trim().replace(/^"|"$/g, '')
+        if (ACTION_ID.test(id)) found.add(id)
+      }
+    }
+    for (const [, id] of text.matchAll(/"(?:action|rowAction)"\s*:\s*"([^"]+)"/g)) {
+      if (ACTION_ID.test(id)) found.add(id)
+    }
+  }
+  return found
+}
+
+/**
+ * The source of every Go file that builds a UIContribution. A page is a Go file
+ * that registers one, so those are the files scanned; the three trees below are
+ * the ones that can hold one today (Core pages, plugin packs, platform
+ * extensions). A scan that found no pages has silently proved nothing, so the
+ * empty case throws rather than passing.
+ */
+function pageDeclarations(): string[] {
   const roots = ['../backend', '../../plugins', '../../extensions'].map((rel) =>
     join(process.cwd(), rel),
   )
-  const found = new Set<string>()
-  let pages = 0
+  const found: string[] = []
   for (const root of roots) {
     let files: string[]
     try {
@@ -113,23 +143,24 @@ function declaredActions(): Set<string> {
     }
     for (const file of files) {
       const text = readFileSync(file, 'utf8')
-      if (!text.includes('UIContribution')) continue
-      pages += 1
-      // A []string{...} list is a page's action list, a control's actions or
-      // its rowActions; "action" and "rowAction" name one id each.
-      for (const [, list] of text.matchAll(/\[\]string\{([^}]*)\}/g)) {
-        for (const raw of list.split(',')) {
-          const id = raw.trim().replace(/^"|"$/g, '')
-          if (ACTION_ID.test(id)) found.add(id)
-        }
-      }
-      for (const [, id] of text.matchAll(/"(?:action|rowAction)"\s*:\s*"([^"]+)"/g)) {
-        if (ACTION_ID.test(id)) found.add(id)
-      }
+      if (text.includes('UIContribution')) found.push(text)
     }
   }
-  // A scan that found no pages has silently proved nothing.
-  if (pages === 0) throw new Error('no Go page declarations were found to scan')
+  if (found.length === 0) throw new Error('no Go page declarations were found to scan')
+  return found
+}
+
+/** Every control kind a registered page declares, read off the Go source. */
+function declaredKinds(): Set<string> {
+  const found = new Set<string>()
+  // The daemon's own field, with or without the space a map literal usually
+  // carries — a gate that only reads one spelling would pass on a page
+  // declared the other way.
+  for (const text of pageDeclarations()) {
+    for (const [, kind] of text.matchAll(/"kind"\s*:\s*"([a-zA-Z][a-zA-Z0-9]*)"/g)) {
+      found.add(kind)
+    }
+  }
   return found
 }
 
@@ -202,6 +233,200 @@ describe('the kind registry', () => {
     // registry that had started naming screens instead of kinds.
     for (const kind of rendererKinds()) {
       expect(kind.includes('.'), `${kind} is a kind, not a page id`).toBe(false)
+    }
+  })
+
+  it('has a renderer for every kind a registered page declares', () => {
+    // The gate §3.6c is written as an acceptance test, and this is it. A page
+    // that declares a kind nobody drew would otherwise ship as a settings row
+    // reading "no renderer for that kind" — a hole with no owner, discovered by
+    // the person using it rather than by the suite. Reading the Go source
+    // rather than a hand-kept list is the whole point: a list here would go
+    // stale the moment a page gained a control, which is the moment the gate
+    // has to fire.
+    const declared = declaredKinds()
+    expect(declared.size).toBeGreaterThan(0)
+    const kinds = rendererKinds()
+    const missing = [...declared].filter((kind) => !kinds.includes(kind))
+    expect(missing).toEqual([])
+  })
+})
+
+// --- what every kind looks like with nothing, and with a failure ------------
+//
+// Empty and failed are asserted for EVERY registered kind, not for the ones
+// somebody remembered: a blank section is the failure this file exists to
+// prevent, because "the daemon has nothing" and "the daemon is gone" look
+// identical to the person reading them, and a control that renders neither
+// sentence has told them nothing they can act on. The third state — disabled
+// while a write is in flight — is asserted on the controls that write, below.
+
+/** A daemon that answers every collection empty and every scalar with its
+ *  neutral value — what a machine that has never been set up looks like. */
+const NEUTRAL: Record<string, unknown> = {
+  GetStatus: null,
+  TrialState: { plugin: '', state: 'none', remaining_ms: 0, timeout_ms: 0 },
+  SetRuleEnabled: true,
+  SetShortcuts: 0,
+  SetZones: 0,
+  SetUserRule: '',
+  ApplyProfile: {},
+  PanicStop: {},
+  Resume: {},
+  ResetEverything: [],
+  SetOverride: null,
+  BeginTrial: '',
+  ConfirmTrial: '',
+  RollbackTrial: '',
+}
+
+/** A daemon that answers every method the same way, recording what it was asked. */
+function stubDaemon(reason: string | null, asked?: string[]): ServiceApi {
+  return new Proxy({} as ServiceApi, {
+    get: (_target, name: string) => () => {
+      asked?.push(name)
+      if (reason !== null) return Promise.reject(new Error(reason))
+      const value = name in NEUTRAL ? NEUTRAL[name] : []
+      return Promise.resolve(value)
+    },
+  })
+}
+
+/** One act() turn, enough for a useResource load to land. */
+async function oneTurn(): Promise<void> {
+  const { act } = await import('@testing-library/react')
+  await act(async () => {
+    await Promise.resolve()
+  })
+}
+
+/** The control section, with its own label text removed so "blank" means blank. */
+function sectionText(container: HTMLElement, label: string): string {
+  const section = container.querySelector('section.ctl')
+  return (section?.textContent ?? '').replace(label, '').trim()
+}
+
+/** A stub whose named calls hang until released, so "in flight" is observable. */
+function heldService(names: string[]): { service: ServiceApi; release: () => void } {
+  let open = (): void => {}
+  const held = new Promise<unknown>((resolve) => {
+    open = () => resolve([])
+  })
+  const service = new Proxy(stub, {
+    get: (target, name: string) =>
+      names.includes(name)
+        ? () => held
+        : (target as unknown as Record<string, unknown>)[name],
+  }) as unknown as ServiceApi
+  return { service, release: open }
+}
+
+function buttonNamed(container: HTMLElement, name: string): HTMLElement {
+  const found = Array.from(container.querySelectorAll('button')).find(
+    (button) => (button.textContent ?? '').trim() === name,
+  )
+  expect(found, `a ${name} button is offered`).toBeTruthy()
+  return found as HTMLElement
+}
+
+function labelNamed(container: HTMLElement, label: string): HTMLElement {
+  const row = Array.from(container.querySelectorAll('label')).find(
+    (field) => field.querySelector('.ctl-label')?.textContent === label,
+  )
+  const input = row?.querySelector('input, select')
+  expect(input, `a ${label} field is offered`).toBeTruthy()
+  return input as HTMLElement
+}
+
+/** Presses a chord on a recorder, in the spelling the daemon stores. */
+function pressChord(recorder: HTMLElement, key: string): void {
+  fireEvent.click(recorder)
+  fireEvent.keyDown(recorder, { key, code: `Key${key.toUpperCase()}`, ctrlKey: true })
+}
+
+describe('every registered kind, with nothing and with a failure', () => {
+  it('says something when every source answers empty', async () => {
+    for (const kind of rendererKinds()) {
+      const { container, unmount } = show({ kind, id: 'probe', label: 'Probe' }, stubDaemon(null))
+      await oneTurn()
+      expect(sectionText(container, 'Probe'), `${kind} is not blank`).not.toBe('')
+      // Nothing failed, so nothing may claim it did.
+      expect(container.querySelector('.ctl-error'), `${kind} reports no error it did not have`).toBeNull()
+      unmount()
+    }
+  })
+
+  it('names a failed source on every kind that reads one', async () => {
+    for (const kind of rendererKinds()) {
+      const asked: string[] = []
+      const { container, unmount } = show(
+        { kind, id: 'probe', label: 'Probe' },
+        stubDaemon('source unavailable', asked),
+      )
+      await oneTurn()
+      // Whether a kind HAS a source is derived, not hand-listed: a renderer
+      // that asked the daemon for nothing has no source to fail, and the only
+      // thing owed then is that it still draws its own declared text.
+      if (asked.length > 0) {
+        expect(
+          container.querySelector('.ctl-error')?.textContent,
+          `${kind} names the failure`,
+        ).toMatch(/source unavailable/)
+      }
+      expect(sectionText(container, 'Probe'), `${kind} is not blank on a failure`).not.toBe('')
+      unmount()
+    }
+  })
+
+  it('disables the write while it is in flight, and re-enables it after', async () => {
+    // The disabled state is not decoration: a settings window that leaves a
+    // write's button live during the write takes the same edit twice, and the
+    // second lands after the first with no way to tell which one stuck. Each
+    // write is held open here, so the assertion is about the control and not
+    // about how fast a promise happened to resolve.
+    const cases: { kind: string; write: RegExp; arm: (c: HTMLElement) => void }[] = [
+      {
+        kind: 'profileList',
+        write: /^Apply /,
+        arm: () => {},
+      },
+      {
+        kind: 'keymapEditor',
+        write: /Save rule/,
+        arm: (c) => {
+          pressChord(buttonNamed(c, 'Record a shortcut'), 'K')
+          fireEvent.change(labelNamed(c, 'Action'), { target: { value: 'window.switch' } })
+        },
+      },
+      {
+        kind: 'ruleBuilder',
+        write: /Save rule/,
+        arm: (c) => {
+          pressChord(buttonNamed(c, 'AND press the shortcut'), 'K')
+          fireEvent.change(labelNamed(c, 'THEN'), { target: { value: 'window.switch' } })
+        },
+      },
+    ]
+
+    for (const entry of cases) {
+      reset()
+      const { service, release } = heldService(entry.kind === 'profileList' ? ['ApplyProfile'] : ['SetUserRule'])
+      const { container, unmount } = show({ kind: entry.kind, id: 'probe', label: 'Probe' }, service)
+      await oneTurn()
+      entry.arm(container)
+
+      const write = Array.from(container.querySelectorAll('button')).find((button) =>
+        entry.write.test((button.textContent ?? '').trim()),
+      )
+      expect(write, `${entry.kind} offers its write`).toBeTruthy()
+      fireEvent.click(write as HTMLButtonElement)
+      await oneTurn()
+      expect((write as HTMLButtonElement).disabled, `${entry.kind} disables during the write`).toBe(true)
+
+      release()
+      await oneTurn()
+      expect((write as HTMLButtonElement).disabled, `${entry.kind} re-enables after the write`).toBe(false)
+      unmount()
     }
   })
 })
@@ -558,8 +783,11 @@ describe('the kinds earlier pages declared', () => {
   })
 
   it('names a kind that genuinely has no renderer', () => {
-    show({ kind: 'packList', id: 'packs' }, daemon())
+    // Not a kind a page declares — one no page has asked for. The row has to
+    // name what it could not draw, because a hole with no owner is a defect
+    // nobody finds until somebody clicks it.
+    show({ kind: 'somethingInvented', id: 'probe' }, daemon())
     expect(screen.getByText(/no renderer for that kind/)).toBeTruthy()
-    expect(screen.getByText('packList')).toBeTruthy()
+    expect(screen.getByText('somethingInvented')).toBeTruthy()
   })
 })
