@@ -640,6 +640,41 @@ body {
   text-decoration: underline;
 }
 
+/* --- keymap editor ---------------------------------------------------------
+ *
+ * The four spec steps sit on one row and wrap rather than stack, so the whole
+ * flow — search, press, choose, resolve — is visible at once instead of behind
+ * a disclosure. The recorder is inline with its own chip because the captured
+ * chord is the result of that one control and belongs beside it.
+ */
+.ctl-recorder {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ctl-recorder .ctl-input[aria-pressed='true'] {
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+/* The rule sentence the builder assembles. Set as a block with room above it
+   because it is the RESULT of the picks above, and reading it as a paragraph is
+   the whole point — a one-line label beside the controls would not be read the
+   way the spec's own example is. */
+.ctl-clause {
+  margin: 8px 0 4px;
+  padding: 7px 10px;
+  border-left: 2px solid var(--accent);
+  background: var(--bg-sunken);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  color: var(--text);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 40em) {
   .ctl {
     grid-template-columns: minmax(0, 1fr);

@@ -49,3 +49,13 @@ CrossOS destination: app/frontend/src/App.tsx (navGroups + the nav rail markup),
 Modification: structural port, no code copied — a left rail of grouped page buttons with a section cap per group; the reference is SwiftUI on macOS and the destination is React in a webview, so the layout and the label treatment transfer and the drawing does not. The group names, the group order and the pages under each group are the daemon's (Host.Group / Host.Order), not the reference's menu sections.
 Reason for modification: CrossOS navigates discovered UIContributions rather than an extension list, and its rail is rendered from a webview; the reference's own sections, search field and filter segmented control are not part of the settings nav.
 CrossOS license: MIT
+
+Source repository: Hibrielle/menumate
+Source commit: 017d6dae1e8569b9d92513036503b013dc528283
+Source file: App/UI/MenuHubScreen.swift (:183-188 and :246-247 a section cap over a ForEach in which every entry is handed to actionRow, so each entry gets its own row rather than being summarised into the one above it)
+Original license: MIT
+Original copyright: Copyright (c) 2026 Hibrielle
+CrossOS destination: app/frontend/src/controls/PackListControl.tsx (one row per installed extension, each carrying its own state and its own reason beside it)
+Modification: structural port, no code copied. What transfers is the LAYOUT: a list under a cap in which every entry is drawn as its own row, because the question a reader is answering is which extension contributes what — collapsing the entries into one summary answers it for none of them. The rows here are the daemon's extension registry (core:pluginMeta) and each carries the daemon's own reason for its load state.
+Reason for modification: the reference is a SwiftUI app computing live menu state from an extension manager; this is React over a declared schema reading a registry, and no pack manifest is loaded at runtime so there are no contributed actions to list yet.
+CrossOS license: MIT

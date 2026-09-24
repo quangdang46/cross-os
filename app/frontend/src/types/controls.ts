@@ -274,6 +274,32 @@ export interface ShortcutRow {
   [field: string]: unknown
 }
 
+/**
+ * One chord a person pressed, as the recorder caught it.
+ *
+ * Modifiers are the daemon's OWN spellings (Ctrl, Shift, Alt, Win — the rows
+ * userrules.Modifiers serves and ModifierMask reads back), not the DOM's
+ * `ctrlKey`/`metaKey`: a rule stores these strings, so a capture that spelled
+ * them any other way would be a chord the router cannot match.
+ */
+export interface ChordCapture {
+  key: string
+  modifiers: string[]
+}
+
+/**
+ * One claim on a chord, as the decision pipeline reports it: the rule that won
+ * and the rules that lost to it. Both are the router's own verdict (the winner
+ * is tr.Winner, the losers are tr.Losers, both produced by rule.Resolve), so a
+ * resolver built on these cannot offer a rule that does not in fact lose.
+ */
+export interface ChordContest {
+  /** The chord every claim here is for, in the daemon's rendering. */
+  keys: string
+  winner: string
+  losers: string[]
+}
+
 /** One installed plugin, as the dashboard/status payload serves it. */
 export interface PluginState {
   ID: string

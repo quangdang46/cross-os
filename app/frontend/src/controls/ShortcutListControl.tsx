@@ -1,16 +1,30 @@
-// The window-shortcut table and its editor (bead cross-os-itq).
+// The shortcut table and its editor (bead cross-os-itq; remapped by
+// w7-frontend-remap).
 //
-// Reading it is three columns — action, modifiers, key — which is exactly what
-// config.getShortcuts serves. Editing is a local draft: nothing is written
-// until Save, because config.setShortcuts REPLACES the whole table, and a write
-// per keystroke would push an unvalidated table at the rules engine twice a
-// second. The replace is also why Save is armed on the draft rather than on the
-// fetch: see save() below.
+// TWO SOURCES, TWO TABLES, ONE RENDERER. Both WindowsPage and CommandsPage
+// declare a `shortcutList`, and they do not mean the same thing:
 //
-// Which pages get the editor is the page's call, not this file's. A page that
-// declares editable:true gets it; a page that declares editLinks:"owner" stays
-// read-only, because per-rule editing belongs to the owning page and a second
-// editor would be a second source of truth for the same chords.
+//	core:windowShortcuts  the persisted window table (config.getShortcuts):
+//	                      three columns — action, modifiers, key — editable in
+//	                      place, because SetShortcuts REPLACES it and this is
+//	                      the page that owns those chords.
+//	core:allShortcuts     the whole registry: every rule the router compiles
+//	                      (config.getMatrix), read-only, with per-row on/off
+//	                      through SetRuleEnabled. CommandsPage is the "every
+//	                      shortcut in one place" page and says so in its own
+//	                      description, and it links per-rule editing back to the
+//	                      owning page (editLinks:"owner") rather than offering a
+//	                      second editor for the same rule.
+//
+// Before this dispatch both spellings rendered Shortcuts(), so the Shortcuts
+// page showed the window table and called itself the global registry: a page
+// that answered a different question than the one asked. Dispatching on
+// `source` fixes that without a second component, because the difference is
+// WHICH served rows a page wants, not how rows are drawn.
+//
+// The window editor's own rules are unchanged: a local draft, Save armed on the
+// draft rather than on the fetch, because SetShortcuts is FULL-REPLACE and a
+// save fired before the first load answered would persist an empty table.
 //
 // Validation is the daemon's, deliberately. winlayout rejects an unknown action
 // name, a duplicate chord and a non-window capability before it stores anything
@@ -21,25 +35,54 @@
 
 import { useState } from 'react'
 import type { ReactElement } from 'react'
-import type { ShortcutRow } from '../types/controls'
+import type { MatrixRow, ShortcutRow } from '../types/controls'
 import { asText, failedTo, splitModifiers } from '../lib/wire'
+import { formatChord, humanize } from '../lib/format'
 import { useResource } from '../lib/useResource'
-import { ControlFrame, EmptyState, TextField } from './common'
+import { ControlFrame, EmptyState, TextField, Toggle } from './common'
 import type { ControlProps } from './common'
+
+/**
+ * The two sources this renderer answers, named as the pages declare them. A
+ * source the page did not declare is treated as the window table rather than
+ * refused: a page that omits `source` is asking for the table this component
+ * has always drawn, and a hard error would break a page that works.
+ */
+const WINDOW_SOURCE = 'core:windowShortcuts'
+const ALL_SOURCE = 'core:allShortcuts'
+
+/** The conflict source both pages declare beside their table. */
+const CONFLICTS_SOURCE = 'core:conflicts'
+
+/** Which table a page's `source` asks for. */
+type Table = 'all' | 'window'
+
+function tableFor(source: unknown): Table {
+  if (source === ALL_SOURCE) return 'all'
+  if (source === WINDOW_SOURCE) return 'window'
+  return 'window'
+}
 
 function blankShortcut(): ShortcutRow {
   return { action: '', modifiers: [], key: '' }
 }
 
-export function ShortcutListControl(props: ControlProps): ReactElement {
-  const { control, ctx } = props
+/** modifierText renders the two shapes a row may carry modifiers in. */
+function modifierText(row: ShortcutRow): string {
+  const raw = asText(row.modifiers)
+  if (raw) return raw
+  return Array.isArray(row.modifiers) ? row.modifiers.join(', ') : ''
+}
+
+/** The window table, editable in place. */
+function WindowShortcutTable(props: ControlProps): ReactElement {
+  const { ctx } = props
   const table = useResource(() => ctx.service.Shortcuts(), ctx.refreshToken, [], ctx.note)
   const [draft, setDraft] = useState<ShortcutRow[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [outcome, setOutcome] = useState('')
 
-  const editable = control.editable === true
   const rows = draft ?? table.data ?? []
   const dirty = draft !== null
 
@@ -70,7 +113,7 @@ export function ShortcutListControl(props: ControlProps): ReactElement {
     if (draft === null) return
     const outgoing = draft.map((row) => ({
       action: asText(row.action).trim(),
-      modifiers: splitModifiers(asText(row.modifiers) || (Array.isArray(row.modifiers) ? row.modifiers.join(', ') : '')),
+      modifiers: splitModifiers(modifierText(row)),
       key: asText(row.key).trim(),
     }))
     setBusy(true)
@@ -99,14 +142,10 @@ export function ShortcutListControl(props: ControlProps): ReactElement {
   }
 
   return (
-    <ControlFrame
-      label={control.label ?? control.id}
-      note={control.note}
-      error={error || table.error}
-    >
+    <>
       {rows.length === 0 ? (
         <EmptyState>No window shortcuts are configured.</EmptyState>
-      ) : editable ? (
+      ) : (
         <ul className="ctl-list">
           {rows.map((row, index) => (
             <li className="ctl-item" key={index}>
@@ -118,7 +157,7 @@ export function ShortcutListControl(props: ControlProps): ReactElement {
               />
               <TextField
                 label={`Modifiers, row ${index + 1}`}
-                value={asText(row.modifiers) || (Array.isArray(row.modifiers) ? row.modifiers.join(', ') : '')}
+                value={modifierText(row)}
                 onChange={(value) => edit(index, 'modifiers', value)}
                 placeholder="ctrl, shift"
                 disabled={busy}
@@ -137,51 +176,140 @@ export function ShortcutListControl(props: ControlProps): ReactElement {
             </li>
           ))}
         </ul>
-      ) : (
-        <ul className="ctl-list">
-          {rows.map((row, index) => (
-            <li className="ctl-item" key={index}>
-              <span className="ctl-label">{asText(row.action) || 'unnamed action'}</span>
-              <span className="ctl-chip">{asText(row.key) || 'no key'}</span>
-              <span className="ctl-value">
-                {Array.isArray(row.modifiers) && row.modifiers.length > 0
-                  ? row.modifiers.join(' + ')
-                  : 'no modifiers'}
-              </span>
-            </li>
-          ))}
-        </ul>
       )}
-      {editable ? (
-        <div className="ctl-actions">
-          <button
-            className="ctl-input"
-            type="button"
-            disabled={busy || !dirty}
-            onClick={() => void save()}
-          >
-            {busy ? 'Saving…' : 'Save shortcuts'}
-          </button>
-          <button className="ctl-input" type="button" disabled={busy} onClick={add}>
-            Add a shortcut
-          </button>
-          <button
-            className="ctl-input"
-            type="button"
-            disabled={busy || !dirty}
-            onClick={() => {
-              setDraft(null)
-              setError('')
-              setOutcome('Edits discarded.')
-            }}
-          >
-            Discard changes
-          </button>
-        </div>
-      ) : (
-        <p className="ctl-empty">Edits to these shortcuts are made on the page that owns them.</p>
-      )}
+      <div className="ctl-actions">
+        <button
+          className="ctl-input"
+          type="button"
+          disabled={busy || !dirty}
+          onClick={() => void save()}
+        >
+          {busy ? 'Saving…' : 'Save shortcuts'}
+        </button>
+        <button className="ctl-input" type="button" disabled={busy} onClick={add}>
+          Add a shortcut
+        </button>
+        <button
+          className="ctl-input"
+          type="button"
+          disabled={busy || !dirty}
+          onClick={() => {
+            setDraft(null)
+            setError('')
+            setOutcome('Edits discarded.')
+          }}
+        >
+          Discard changes
+        </button>
+      </div>
       {outcome ? <p className="ctl-value">{outcome}</p> : null}
+      {/* The error row lives with the table that produced it. The frame is
+          shared by both tables, so a save refusal that the window editor
+          raised has to be printed here — a control that set an error and never
+          rendered it is the silent failure the never-a-blank-page rule exists
+          to prevent. */}
+      {error || table.error ? <p className="ctl-error" role="alert">{error || table.error}</p> : null}
+    </>
+  )
+}
+
+/**
+ * The whole registry, one row per rule the router compiles, with a per-row
+ * switch. The toggle is a real enable/disable write (SetRuleEnabled), not a
+ * link to the owning page: CommandsPage declares shortcut.setEnabled for
+ * exactly this, and a registry a person can only read is a registry they cannot
+ * use. What the page does NOT get is an editor — its own `editLinks:"owner"`
+ * says per-rule content is edited where the rule is owned.
+ */
+function AllShortcutTable(props: ControlProps): ReactElement {
+  const { ctx } = props
+  const matrix = useResource(() => ctx.service.GetMatrix(), ctx.refreshToken, [], ctx.note)
+  const [pending, setPending] = useState('')
+  const [error, setError] = useState('')
+  const rows: MatrixRow[] = matrix.data ?? []
+
+  async function toggle(row: MatrixRow, next: boolean): Promise<void> {
+    setPending(row.rule_id)
+    setError('')
+    try {
+      await ctx.service.SetRuleEnabled(row.rule_id, next)
+      ctx.note(`${row.action || row.rule_id} is now ${next ? 'on' : 'off'}.`)
+      ctx.refresh()
+    } catch (reason) {
+      // SetRuleEnabled fails closed on a rule id the daemon does not have, so
+      // the refusal is the answer and the switch is left where it was rather
+      // than drawn in a state the daemon never accepted.
+      const message = failedTo(`${next ? 'Turning on' : 'Turning off'} ${row.action || row.rule_id}`, reason)
+      setError(message)
+      ctx.note(message)
+    } finally {
+      setPending('')
+    }
+  }
+
+  if (rows.length === 0) {
+    // A failed load is a sentence about the daemon; an empty registry is a
+    // sentence about the machine. Collapsing the two is how a settings window
+    // becomes a blank page, so the load error is printed and only then is the
+    // list reported as empty.
+    return matrix.error ? (
+      <p className="ctl-error" role="alert">
+        {matrix.error}
+      </p>
+    ) : (
+      <EmptyState>No shortcuts are configured. The daemon serves this list.</EmptyState>
+    )
+  }
+
+  return (
+    <>
+      <ul className="ctl-list">
+        {rows.map((row) => (
+          <li className="ctl-item" key={row.rule_id}>
+            <span className="ctl-chip">{humanize(row.plugin)}</span>
+            <span className="ctl-label" title={row.keys}>
+              {formatChord(row.keys) || row.rule_id}
+            </span>
+            <span className="ctl-value">{row.action || 'no action'}</span>
+            {row.contexts.length > 0 ? (
+              <span className="ctl-value">{row.contexts.join(', ')}</span>
+            ) : (
+              <span className="ctl-value">everywhere</span>
+            )}
+            <Toggle
+              name={`${row.enabled ? 'Turn off' : 'Turn on'} ${row.action || row.rule_id}`}
+              checked={row.enabled}
+              disabled={pending === row.rule_id}
+              onToggle={(next) => void toggle(row, next)}
+            />
+          </li>
+        ))}
+      </ul>
+      {/* The same sentence the window table has always shown, and for the same
+          reason: the Shortcuts page hosts the registry, the Keyboard and
+          Windows pages host the editing. */}
+      <p className="ctl-empty">Edits to these shortcuts are made on the page that owns them.</p>
+      {error || matrix.error ? <p className="ctl-error" role="alert">{error || matrix.error}</p> : null}
+    </>
+  )
+}
+
+export function ShortcutListControl(props: ControlProps): ReactElement {
+  const { control } = props
+  // The source decides the table, so the two pages that declare this kind get
+  // the two different answers they asked for. Everything else about the
+  // control — the frame, the note, the page's own conflicts field — is shared.
+  const table = tableFor(control.source)
+
+  return (
+    <ControlFrame label={control.label ?? control.id} note={control.note}>
+      {control.conflicts === CONFLICTS_SOURCE ? (
+        <p className="ctl-value">
+          Conflicts resolve by rule priority — the winner and the rules that lost to it are shown
+          on the Activity page.
+        </p>
+      ) : null}
+      {table === 'all' ? <AllShortcutTable {...props} /> : <WindowShortcutTable {...props} />}
     </ControlFrame>
   )
 }

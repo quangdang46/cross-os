@@ -13,20 +13,26 @@
 
 import type { ReactElement } from 'react'
 import type { Control, ServiceApi, Status } from '../types/controls'
+import { ActionSettingsControl } from './ActionSettingsControl'
 import { AuditListControl } from './AuditListControl'
 import { ButtonControl } from './ButtonControl'
 import { ChecklistControl } from './ChecklistControl'
+import { ConflictResolver } from './ConflictResolver'
 import { CreditsControl } from './CreditsControl'
+import { GateBadgeControl } from './GateBadgeControl'
 import { HomeSummaryControl } from './HomeSummaryControl'
+import { KeymapEditorControl } from './KeymapEditorControl'
 import { LicenseControl } from './LicenseControl'
 import { MatrixControl } from './MatrixControl'
 import { NoteControl } from './NoteControl'
 import { OverridesControl } from './OverridesControl'
+import { PackListControl } from './PackListControl'
 import { PaletteControl } from './PaletteControl'
 import { PipelineTraceControl } from './PipelineTraceControl'
 import { PluginDetailControl } from './PluginDetailControl'
 import { PluginListControl } from './PluginListControl'
 import { ProfileListControl } from './ProfileListControl'
+import { RuleBuilderControl } from './RuleBuilderControl'
 import { SchemaFormControl } from './SchemaFormControl'
 import { ShortcutListControl } from './ShortcutListControl'
 import { TrialControl } from './TrialControl'
@@ -63,20 +69,26 @@ type ControlRenderer = (props: ControlProps) => ReactElement
  * and renderControl would then try to draw it.
  */
 const RENDERERS = new Map<string, ControlRenderer>([
+  ['actionSettings', ActionSettingsControl],
   ['auditList', AuditListControl],
   ['button', ButtonControl],
   ['checklist', ChecklistControl],
+  ['conflictResolver', ConflictResolver],
   ['credits', CreditsControl],
+  ['gateBadge', GateBadgeControl],
   ['homeSummary', HomeSummaryControl],
+  ['keymapEditor', KeymapEditorControl],
   ['license', LicenseControl],
   ['matrix', MatrixControl],
   ['note', NoteControl],
   ['overrides', OverridesControl],
+  ['packList', PackListControl],
   ['palette', PaletteControl],
   ['pipelineTrace', PipelineTraceControl],
   ['pluginDetail', PluginDetailControl],
   ['pluginList', PluginListControl],
   ['profileList', ProfileListControl],
+  ['ruleBuilder', RuleBuilderControl],
   ['schemaForm', SchemaFormControl],
   ['shortcutList', ShortcutListControl],
   ['trial', TrialControl],
