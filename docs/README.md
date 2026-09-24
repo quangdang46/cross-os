@@ -14,3 +14,8 @@ inside the signed artifacts + repo pages). Non-tech-first copy: no
 The in-app About page (ymh.4) owns version/license/credits — docs LINK to
 it, never duplicate. Onboarding reuses the nir.4 permission flow
 (Welcome → Enable → Open System Settings → Verify) — no parallel path.
+
+## Contributor notes
+
+- `dev-verification.md` — how to typecheck and test the tree on a machine that
+  is not the macOS build host (`./scripts/dev-verify.sh`; cross-os-j7p)

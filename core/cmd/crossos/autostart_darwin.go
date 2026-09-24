@@ -150,3 +150,10 @@ func uninstallAutostart() error {
 	fmt.Println("crossos: login item removed")
 	return nil
 }
+
+// autostartPath is the login item the ownership audit looks for, or "" where
+// this platform has no login item to own. The audit stats the file itself and
+// dates the record from its mtime: the serving daemon did not write this plist
+// (a separate `crossos install-autostart` run did, possibly a login ago), so
+// "now" would be a creation time that never happened.
+func autostartPath() string { return autostartPlist() }

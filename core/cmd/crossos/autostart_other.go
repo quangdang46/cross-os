@@ -14,3 +14,8 @@ func installAutostart() error {
 func uninstallAutostart() error {
 	return fmt.Errorf("autostart is not implemented on this platform yet")
 }
+
+// autostartPath is empty here: installAutostart refuses on this platform, so
+// no CrossOS-owned login item can exist and the ownership audit has nothing
+// to look for.
+func autostartPath() string { return "" }

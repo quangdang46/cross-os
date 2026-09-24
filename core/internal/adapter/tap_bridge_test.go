@@ -1,3 +1,5 @@
+//go:build darwin
+
 // Tap bridge tests — native tap bridge bead (plan §4).
 //
 // Install on a sandbox/CI machine without TCC input-monitoring consent
@@ -5,6 +7,9 @@
 // That IS the assertion: the test proves the failure path is explicit,
 // never silent success. On hardware with consent the same call returns
 // nil and the live tap owns the callback (Tier-2, manual).
+//
+// darwin-only: these assert against crossosGoDecide, the real CGEvent tap
+// callback. There is no off-darwin equivalent to assert (cross-os-j7p).
 package adapter
 
 import (

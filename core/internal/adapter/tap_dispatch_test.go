@@ -1,3 +1,9 @@
+//go:build darwin
+
+// darwin-only: the dispatch path under test runs through crossosGoDecide and
+// setDecideExport, the real CGEvent tap callback. The portable half of this
+// property is covered by adapter_test.go (TestNoPolicyInBridge) and by
+// pkg/winlayout's dispatch sweep (cross-os-j7p).
 package adapter
 
 import (
