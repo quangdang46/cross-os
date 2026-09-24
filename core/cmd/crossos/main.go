@@ -71,9 +71,14 @@ type Core struct {
 	// the service, not the raw store, so the four user-rule methods cost one
 	// field and four table entries instead of four of each.
 	userRules *userRuleService
-	plugins   map[string]bool // id → enabled
-	trials    map[string]*safety.Trial
-	order     []string
+	// menuOff is the Explorer's per-item toggle (finderdata.go): a menu id
+	// the user has switched off. Absence means on, so an item added to
+	// findermenu.Menu is in the menu until a person turns it off — the daemon
+	// ships what the product declares and the user narrows it, not the reverse.
+	menuOff map[string]bool
+	plugins map[string]bool // id → enabled
+	trials  map[string]*safety.Trial
+	order   []string
 	// interception reports whether the live keyboard tap is installed and
 	// running (bead cross-os-2io). Injected as a func so the daemon serves a
 	// truthful on/off without the core package knowing about cgo.
@@ -135,6 +140,7 @@ func NewCoreWithSettings(rules []event.CompiledRule, grants map[string][]intent.
 		rec:       record.NewRecorder(),
 		set:       set,
 		userRules: newUserRuleService(ruleStore),
+		menuOff:   map[string]bool{},
 		plugins:   map[string]bool{},
 		trials:    map[string]*safety.Trial{},
 	}
@@ -793,7 +799,7 @@ func (c *Core) Serve(ln net.Listener) *ipc.Server {
 // is actually registered: a handler written but left out of this map is
 // dead code that only direct-call tests can see.
 func (c *Core) methods() map[string]ipc.Handler {
-	return map[string]ipc.Handler{
+	m := map[string]ipc.Handler{
 		"core.status":           c.handleStatus,
 		"plugin.list":           c.handlePluginList,
 		"plugin.setEnabled":     c.handlePluginSetEnabled,
@@ -849,7 +855,25 @@ func (c *Core) methods() map[string]ipc.Handler {
 		// which the focused-window watcher needs before it can prime.
 		"core.setObserve":          c.handleSetObserve,
 		"permissions.openSettings": c.handleOpenSettings,
+		// The Explorer page (be-finderdata): the Finder menu the user can
+		// switch items off in, and the file-type catalog behind New >.
+		// Two reads, three writes, and the writes answer with the whole
+		// table they changed so the page never has to assume its own edit
+		// landed.
+		"core.finderMenu":         c.handleFinderMenu,
+		"core.fileTypes":          c.handleFileTypes,
+		"core.setFileType":        c.handleSetFileType,
+		"core.reorderFileTypes":   c.handleReorderFileTypes,
+		"core.setMenuItemEnabled": c.handleSetMenuItemEnabled,
 	}
+	// The appex's own seven menu verbs, published as the set be-finderverbs
+	// builds rather than eight entries spelled out here: the names are a
+	// protocol, and copying them into this map is how a typo becomes a menu
+	// verb the appex can call and the daemon does not answer.
+	for name, h := range finderMenuHandlers(c) {
+		m[name] = h
+	}
+	return m
 }
 
 // socketLockFile holds the process-lifetime lock; deliberately never closed.
