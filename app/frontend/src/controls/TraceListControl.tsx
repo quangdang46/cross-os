@@ -1,49 +1,14 @@
-// The activity trace (bead cross-os-itq).
+// The kind earlier builds of the daemon served for the activity feed.
 //
-// These lines used to be joined into one string with ' · ' and printed as a
-// single value, which is unreadable the moment anything goes wrong: a run of
-// ten lines becomes one wall of text with no start, no end and nothing to
-// select. Each line is now its own row, split into the call that produced it
-// and what it said, so a timeline can place them and a reader can point at one.
+// `traceList` is declared by the Activity page (ActivityPage, pages.go) and the
+// Observe page (ObservePage, pages.go), and App.tsx tests for that spelling to
+// decide whether the page already draws a log. Both now land on the pipeline
+// renderer, which reads the daemon's structured traces (core:traces) and shows
+// each decision's stages as their own rows — so this file is a NAME, not a
+// second renderer: one implementation, two spellings of one kind.
 //
-// ctx.logs is the bridge's own UI log sink (App.tsx owns the fetch), so this
-// control adds no polling of its own.
+// The alias keeps a daemon that has not been rebuilt alongside the shell from
+// dropping two pages into UnsupportedControl. Retiring the spelling is a Go
+// change, and App.tsx's `ownsTrace` test would have to move with it.
 
-import type { ReactElement } from 'react'
-import { plural, splitLogSource } from '../lib/format'
-import { ControlFrame, EmptyState } from './common'
-import type { ControlProps } from './common'
-
-export function TraceListControl(props: ControlProps): ReactElement {
-  const { control, ctx } = props
-  const lines = Array.isArray(ctx.logs) ? ctx.logs : []
-  // Newest first: the log sink appends, so the last line is the one the user
-  // just caused and the one they are reading the page for.
-  const newestFirst = [...lines].reverse()
-
-  return (
-    <ControlFrame
-      label={control.label ?? control.id}
-      note={typeof control.format === 'string' ? control.format : control.note}
-    >
-      {newestFirst.length === 0 ? (
-        <EmptyState>Nothing has happened yet. Entries appear here as CrossOS acts.</EmptyState>
-      ) : (
-        <>
-          <p className="ctl-value">{plural(lines.length, 'entry', 'entries')}, newest first</p>
-          <ol className="ctl-list">
-            {newestFirst.map((line, index) => {
-              const { source, detail } = splitLogSource(line)
-              return (
-                <li className="ctl-item" key={`${index}-${line}`}>
-                  {source ? <span className="ctl-chip">{source}</span> : null}
-                  <span className="ctl-value">{detail}</span>
-                </li>
-              )
-            })}
-          </ol>
-        </>
-      )}
-    </ControlFrame>
-  )
-}
+export { PipelineTraceControl as TraceListControl } from './PipelineTraceControl'

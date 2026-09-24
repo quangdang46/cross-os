@@ -17,19 +17,22 @@ import { AuditListControl } from './AuditListControl'
 import { ButtonControl } from './ButtonControl'
 import { ChecklistControl } from './ChecklistControl'
 import { CreditsControl } from './CreditsControl'
-import { EnableFlowControl } from './EnableFlowControl'
+import { HomeSummaryControl } from './HomeSummaryControl'
 import { LicenseControl } from './LicenseControl'
 import { MatrixControl } from './MatrixControl'
 import { NoteControl } from './NoteControl'
 import { OverridesControl } from './OverridesControl'
 import { PaletteControl } from './PaletteControl'
+import { PipelineTraceControl } from './PipelineTraceControl'
+import { PluginDetailControl } from './PluginDetailControl'
 import { PluginListControl } from './PluginListControl'
+import { ProfileListControl } from './ProfileListControl'
 import { SchemaFormControl } from './SchemaFormControl'
 import { ShortcutListControl } from './ShortcutListControl'
-import { TraceListControl } from './TraceListControl'
 import { TrialControl } from './TrialControl'
 import { UnsupportedControl } from './UnsupportedControl'
 import { VersionControl } from './VersionControl'
+import { WizardControl } from './WizardControl'
 import { ZoneEditorControl } from './ZoneEditorControl'
 import type { ControlProps } from './common'
 
@@ -64,20 +67,44 @@ const RENDERERS = new Map<string, ControlRenderer>([
   ['button', ButtonControl],
   ['checklist', ChecklistControl],
   ['credits', CreditsControl],
-  ['enableFlow', EnableFlowControl],
+  ['homeSummary', HomeSummaryControl],
   ['license', LicenseControl],
   ['matrix', MatrixControl],
   ['note', NoteControl],
   ['overrides', OverridesControl],
   ['palette', PaletteControl],
+  ['pipelineTrace', PipelineTraceControl],
+  ['pluginDetail', PluginDetailControl],
   ['pluginList', PluginListControl],
+  ['profileList', ProfileListControl],
   ['schemaForm', SchemaFormControl],
   ['shortcutList', ShortcutListControl],
-  ['traceList', TraceListControl],
   ['trial', TrialControl],
   ['version', VersionControl],
+  ['wizard', WizardControl],
   ['zoneEditor', ZoneEditorControl],
+
+  // The three spellings earlier pages declared, each mapping to the renderer
+  // that replaced it. They are kinds, like every other key here, so nothing
+  // about them is a page id — and keeping them costs nothing while a daemon
+  // and a shell are free to ship separately: a page that declared `traceList`
+  // draws the pipeline renderer rather than landing in UnsupportedControl. The
+  // Go side retires them by renaming the `kind` field; the aliases are the
+  // grace period, not a second implementation.
+  ['enableFlow', WizardControl],
+  ['statusCard', HomeSummaryControl],
+  ['traceList', PipelineTraceControl],
 ])
+
+/**
+ * The registered kinds, in served order. Exported for the coverage test in
+ * renderers.test.tsx, which asserts that no key here is a page id: page ids in
+ * this codebase are namespaced and dotted, so a dotted key would be a registry
+ * that had started naming screens instead of kinds.
+ */
+export function rendererKinds(): string[] {
+  return [...RENDERERS.keys()]
+}
 
 export function renderControl(control: Control, ctx: ControlContext): ReactElement {
   const Renderer = RENDERERS.get(control.kind)

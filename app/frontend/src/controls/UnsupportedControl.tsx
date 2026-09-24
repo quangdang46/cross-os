@@ -6,6 +6,10 @@
 // a missing renderer is a defect someone can find, not a page that renders
 // blank and leaves the user wondering whether CrossOS is broken.
 //
+// The fix is a renderer and one entry in the kind registry (controls/index.tsx),
+// never a branch in App.tsx: a shell that special-cased a kind by name would
+// make the next page a UI change, which is the rule §3.6c exists to prevent.
+//
 // It is deliberately not styled as an error. Nothing failed at runtime; the
 // shell simply cannot draw what the page declared, and a row in the error style
 // would send users looking for a permission problem that does not exist.

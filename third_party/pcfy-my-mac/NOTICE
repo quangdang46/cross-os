@@ -1,0 +1,10 @@
+CrossOS draws its first-run setup sequencing from pcfy-my-mac.
+
+pcfy-my-mac — Copyright (c) 2024 Raxigan — MIT License (see LICENSE in this
+directory).
+Source: https://github.com/raxigan/pcfy-my-mac
+Per-file attribution: see ATTRIBUTION.md.
+
+No pcfy-my-mac source code is vendored. The reference informed the ORDER and
+SHAPE of the setup flow only (an ordered list of named steps, one open at a
+time, with a finish at the end).

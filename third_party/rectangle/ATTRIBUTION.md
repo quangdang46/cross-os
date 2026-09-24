@@ -28,3 +28,13 @@ read as a native macOS pane inside a webview.
 No rectangle source is included; the LICENSE is recorded here for the
 structural reference only.
 CrossOS license: MIT
+
+Source repository: ramonwessels/rectangle
+Source commit: 12a9bc79f99abeb86297da3d7436b4489f920fa2
+Source file: Rectangle/PrefsWindow/SnapAreaViewController.swift
+Original license: MIT
+Original copyright: Copyright (c) 2019-2026 Ryan Hanson
+CrossOS destination: app/frontend/src/controls/ProfileListControl.tsx (the per-capability rollup: one row per named area, each with its own state, none collapsed into the one beside it)
+Modification: structural port, no code copied. What transfers is the ZONE LIST's rule: every named area is a row of its own carrying its own state and its own label — one selector per area (:16-24), a label beside its own popup so the area is named in words rather than by its key (:75-86), and each area listed under its own displayName rather than summarised (:269, :279). CrossOS's rows are a profile's capabilities, counted and named by the daemon; the snap geometry, the Defaults keys and the window-action dispatch are not ported.
+Reason for modification: AppKit zone controls become rows in a webview card. §9.11 records rectangle as BEHAVIOR-only precedent — zone geometry and defaults inform UX, no code — and this is that: the LIST rule, not the snapping.
+CrossOS license: MIT

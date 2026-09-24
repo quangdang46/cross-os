@@ -466,6 +466,180 @@ body {
   color: var(--text);
 }
 
+/* --- setup stepper ---------------------------------------------------------
+ *
+ * A wizard is a list of named steps with one body open, so the stepper is an
+ * ordered list whose rows are buttons — keyboard reachable and announced as
+ * steps, with aria-current on the open one. The index is in a fixed-width
+ * column so the labels line up however long they are.
+ */
+
+.ctl-steps {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.ctl-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ctl-step:last-child {
+  border-bottom: 0;
+}
+
+.ctl-step.is-current {
+  background: var(--bg-sunken);
+}
+
+.ctl-step-button {
+  appearance: none;
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ctl-step-index {
+  flex: none;
+  width: 1.4em;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.ctl-step-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* --- profile cards ---------------------------------------------------------
+ *
+ * A card is a declared bundle: a name, a sentence about it, one row per
+ * capability and ONE apply button. The cards stack rather than sit in columns:
+ * a capability row carries a sentence of detail, and two columns of sentences
+ * on a 1280px window is a layout that only reads at one width.
+ */
+
+.ctl-cards {
+  display: grid;
+  gap: 10px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ctl-card {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+
+.ctl-card.is-active {
+  border-color: var(--accent);
+}
+
+.ctl-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ctl-card-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ctl-caps {
+  margin: 6px 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.ctl-cap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 2px 0;
+  min-width: 0;
+}
+
+/* The tick is decoration beside the word, never the signal: a colour-blind
+   reader and a screen-reader user get the same verdict from the text. */
+.ctl-cap-mark {
+  flex: none;
+  width: 1em;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* --- decision pipeline -----------------------------------------------------
+ *
+ * One row per stage, in the order the daemon recorded them. The stage name is
+ * its own column so the details line up under one another and a reader can scan
+ * a column instead of parsing a sentence — which is the whole point of drawing
+ * the stages at all.
+ */
+
+.ctl-item.is-block {
+  display: block;
+}
+
+.ctl-stages {
+  margin: 6px 0 2px;
+  padding: 0 0 0 4px;
+  list-style: none;
+  border-left: 2px solid var(--line);
+}
+
+.ctl-stage {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px;
+  padding: 2px 0 2px 8px;
+  min-width: 0;
+}
+
+.ctl-stage-name {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+
+/* A row's own name is a button when the row opens something: the plugin list
+   opens the detail card, and a div would cost the keyboard and the name. */
+.ctl-link {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 @media (max-width: 40em) {
   .ctl {
     grid-template-columns: minmax(0, 1fr);

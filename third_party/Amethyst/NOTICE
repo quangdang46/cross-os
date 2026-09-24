@@ -1,0 +1,9 @@
+CrossOS draws its landing-card status surface from Amethyst.
+
+Amethyst — Copyright (c) 2015 Ian Ynda-Hummel — MIT License (see LICENSE in
+this directory).
+Source: https://github.com/ianyh/Amethyst
+Per-file attribution: see ATTRIBUTION.md.
+
+No Amethyst source code is vendored. The reference informed LAYOUT only: one row
+per fact about the machine, each row carrying its own explanation.

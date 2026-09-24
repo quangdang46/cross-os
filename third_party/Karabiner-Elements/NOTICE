@@ -1,0 +1,10 @@
+CrossOS draws its settings editor flow from Karabiner-Elements.
+
+Karabiner-Elements — released into the public domain (Unlicense; see LICENSE in
+this directory).
+Source: https://github.com/pqrs-org/Karabiner-Elements
+Per-file attribution: see ATTRIBUTION.md.
+
+No Karabiner-Elements source code is vendored. The reference informed LAYOUT
+only: a list of what is installed beside the detail of the item being read, and
+one row per step with each step's own value.
