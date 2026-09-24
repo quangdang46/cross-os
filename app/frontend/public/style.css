@@ -559,6 +559,93 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* --- the switcher tiles -----------------------------------------------------
+ *
+ * Port source: alt-tab-macos's tile grid, whose panel is a scroll view of
+ * equal-height tiles that wrap at the panel's max width
+ * (tmp/research/alt-tab-macos/src/switcher/main-window/TilesView.swift, and
+ * TileGridLayout.swift for the arithmetic the renderer calls). The shape below
+ * is CrossOS's own: there are no thumbnails, so a tile is the window's own name
+ * and the two words the daemon sends about it.
+ *
+ * The grid's GEOMETRY is not here — left, top, width and height are computed by
+ * SwitcherPanelControl from the widths the browser measured, because the
+ * wrapping, the row centering and the auto tile size are arithmetic the
+ * reference pins by test (see that file's header). What is here is the box a
+ * tile is drawn in, and the one rule that matters for its own accessibility:
+ * the selected tile is marked by a WORD beside its name as well as by colour,
+ * so a colour-blind reader and a screen reader both get the highlight. */
+
+.ctl-tile-grid {
+  position: relative;
+  margin: 6px 0 0;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.ctl-tile {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  overflow: hidden;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.ctl-tile:hover:not(:disabled) {
+  background: var(--bg-sunken);
+}
+
+/* The highlight the daemon chose. It is a border AND a background AND the word
+   "Selected" inside the tile, never the border alone. */
+.ctl-tile.is-selected {
+  border-color: var(--accent);
+  background: var(--bg-sunken);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.ctl-tile:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ctl-tile-name {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ctl-tile-app {
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* The overlay document (src/switcher.html). It is a window over everything, so
+   it centres its content and leaves the rest of the screen alone; the tiles do
+   the sizing. */
+.switcher-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-height: 100%;
+  padding: 12px;
+}
+
 /* --- profile cards ---------------------------------------------------------
  *
  * A card is a declared bundle: a name, a sentence about it, one row per

@@ -49,6 +49,46 @@ const SET_FILE_TYPE = ['core', 'setFileType'].join('.')
 const REORDER_FILE_TYPES = ['core', 'reorderFileTypes'].join('.')
 
 /**
+ * The switcher's two ids, assembled for the same reason as the file-type pair
+ * above. They are also EXPORTED, because the overlay entry has to name the wait
+ * before the panel it draws exists: the ids are the permission tokens the daemon
+ * checks, and both sides of the switcher resolve them through this one table
+ * rather than each carrying a spelling of its own.
+ */
+export const SWITCHER_FOCUS = ['core', 'switcherFocus'].join('.')
+export const SWITCHER_WAIT = ['core', 'switcherWait'].join('.')
+
+/**
+ * The switcher's three bound calls, narrowed exactly as the file-type catalog
+ * narrows its own: the Wails Service carries all three, but ServiceApi does not
+ * model them yet, so the control and the overlay both read them through this
+ * seam rather than through a hand-written shim that could drift from the
+ * generator. A build with no binding refuses in words instead of throwing.
+ */
+interface SwitcherCalls {
+  Windows(): Promise<unknown>
+  SwitcherWait(timeoutMs: number): Promise<unknown>
+  SwitcherFocus(windowID: string): Promise<unknown>
+}
+
+function switcherCalls(service: ServiceApi): SwitcherCalls {
+  const calls = service as Partial<SwitcherCalls>
+  const refuse = (name: string) => (): Promise<unknown> =>
+    Promise.reject(new Error(`a Service.${name} binding; the daemon serves the window switcher over its windows source and its wait verb`))
+  return {
+    Windows: typeof calls.Windows === 'function' ? calls.Windows.bind(service) : refuse('Windows'),
+    SwitcherWait:
+      typeof calls.SwitcherWait === 'function'
+        ? calls.SwitcherWait.bind(service)
+        : refuse('SwitcherWait'),
+    SwitcherFocus:
+      typeof calls.SwitcherFocus === 'function'
+        ? calls.SwitcherFocus.bind(service)
+        : refuse('SwitcherFocus'),
+  }
+}
+
+/**
  * The catalog's bound calls. The Wails Service is the shell's single seam and
  * does not carry these yet — the catalog is served by the daemon's Explorer
  * data source — so they are narrowed here exactly as the control narrows its
@@ -124,6 +164,18 @@ export const ACTION_COMMANDS: Record<string, ActionCommand> = {
   // would be a read-modify-write of a row the daemon cannot find.
   [SET_FILE_TYPE]: async (service, args) => fileTypeCalls(service).SetFileType(args?.value),
   [REORDER_FILE_TYPES]: async (service, args) => fileTypeCalls(service).ReorderFileTypes(reorderIds(args)),
+
+  // The switcher's two. Focus is the row write — the same write a release of
+  // the chord performs, so a click never synthesizes a keystroke — and it
+  // refuses an empty id through rowId like every other row-scoped write: a
+  // focus with no window would ask the daemon about one that cannot exist.
+  [SWITCHER_FOCUS]: async (service, args) => switcherCalls(service).SwitcherFocus(rowId(args)),
+  // The wait is the bounded long poll behind an idle switcher, and its budget
+  // is the DAEMON's: zero asks for the default the daemon already applies to a
+  // request that names none, so this table carries no second copy of a number
+  // the daemon owns (and none of its 30s cap). A spent budget answers
+  // triggered=false rather than an error, which is why this is a plain read.
+  [SWITCHER_WAIT]: (service) => switcherCalls(service).SwitcherWait(0),
 }
 
 /**

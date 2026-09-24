@@ -36,6 +36,7 @@ import { ProfileListControl } from './ProfileListControl'
 import { RuleBuilderControl } from './RuleBuilderControl'
 import { SchemaFormControl } from './SchemaFormControl'
 import { ShortcutListControl } from './ShortcutListControl'
+import { SwitcherPanelControl } from './SwitcherPanelControl'
 import { TrialControl } from './TrialControl'
 import { UnsupportedControl } from './UnsupportedControl'
 import { VersionControl } from './VersionControl'
@@ -93,6 +94,7 @@ const RENDERERS = new Map<string, ControlRenderer>([
   ['ruleBuilder', RuleBuilderControl],
   ['schemaForm', SchemaFormControl],
   ['shortcutList', ShortcutListControl],
+  ['switcherPanel', SwitcherPanelControl],
   ['trial', TrialControl],
   ['version', VersionControl],
   ['wizard', WizardControl],

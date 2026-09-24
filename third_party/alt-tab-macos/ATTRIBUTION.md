@@ -284,8 +284,73 @@ CrossOS license: MIT
 
 ---
 
-Six ported algorithms, seven blocks: the ordering comparator is split out from
+Source repository: lwouis/alt-tab-macos
+Source commit: 1cfb7e1df05f2cb87e0cc88f490de97d3e51b753 (tag v11.7.0)
+Source file: src/switcher/main-window/TileGridLayoutSpecs.md:5-49 (equal-height
+tiles of their own width, placed along the writing direction until the next would
+cross the panel's max width; a tile wraps on its far edge measured with the padding
+that follows it, and both the projection and the row's y are floored; maxY always
+counts one row even with no tiles; a tile that OPENS a row does not widen the grid,
+with the oversized-first-tile exception pinned at maxX 0; rows always holds at
+least one row; a row is centered only when narrower than the space the CALLER
+gives it, offsets round away from zero and are never negative, and centering is
+measured against that width rather than against maxX; the auto size takes the
+first candidate that fits and the last one regardless, measuring each candidate up
+to and including the chosen one), :56-95 (the six named test groups), and
+TileGridLayout.swift:39-105 (the four functions the spec describes: compute,
+centeringOffsets, firstSizeThatFits, and the three private helpers)
+Original license: GPL-3.0
+Original copyright: Copyright (c) lwouis and the alt-tab-macos contributors (no
+per-file header in the project; the holder list is docs/contributors.md at this
+commit)
+CrossOS destination: app/frontend/src/controls/SwitcherPanelControl.tsx —
+tileGrid, centeringOffsets, firstSizeThatFits and the three private helpers
+(projectedX, needsNewRow, originX); the DOM half is SwitcherPanelControl's own
+useLayoutEffect measurement of each tile's offsetWidth, the RTL mirror across
+PANEL_MAX_WIDTH, and the TILE_SIZES auto ladder; app/frontend/src/controls/switcher.test.tsx
+— the six groups, A one row through F the auto size, with the reference's own
+fixtures (5pt padding, 100pt tile, 40/90/200pt widths) and expected values
+Modification: structural port, no code copied. What transfers is the ARITHMETIC
+and the four rules that are easy to break while simplifying it: the wrap is
+measured WITH the padding that follows a tile, the projection and the row's y are
+floored so accumulated half-pixels cannot push a fitting row onto the next one,
+a tile that opens a row does not widen the grid (so the panel is sized from row
+1, and the one oversized-first-tile case is left at maxX 0), and the auto size
+returns the LAST candidate when nothing fits after having measured every one of
+them — because in the reference the measure closure applies the size to the
+appearance before it can measure, which makes the call order and count part of the
+contract rather than an accident. The two subtleties the Swift spells in a type are
+spelled in a function here: currentX is the leading edge in LTR and the TRAILING
+edge in RTL (so the frame origin is one width before it), and Swift's two rounding
+modes are two functions, floorTo for .rounded(.down) and rounded for .rounded()
+(half away from zero, so 22.5 is 23 and -22.5 is -23).
+No AltTab source is vendored for this port: TilesView.swift, TilesPanel.swift,
+TileView.swift, TileFontIconView.swift, TileOverView.swift, TilesPanelBackgroundView.swift,
+TileUnderLayer.swift, TileTitleView.swift and the appearance object are all
+absent, as is every line of Swift behind them. There are no thumbnails in CrossOS,
+so the three appearance styles (thumbnails, titles, appIcons) do not come either —
+a tile is the window's own name and the two words the daemon sends about it, which
+is why the widths the grid is computed over are measured from the DOM rather than
+taken from an image's aspect ratio.
+Reason for modification: the reference's grid is half of a panel. The placement is
+a pure function, but measuring a tile means filling an NSView, assigning frames
+inside a flipped document view, and sizing the panel and the scroll view from
+maxX/maxY — AppKit, a screen and a run loop. CrossOS lays tiles out in a webview
+that the daemon serves rows to, where the width of a tile is whatever its text
+needs and the panel's max width is a stylesheet's business. The split is the
+reference's own (TileGridLayoutSpecs.md:17-18: "the grid can now be pinned at any
+width, any tile size, either writing direction and any number of tiles, without a
+screen"), so the arithmetic comes across whole and the AppKit half stays behind —
+which is also what lets the six groups be pinned by a test with no window server
+present.
+CrossOS license: MIT
+
+---
+
+Seven ported algorithms, eight blocks: the ordering comparator is split out from
 the release-to-commit machine because it is a separate kernel (Order asks "in what
 sequence", the Session asks "which tile now that the user has had a say") and
-merging them would hide that. Every block above is a structural port. No AltTab
-source is vendored, for any of them.
+merging them would hide that; the tile grid is split out from both because it is
+the only one of the seven that is about PRESENTATION rather than about which
+window is picked, and it is the one that has to run without a window server. Every
+block above is a structural port. No AltTab source is vendored, for any of them.

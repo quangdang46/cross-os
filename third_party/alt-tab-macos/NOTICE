@@ -13,7 +13,8 @@ transliteration or a partial extract of the GPL-3.0 project, and none is derived
 from its licence text. CrossOS holds no AltTab licence file either — the licence
 is named, not shipped. The reference informed the shape of the switcher kernel
 only: which plane owns a fact, when a window list is read, where the default
-highlight lands, and when a highlight becomes a commitment. Every line of it is a
+highlight lands, when a highlight becomes a commitment, and how a grid of tiles
+wraps, centers its short rows and settles on a size. Every line of it is a
 structural port recorded in ATTRIBUTION.md.
 
 alt-tab-macos is not a dependency. It is not built, not linked and not required to

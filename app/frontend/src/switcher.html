@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="stylesheet" href="/style.css" />
+    <title>CrossOS Switcher</title>
+  </head>
+  <!-- The overlay's own root, not the shell's #root: this document IS the
+       switcher, so the shell's entry point is never loaded here. The
+       difference in name is what keeps the two entries from fighting over one
+       mount point if both are ever open at once. -->
+  <body>
+    <div id="switcher-root"></div>
+    <script type="module" src="/src/switcher.tsx"></script>
+  </body>
+</html>

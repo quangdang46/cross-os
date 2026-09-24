@@ -17,6 +17,20 @@ export default defineConfig({
     strictPort: true,
   },
   plugins: [react(), ...(process.env.VITEST ? [] : [wails("./bindings")])],
+  // Two documents, so two entries. The settings shell is index.html; the
+  // switcher overlay is src/switcher.html, which is a WINDOW of its own rather
+  // than a route inside the settings window — a switcher summoned while the
+  // settings window is already up has to be a second window, and a second
+  // window is a second document. Naming the settings entry explicitly keeps the
+  // default from silently becoming whichever html file sorted first.
+  build: {
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        switcher: "src/switcher.html",
+      },
+    },
+  },
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],

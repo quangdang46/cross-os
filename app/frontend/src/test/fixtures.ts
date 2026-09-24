@@ -45,6 +45,11 @@ import type {
   UserRuleRow,
   ZoneRow,
 } from '../types/controls'
+// The two action ids the Switcher page declares, imported from the registry
+// rather than spelled here: an action id is a permission token the daemon
+// checks, so a fixture that wrote its own copy could pass against an id nothing
+// is bound under.
+import { SWITCHER_FOCUS, SWITCHER_WAIT } from '../controls/actions'
 
 // --- the pages ---------------------------------------------------------------
 
@@ -141,6 +146,24 @@ export function productPages(): unknown[] {
       controls: [
         { kind: 'shortcutList', id: 'shortcuts', label: 'Window shortcuts', source: 'daemon:windowShortcuts', editable: true },
         { kind: 'zoneEditor', id: 'zones', label: 'Snap zones', source: 'daemon:snapZones' },
+      ],
+    }),
+    servedPage({
+      id: 'switch',
+      title: 'Switcher',
+      group: 'shortcuts',
+      order: 35,
+      description: 'The windows the switcher can raise, in the order it will raise them.',
+      controls: [
+        {
+          kind: 'switcherPanel',
+          id: 'windows',
+          label: 'Open windows',
+          source: 'daemon:windows',
+          rowAction: SWITCHER_FOCUS,
+          actions: [SWITCHER_WAIT],
+          note: 'One row per window, named by its title. Clicking a row raises it.',
+        },
       ],
     }),
     servedPage({
@@ -241,10 +264,35 @@ interface Machine {
   extensions: Record<string, boolean>
   rules: UserRuleRow[]
   decisions: TraceRow[]
+  /** The open windows the switcher lists, most-recently-used first. */
+  windows: WindowRow[]
   /** A bound method to reject, by name. Absent means the call resolves. */
   faults: Record<string, unknown>
   /** Every call the shell made, in order, for assertions about the sequence. */
   calls: string[]
+}
+
+/**
+ * One window as the daemon's switcher row carries it. The shape is declared
+ * here rather than imported from the renderer: the row is the DAEMON's wire
+ * shape (core/cmd/crossos/switcher.go, switcherRow), so a fixture that took it
+ * from the control it draws would only be checking the control against itself.
+ */
+interface WindowRow {
+  window_id: string
+  app_id: string
+  title: string
+  index: number
+  selected: boolean
+  skippable: boolean
+}
+
+function freshWindows(): WindowRow[] {
+  return [
+    { window_id: '412', app_id: 'com.apple.finder', title: 'Downloads', index: 0, selected: false, skippable: false },
+    { window_id: '881', app_id: 'com.apple.Terminal', title: 'crossos — zsh', index: 1, selected: true, skippable: false },
+    { window_id: '207', app_id: 'com.apple.Safari', title: '', index: 2, selected: false, skippable: true },
+  ]
 }
 
 function fresh(): Machine {
@@ -255,6 +303,7 @@ function fresh(): Machine {
     extensions: { 'window-keys': false, 'finder-actions': false },
     rules: [],
     decisions: [],
+    windows: freshWindows(),
     faults: {},
     calls: [],
   }
@@ -618,6 +667,40 @@ const controlSurface: ServiceApi = {
 }
 
 /**
+ * The switcher's three calls, kept beside the control surface rather than in it
+ * for the reason every other extra call is kept out of ServiceApi: they are a
+ * narrow, page-owned seam, and widening the shared interface for them would put
+ * the switcher's vocabulary in every control's reach.
+ */
+const switcherSurface = {
+  Windows: () => answer('Windows', () => [...machine.windows]),
+
+  // The long poll. A SETTINGS window never summons a switcher, so the only
+  // answer this machine can give is the idle one — a spent budget, which the
+  // daemon spells triggered=false rather than an error. The overlay, which is
+  // the surface that does wait for a chord, scripts its own answers; see
+  // controls/switcher.test.tsx. The budget is the daemon's to clamp (the shell
+  // asks for its default with zero), so it is taken and not interpreted.
+  SwitcherWait: (timeoutMs: number) => answer('SwitcherWait', () => ({ triggered: false })),
+
+  // Raising a window is the same write a release of the chord performs. It
+  // moves the row to the front of the MRU, and the highlight FOLLOWS it — the
+  // reference's rule that acting on a tile is a commitment, so the pick does not
+  // slide off the window the person aimed at
+  // (SelectionResolverSpecs.md:44-50, priority 5).
+  SwitcherFocus: (windowID: string) =>
+    answer('SwitcherFocus', () => {
+      const raised = machine.windows.find((row) => row.window_id === windowID)
+      if (!raised) throw new Error(`no window named ${windowID}`)
+      const rest = machine.windows.filter((row) => row.window_id !== windowID)
+      machine.windows = [{ ...raised, selected: true }, ...rest.map((row) => ({ ...row, selected: false }))].map(
+        (row, index) => ({ ...row, index }),
+      )
+      return { window_id: windowID, focused: true }
+    }),
+}
+
+/**
  * The three calls App.tsx makes itself, which ServiceApi deliberately does not
  * model (see the interface's own comment). The shell needs them to discover
  * pages and to show the two log sources, so the stub carries them alongside the
@@ -637,4 +720,4 @@ const shellSurface = {
  * imports this object once, so every call in a test reads the state as it
  * stands at that moment rather than a snapshot taken when the module loaded.
  */
-export const stub = Object.assign(controlSurface, shellSurface)
+export const stub = Object.assign(controlSurface, shellSurface, switcherSurface)
