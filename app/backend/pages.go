@@ -223,7 +223,7 @@ func CommandsPage() pluginapi.UIContribution {
 func CorePages() []pluginapi.UIContribution {
 	return []pluginapi.UIContribution{
 		HomePage(), ProfilesPage(),
-		MatrixPage(), WindowsPage(), CommandsPage(),
+		MatrixPage(), WindowsPage(), SwitcherPage(), CommandsPage(),
 		FinderPage(),
 		ActivityPage(), ObservePage(),
 		ExtensionsPage(), SchemaFormHelp(), SafetyPage(), AboutPage(),

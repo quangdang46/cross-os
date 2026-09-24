@@ -42,10 +42,11 @@ func TestAllPagesDiscovered(t *testing.T) {
 	h := NewHost()
 	registerAll(t, h)
 	// The served order, frozen. This is the product's navigation: Home and
-	// Profiles, the shortcut surfaces, Explorer, the two activity surfaces,
-	// then the advanced group. It is written out rather than derived so a
-	// page that quietly changes its Order — or a group that starts sorting
-	// somewhere surprising — fails here instead of shipping a new nav.
+	// Profiles, the shortcut surfaces (Keyboard, Windows, Switcher,
+	// Shortcuts, Explorer), the two activity surfaces, then the advanced
+	// group. It is written out rather than derived so a page that quietly
+	// changes its Order — or a group that starts sorting somewhere
+	// surprising — fails here instead of shipping a new nav.
 	//
 	// Onboarding is not in this list. On a fresh profile it LEADS (see
 	// TestFirstRunLandingGate), which is the one thing that makes an
@@ -59,6 +60,7 @@ func TestAllPagesDiscovered(t *testing.T) {
 		{"core.profiles", "home", 10},
 		{"core.keyboard", "shortcuts", 20},
 		{"core.windows", "shortcuts", 30},
+		{"core.switcher", "shortcuts", 35},
 		{"core.shortcuts", "shortcuts", 40},
 		{"core.finder", "shortcuts", 50},
 		{"core.activity", "activity", 60},
@@ -437,5 +439,118 @@ func TestPagesCarrySchema(t *testing.T) {
 				t.Fatalf("page %s: control %+v missing kind/id", p.ID, c)
 			}
 		}
+	}
+}
+
+// switcherControl is the part of a control the page contract is written in:
+// what it draws, where its rows come from, and what a row or the whole list
+// can write. Same shape as the Explorer page's, for the same reason — the
+// schema is authored as a Go map literal, so these tests read the JSON the
+// Host serves rather than the struct that built it.
+type switcherControl struct {
+	Kind      string   `json:"kind"`
+	ID        string   `json:"id"`
+	Label     string   `json:"label"`
+	Source    string   `json:"source"`
+	RowAction string   `json:"rowAction"`
+	Actions   []string `json:"actions"`
+}
+
+func decodeSwitcher(t *testing.T) []switcherControl {
+	t.Helper()
+	var body struct {
+		Controls []switcherControl `json:"controls"`
+	}
+	if err := json.Unmarshal(SwitcherPage().Schema, &body); err != nil {
+		t.Fatalf("switcher schema not JSON: %v", err)
+	}
+	return body.Controls
+}
+
+// TestSwitcherPageContract pins the three things that decide whether the page
+// shows anything: the kind ws-6 renders, the source the daemon serves, and the
+// two action ids it declares. Each is checked against the method table rather
+// than against a wish — a source no handler serves renders an empty page that
+// reads as "no windows open" rather than as a missing method, and an action id
+// spelled differently from the daemon's is a permission token that matches
+// nothing.
+func TestSwitcherPageContract(t *testing.T) {
+	p := SwitcherPage()
+	if p.ID != "core.switcher" || p.Title != "Switcher" {
+		t.Fatalf("id=%q title=%q, want core.switcher / Switcher", p.ID, p.Title)
+	}
+	controls := decodeSwitcher(t)
+	if len(controls) != 1 {
+		t.Fatalf("switcher declares %d controls, want exactly 1: %+v", len(controls), controls)
+	}
+	c := controls[0]
+	if c.Kind != "switcherPanel" {
+		t.Fatalf("kind=%q, want switcherPanel (the kind ws-6 draws)", c.Kind)
+	}
+	if c.ID != "windows" {
+		t.Fatalf("id=%q, want windows", c.ID)
+	}
+	// The label is in words, not the source id: the layout rule this page
+	// follows is that a named thing is never identified by its key alone.
+	if c.Label == "" || c.Label == c.Source {
+		t.Fatalf("label=%q must name the control in words, not repeat %q", c.Label, c.Source)
+	}
+	if c.Source != "core:windows" {
+		t.Fatalf("source=%q, want core:windows (ws-3's core.windows)", c.Source)
+	}
+	if c.RowAction != "core.switcherFocus" {
+		t.Fatalf("rowAction=%q, want core.switcherFocus", c.RowAction)
+	}
+	if len(c.Actions) != 1 || c.Actions[0] != "core.switcherWait" {
+		t.Fatalf("actions=%v, want [core.switcherWait]", c.Actions)
+	}
+	// The contribution's action list is every action its controls declare, so a
+	// control that gains a write without the contribution hearing about it
+	// fails here rather than at the daemon.
+	if got, want := strings.Join(p.Actions, ","), "core.switcherFocus,core.switcherWait"; got != want {
+		t.Fatalf("contribution actions=%q, want %q", got, want)
+	}
+}
+
+// TestSwitcherSourcesAreServed pins the source→method pairing the page depends
+// on. The daemon is a separate Go module, so core cannot import these pages
+// and app cannot reach the daemon's method table; what this holds is that the
+// page's own source and action ids are the spellings the bridge below is bound
+// under. A bridge renamed without the page following renames the permission
+// token and leaves the panel reading a source no method serves.
+func TestSwitcherSourcesAreServed(t *testing.T) {
+	app := NewApp(populatedCore())
+	svc := NewService(app, NewHost())
+	// core:windows is served by the bound Windows call. The stub answers a nil
+	// list, so this asserts the two properties the page depends on: the source
+	// is reachable at all, and what arrives is a list the panel can render. The
+	// UI-log note the null leaves is the bridge's own rule (sourceList), and a
+	// machine with no window server is exactly the case where the page must
+	// still draw — an unreachable source is a different failure.
+	rows, err := svc.Windows()
+	if err != nil {
+		t.Fatalf("the switcher page's source is not served: %v", err)
+	}
+	if rows == nil {
+		t.Fatal("core:windows reached the page as null, not as an empty list")
+	}
+	// The wait is a source too, and the one call on this page that is allowed
+	// to answer "nothing happened": a spent budget is a poll resuming, not a
+	// daemon fault. A trigger is what says the switcher was summoned.
+	trig, err := svc.SwitcherWait(0)
+	if err != nil {
+		t.Fatalf("core.switcherWait is not served: %v", err)
+	}
+	if trig.Triggered {
+		t.Fatalf("an idle switcher answered triggered=true: %+v", trig)
+	}
+	// The row action fails closed on a nameless window, the way the daemon
+	// refuses a missing window_id — a click that focused nothing must not leave
+	// the page believing it did.
+	if err := svc.SwitcherFocus(""); err == nil {
+		t.Fatal("core.switcherFocus must refuse an empty window id")
+	}
+	if len(svc.UILogs()) == 0 {
+		t.Fatal("the refused focus must reach the UI log, not vanish")
 	}
 }
