@@ -17,9 +17,9 @@
 #   ./scripts/dev-verify.sh --help
 #
 # Exit status: 0 when every check passed except the KNOWN GOOS gaps listed
-# below (which are printed loudly, never silently swallowed), 1 on any real
-# regression. Fail-closed: an error this script does not recognise is a
-# failure, not a warning.
+# below, 1 on any real regression. Fail-closed: an error this script does not
+# recognise is a failure, not a warning. The gap lists are currently EMPTY, so
+# every check below is a real gate: a command that fails is a FAILURE.
 #
 # Bead: cross-os-j7p.
 set -uo pipefail
@@ -39,21 +39,19 @@ die()  { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 # error ride along inside a command that already failed for a known reason,
 # which is the opposite of fail-closed.
 #
+# BOTH LISTS ARE EMPTY. core/cmd/crossos used to need two: main.go called
+# syscall.Flock with no build constraint, and main_test.go called the
+# darwin-only adapter tap seam the same way. Both are fixed — the lock is in
+# lock_unix.go / lock_windows.go / lock_other.go, the darwin tests in
+# main_darwin_test.go — so those patterns are deleted rather than left to
+# absorb errors. An empty list is the strong form of this check: a
+# regression in either file is now a FAILURE, not a recorded gap.
+#
 # When a lane fixes the underlying file, delete its pattern here — the check
 # then stops being a gap, and if the fix is wrong the check goes red.
-GAP_PATTERNS=(
-  # core/cmd/crossos/main.go calls syscall.Flock with no build constraint.
-  'cmd[\\/]crossos[\\/]main\.go:[0-9]+:[0-9]+: undefined: syscall\.(Flock|LOCK_EX|LOCK_NB)'
-  # core/cmd/crossos/main_test.go calls the macOS-only adapter tap-entry seam
-  # with no build constraint. "too many errors" is Go's cap marker on the last
-  # of those lines, not a separate diagnostic.
-  'cmd[\\/]crossos[\\/]main_test\.go:[0-9]+:[0-9]+: (undefined: adapter\.(BindDecideForTest|DecideForMacTest|MustWinKeycodeForTest|DecideForTest|ToWinKeycode)|too many errors)'
-)
+GAP_PATTERNS=()
 
-KNOWN_GAPS=(
-  "core/cmd/crossos/main.go calls syscall.Flock with no build constraint (unix-only)"
-  "core/cmd/crossos/main_test.go calls the macOS-only adapter tap-entry seam with no build constraint"
-)
+KNOWN_GAPS=()
 
 # An unrecognised compiler diagnostic. Matches go build / go vet / go test
 # error lines on both slash styles, so a path-separator difference between
@@ -71,15 +69,26 @@ run_gate() {
   fi
   # Strip every line a known gap is allowed to produce, then look for any
   # compiler diagnostic left over. Left over == real regression == fail.
+  #
+  # ${arr[@]+"${arr[@]}"} is the empty-safe spelling of "${arr[@]}". The gap
+  # lists are empty now, and macOS still ships bash 3.2, where expanding an
+  # empty array under set -u raises "unbound variable" — which would replace
+  # a real error report with a crash. The classifier still has to run on an
+  # empty list; it just has nothing to strip.
   local leftover
   leftover="$(while IFS= read -r line; do
                 local skip=0 p
-                for p in "${GAP_PATTERNS[@]}"; do
+                for p in ${GAP_PATTERNS[@]+"${GAP_PATTERNS[@]}"}; do
                   grep -qE "$p" <<<"$line" && { skip=1; break; }
                 done
                 [[ $skip -eq 0 ]] && printf '%s\n' "$line"
               done <<<"$out" | grep -E "$ERR_LINE" || true)"
-  if [[ -n "$leftover" ]]; then
+  # A failure is a FAILURE unless its output is entirely covered by a
+  # recorded gap. With the gap list empty there is nothing a failing command
+  # could be excused for, including a failure that printed no compiler
+  # diagnostic at all (a module that will not resolve, say) — reporting that
+  # as a gap is the fail-open this script is written to refuse.
+  if [[ -n "$leftover" || ${#GAP_PATTERNS[@]} -eq 0 ]]; then
     printf '  \033[31mFAIL\033[0m %s — unrecognised error\n' "$label"
     printf '%s\n' "$out" | sed 's/^/        /'
     return 1
@@ -197,7 +206,6 @@ fi
 if (( ${#KNOWN_GAPS[@]} )); then
   printf '\n\033[33mRecorded GOOS gaps\033[0m (known, tracked, not regressions):\n'
   for g in "${KNOWN_GAPS[@]}"; do printf '  - %s\n' "$g"; done
-  printf 'Each is a missing build constraint in a file outside this lane.\n'
   printf 'See docs/dev-verification.md for the exact symbols and the fix shape.\n'
 fi
 printf '\n\033[32mOK\033[0m\n'

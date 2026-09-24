@@ -164,20 +164,103 @@ settings row.
 `src/lib/service.ts` silently stops checking anything, and a green
 `tsc --noEmit` says nothing about the bindings at all.
 
-## Known gaps (outside this lane's files)
+## The daemon lock, and the darwin-only tap tests
 
-- `core/cmd/crossos/main.go` calls `syscall.Flock` / `LOCK_EX` / `LOCK_NB` in
-  `listenSocket` with no build constraint. Unix-only, so `go build ./...` for
-  core still fails on Windows after this change. The fix shape is the same as
-  the adapter one: move the locking into a `//go:build !windows` file with a
-  typed error elsewhere, keeping the socket path and the "never steal a live
-  daemon's socket" behaviour (cross-os-jn1) intact.
-- `core/cmd/crossos/main_test.go` calls the macOS-only adapter tap-entry seam
-  (`BindDecideForTest`, `DecideForMacTest`, `MustWinKeycodeForTest`,
-  `ToWinKeycode`) with no build constraint, so `go test ./...` for core still
-  fails on Windows. Those tests genuinely need darwin — they assert against the
-  real CGEvent tap callback — so the honest fix is a `//go:build darwin` tag or
-  moving them to a `_darwin_test.go` name, not a stub.
+`core/cmd/crossos` carried the same defect one level up from `adapter` — and
+it was all this note's gap list had left, two entries in all.
+`listenSocket` called `syscall.Flock` from an unconstrained file, and
+`main_test.go` called the darwin-only tap seam (`BindDecideForTest`,
+`DecideForMacTest`, `ToWinKeycode`) from an unconstrained file. Both are now
+split per GOOS:
+
+| file | constraint | supplies |
+| --- | --- | --- |
+| `lock_unix.go` | `unix && !solaris && !aix` | `syscall.Flock(LOCK_EX\|LOCK_NB)` |
+| `lock_windows.go` | `windows` | `LockFileEx`, exclusive + fail-immediately |
+| `lock_other.go` | `!windows && (!unix \|\| solaris \|\| aix)` | a typed refusal |
+| `main_darwin_test.go` | `darwin` | the three CGEvent-tap tests |
+| `main_test.go` | (none) | the 26 portable tests, on every GOOS |
+
+Those lock constraints are measured, not guessed. `syscall.Flock` exists on
+darwin, linux, the BSDs, dragonfly, illumos and ios, and on no other GOOS —
+solaris and aix satisfy `unix` but do not carry it, so they are excluded by
+name and fall through to `lock_other.go`:
+
+```sh
+mkdir -p /tmp/flockprobe && cd /tmp/flockprobe
+printf 'package p\nimport "syscall"\nvar _ = syscall.Flock\n' > p.go
+go mod init p >/dev/null
+for spec in darwin/arm64 linux/amd64 windows/amd64 freebsd/amd64 \
+            netbsd/amd64 openbsd/amd64 dragonfly/amd64 illumos/amd64 \
+            solaris/amd64 aix/ppc64; do
+  printf '%-18s ' "$spec"
+  GOOS="${spec%%/*}" GOARCH="${spec##*/}" go build ./... >/dev/null 2>&1 \
+    && echo 'HAS Flock' || echo 'NO Flock'
+done
+```
+
+**The Windows half is a real lock.** Windows has no `flock(2)`; the equivalent
+is `LockFileEx`, an exclusive byte-range lock, resolved through
+`syscall.NewLazyDLL("kernel32.dll").NewProc("LockFileEx")` because Go's stdlib
+`syscall` package does not export it — only `x/sys/windows` does — which keeps
+the daemon on the stdlib-only dependency set its other Windows seam
+(`adapter/dll_windows.go`) already uses. `ERROR_LOCK_VIOLATION` is not exported
+either, so `lock_windows.go` carries the value under its Win32 name.
+
+A `return nil` there would be the worst available outcome and the one this
+repo's rules name: the lock would fail **open**, a second daemon would read the
+lock file as free, unlink the live daemon's socket and serve beside it — the
+exact socket theft `cross-os-jn1` exists to prevent. So the property is pinned
+by a test that runs on whichever GOOS runs it, and the platforms with no
+advisory locking refuse to start rather than serve unlocked:
+
+```
+$ go test ./cmd/crossos/ -run TestLockExclusiveRefusesSecondHolder -v
+--- PASS: TestLockExclusiveRefusesSecondHolder (0.00s)
+```
+
+Replacing `lockExclusive` with a no-op turns it red, which is the whole point:
+
+```
+--- FAIL: TestLockExclusiveRefusesSecondHolder (0.00s)
+    main_test.go:823: second holder: err=<nil>, want errLockHeld — a lock that
+    fails open lets a second daemon steal the socket
+```
+
+The three moved tests keep running on macOS. They are the proof that a chord
+as CGEvent reports it reaches the same rule the router reaches with the
+internal Windows virtual keycode — a property no off-darwin stub could assert,
+which is why the file is constrained rather than emptied. The package goes
+from 54 to 55 passing tests on darwin (the new lock test is the difference)
+and `main_test.go` holds 26 of them, portable.
+
+Re-derive the per-GOOS sets at any time:
+
+```sh
+cd core
+GOOS=darwin  go list -f 'GoFiles={{.GoFiles}}
+TestGoFiles={{.TestGoFiles}}' ./cmd/crossos
+GOOS=windows go list -f 'GoFiles={{.GoFiles}}
+TestGoFiles={{.TestGoFiles}}' ./cmd/crossos
+```
+
+| GOOS | `GoFiles` | `TestGoFiles` |
+| --- | --- | --- |
+| darwin | `autostart_darwin.go lock_unix.go main.go pagedata.go tap_darwin.go userules.go` | `autostart_darwin_test.go main_darwin_test.go main_test.go pagedata_test.go userules_test.go` |
+| windows | `autostart_other.go lock_windows.go main.go pagedata.go tap_other.go userules.go` | `main_test.go pagedata_test.go userules_test.go` |
+
+`GOOS=windows go build ./...` and `GOOS=windows go vet ./...` both pass. So
+does CI's `build` job, which compiles the daemon for `windows/amd64`: that row
+was red while `main.go` called `syscall.Flock` unconditionally, and is green
+now.
+
+## Known gaps
+
+The two `core/cmd/crossos` gaps this note used to carry are closed — see
+*The daemon lock, and the darwin-only tap tests* above — and their patterns
+are deleted from `GAP_PATTERNS` in `scripts/dev-verify.sh`, so a regression in
+either file is now a real failure. That leaves:
+
 - `app/frontend/bindings/` is gitignored, so a clean clone cannot run
   `npx tsc --noEmit` or `npm run build` until `wails3 generate bindings ./...`
   has run in `app/`. That is the correct policy (they are build outputs), and
@@ -187,4 +270,5 @@ settings row.
   hide errors past the cap. `scripts/dev-verify.sh` therefore classifies every
   error *line* against a known-gap list and fails on anything unrecognised —
   an error riding along inside an already-failing command is reported, never
-  absorbed.
+  absorbed. With the list empty that means a failing command in this tree is
+  a failure whatever it printed, including nothing at all.

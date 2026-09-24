@@ -10,6 +10,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -827,8 +828,21 @@ func (c *Core) methods() map[string]ipc.Handler {
 	}
 }
 
-// socketLockFile holds the process-lifetime flock; deliberately never closed.
+// socketLockFile holds the process-lifetime lock; deliberately never closed.
 var socketLockFile *os.File
+
+// errLockHeld means another live process owns the lock file. It is distinct
+// from a lock that could not be taken at all, so the caller can tell "stop
+// the leftover daemon" from "this platform cannot lock" instead of blaming a
+// running daemon for a failure that never involved one. The lock itself is
+// per-GOOS: lock_unix.go (flock), lock_windows.go (LockFileEx),
+// lock_other.go (refuses).
+var errLockHeld = errors.New("lock file is held by another process")
+
+// errLockUnsupported is what lock_other.go returns on the platforms with no
+// advisory file locking at all. The daemon refuses to start there: serving
+// without the lock is what lets a second daemon steal a live socket.
+var errLockUnsupported = fmt.Errorf("advisory file locking is not implemented on %s", runtime.GOOS)
 
 // lockHolder reads the pid the owning daemon recorded in the lock file.
 // Returns "" when nobody recorded one.
@@ -870,9 +884,12 @@ func listenSocket(path string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		holder := lockHolder(lockPath)
+	if err := lockExclusive(lockFile); err != nil {
 		lockFile.Close()
+		if !errors.Is(err, errLockHeld) {
+			return nil, fmt.Errorf("cannot take the daemon lock on %s: %w", lockPath, err)
+		}
+		holder := lockHolder(lockPath)
 		return nil, fmt.Errorf("another crossos daemon holds %s%s — it is not serving, so it is a leftover. Stop it with: kill %s",
 			lockPath, holder, lockHolderCmd(holder, lockPath))
 	}
