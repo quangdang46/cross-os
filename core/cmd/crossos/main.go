@@ -837,7 +837,10 @@ func (c *Core) methods() map[string]ipc.Handler {
 		"core.traces":          c.handleTraces,
 		"core.pluginMeta":      c.handlePluginMeta,
 		"core.onboardingState": c.handleOnboardingState,
-		"core.apps":            c.handleApps,
+		// The wizard's one write, beside its read: the derived steps cannot
+		// record that the user is finished, so the flag gets its own method.
+		"core.onboardingComplete": c.handleOnboardingComplete,
+		"core.apps":               c.handleApps,
 		// The Alt+Tab switcher (ws-3): the list the switcher page draws, the
 		// bounded long-poll it waits on, and the focus a commit performs.
 		"core.windows":       c.handleWindows,

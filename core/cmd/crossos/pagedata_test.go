@@ -194,6 +194,7 @@ func TestEveryPageDataMethodIsRegistered(t *testing.T) {
 		"core.readiness",
 		"core.profiles", "core.profileApply", "core.conflicts",
 		"core.traces", "core.pluginMeta", "core.onboardingState",
+		"core.onboardingComplete",
 		// The Alt+Tab switcher's three sources: the list, the long-poll the
 		// shell parks on, and the focus a commit performs.
 		"core.windows", "core.switcherWait", "core.switcherFocus",
@@ -1046,6 +1047,66 @@ func TestOnboardingStateResolvesEveryChecklistRow(t *testing.T) {
 			t.Errorf("step %q is not done on a completed first run", s.ID)
 		}
 	}
+}
+
+// TestOnboardingCompleteRoundTrip drives the wizard's one write through the
+// method table, the way the shell reaches it, rather than calling the handler
+// directly: a write that is not registered is the failure this whole source
+// has been bitten by, and a direct call cannot see it.
+//
+// The daemon starts unfinished, the write says the user is finished, and the
+// reply is the state the store now holds. Reading the flag back matters as much
+// as setting it — the shell's OnboardingRow and the shell's completion button
+// are two ends of one promise, and a write that answers a row the next read
+// contradicts is how a dismissed wizard comes back on the next launch.
+func TestOnboardingCompleteRoundTrip(t *testing.T) {
+	c := testCore(t)
+
+	// A fresh daemon is unfinished, and the wizard waits at its first step.
+	res, rerr := onboardingCall(t, c, "core.onboardingState", nil)
+	before := decode[wireOnboardingRow](t, res, rerr)
+	if before.Completed {
+		t.Error("a fresh daemon reports the first run as finished")
+	}
+	if before.CurrentStep != "welcome" {
+		t.Errorf("current step=%q on a fresh daemon, want welcome", before.CurrentStep)
+	}
+
+	res, rerr = onboardingCall(t, c, "core.onboardingComplete", nil)
+	after := decode[wireOnboardingRow](t, res, rerr)
+	if !after.Completed {
+		t.Error("the write answered completed=false — the flag it set is not in the row it sent")
+	}
+	if after.CurrentStep != "done" {
+		t.Errorf("current step=%q after completing, want done", after.CurrentStep)
+	}
+	// Every step is done on a completed run, so the wizard cannot leave the
+	// page one checkbox away from dismissing itself.
+	for _, s := range after.Steps {
+		if !s.Done {
+			t.Errorf("step %q is not done on the completed run the write answered", s.ID)
+		}
+	}
+
+	// And it survives: a read after the write — a fresh handler, a fresh
+	// derivation — reports the same thing, because the flag is persisted rather
+	// than held in the handler.
+	res, rerr = onboardingCall(t, c, "core.onboardingState", nil)
+	again := decode[wireOnboardingRow](t, res, rerr)
+	if !again.Completed || again.CurrentStep != "done" {
+		t.Errorf("re-read reports completed=%v at %q, want done", again.Completed, again.CurrentStep)
+	}
+}
+
+// onboardingCall dispatches through the method table the way a client does, so
+// the round trip cannot pass on a handler the daemon never registered.
+func onboardingCall(t *testing.T, c *Core, method string, params json.RawMessage) (any, *ipc.RPCError) {
+	t.Helper()
+	h, ok := c.methods()[method]
+	if !ok {
+		t.Fatalf("%s is not in the method table", method)
+	}
+	return h(params)
 }
 
 // TestTracesExposeTheRecordedDetail: core.traces serves the columns

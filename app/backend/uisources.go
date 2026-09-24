@@ -110,6 +110,34 @@ type ReadinessRow struct {
 	Detail string `json:"detail"`
 }
 
+// OnboardingRow is the whole first-run wizard in one answer
+// (core.onboardingState): where the user is, what is left, and the readiness
+// rows the step verdicts were judged from.
+//
+// Readiness rides along rather than being looked up again, because the step
+// verdicts on this row were computed FROM those rows — a page that re-reads
+// core.readiness to explain a step is showing a second opinion that can
+// disagree with the verdict it is explaining.
+type OnboardingRow struct {
+	Completed   bool             `json:"completed"`
+	CurrentStep string           `json:"current_step"`
+	Steps       []OnboardingStep `json:"steps"`
+	Readiness   []ReadinessRow   `json:"readiness"`
+	Ready       int              `json:"ready"`
+	Total       int              `json:"total"`
+}
+
+// OnboardingStep is one wizard step with its verdict. Detail is why the step is
+// not done — the reason to act, not merely the fact of waiting — and is absent
+// (not empty) on a done step, so a page leaves the slot out rather than render
+// a blank line where an explanation would have been.
+type OnboardingStep struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Done   bool   `json:"done"`
+	Detail string `json:"detail,omitempty"`
+}
+
 // ProfileRow is one profile card (core.profiles) — the Windows-experience
 // bundle and whatever profiles ship beside it. The bundle is the profile's own
 // data; what the card adds is the rollup, so one answer settles whether the

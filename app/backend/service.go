@@ -142,6 +142,15 @@ func (s *Service) Readiness() ([]ReadinessRow, error) {
 	return s.app.Readiness()
 }
 
+// OnboardingState serves the first-run wizard: the done flag, the step the user
+// is on, and the verdicts, all as the daemon derives them.
+func (s *Service) OnboardingState() (OnboardingRow, error) {
+	return s.app.OnboardingState()
+}
+
+// CompleteOnboarding dismisses the first-run wizard for good.
+func (s *Service) CompleteOnboarding() error { return s.app.CompleteOnboarding() }
+
 // The Wave 3 source bindings (bead w3-shell-bridge): the profile cards, the
 // decision trace, the plugin manifest facts, the app list the rule builder
 // picks from, and the person-authored rule table.

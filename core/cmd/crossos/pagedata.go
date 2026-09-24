@@ -1347,6 +1347,33 @@ func (c *Core) handleOnboardingState(_ json.RawMessage) (any, *ipc.RPCError) {
 	return out, nil
 }
 
+// --- core.onboardingComplete ---
+
+// handleOnboardingComplete serves core.onboardingComplete: the user saying "I
+// am finished", latched into the store and answered with the wizard as it now
+// stands.
+//
+// The flag is the one part of handleOnboardingState the daemon cannot
+// re-derive, which is why it is the one that gets a write. Every step there is
+// a function of live state, so a user who skipped a step this machine happens
+// to satisfy would be sent back through it on every launch; the sentence "I am
+// finished" is the only evidence, and it has to be remembered somewhere the
+// derivation cannot contradict.
+//
+// The reply is handleOnboardingState's own row rather than a bare ack. The
+// page that dismisses the wizard redraws from what the daemon now believes, so
+// a write that landed and a page still sitting on step one cannot disagree —
+// and a second derivation here is the one that would eventually drift.
+func (c *Core) handleOnboardingComplete(_ json.RawMessage) (any, *ipc.RPCError) {
+	if err := c.set.SetOnboardingComplete(true); err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.ErrInternal,
+			Message: "set onboarding complete: " + err.Error(),
+		}
+	}
+	return c.handleOnboardingState(nil)
+}
+
 // --- core.apps ---
 
 // handleApps serves the installed applications the rule editor's "IF App = …"

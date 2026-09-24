@@ -248,6 +248,33 @@ func (s *stubCore) SwitcherFocus(windowID string) error {
 	return nil
 }
 
+// The onboarding stubs carry no rows of their own, the same bargain the wave-3
+// stubs above make: the zero value is a fresh, unfinished wizard, which is what
+// the null and failure rules below need to reach them. The wizard's own round
+// trip — fresh daemon, then the write, then the re-read — is driven for real in
+// core/cmd/crossos/pagedata_test.go, where the store and the derivation both
+// exist, and the daemon's spelling is pinned against pagedata.go below rather
+// than against a struct agreeing with itself.
+func (s *stubCore) OnboardingState() (OnboardingRow, error) {
+	if s.failSources != nil {
+		return OnboardingRow{}, s.failSources
+	}
+	return OnboardingRow{
+		CurrentStep: "welcome",
+		Steps:       []OnboardingStep{},
+		Readiness:   nil,
+	}, nil
+}
+
+// CompleteOnboarding accepts the write, because a stub that refused one would
+// make the failure rules below assert a rejection no daemon performs.
+func (s *stubCore) CompleteOnboarding() error {
+	if s.failSources != nil {
+		return s.failSources
+	}
+	return nil
+}
+
 // sourceReader names one bridge call so the null and failure rules below can
 // be asserted once for every source instead of per method.
 type sourceReader struct {
@@ -440,6 +467,9 @@ func TestServiceExposesFrozenSources(t *testing.T) {
 		// the person-authored rule table.
 		"Profiles", "ApplyProfile", "Traces", "PluginMeta", "Apps",
 		"UserRules", "SetUserRule", "DeleteUserRule",
+		// The first-run wizard: its derived state, and the one write that
+		// latches it.
+		"OnboardingState", "CompleteOnboarding",
 		// The switcher: its tiles, the long poll that opens it, and the focus a
 		// click performs.
 		"Windows", "SwitcherWait", "SwitcherFocus",
@@ -606,6 +636,8 @@ var wireModels = []struct {
 	{"AuditRow", AuditRow{}},
 	{"TrialState", TrialState{}},
 	{"ReadinessRow", ReadinessRow{}},
+	{"OnboardingRow", OnboardingRow{}},
+	{"OnboardingStep", OnboardingStep{}},
 	{"ProfileRow", ProfileRow{}},
 	{"ProfileCapabilityRow", ProfileCapabilityRow{}},
 	{"TraceRow", TraceRow{}},
@@ -687,6 +719,63 @@ func TestWindowRowMatchesTheDaemonsRow(t *testing.T) {
 	}
 }
 
+// TestOnboardingRowsMatchTheDaemonsRows pins the first-run wizard's two rows
+// against the structs the daemon really serves, the way the switcher row is
+// pinned — same door, because both structs live in package main, which this
+// module cannot import. onboardingRow is read out of pagedata.go because that
+// is the file that declares it.
+//
+// The tags are the whole point: a wizard whose `current_step` decodes to an
+// empty string renders every step as current, which is a page that cannot be
+// dismissed and gives the user nothing to act on. The kinds are compared too,
+// because a field the shell declares as a string where the daemon sends a
+// number decodes to the zero value instead of failing.
+func TestOnboardingRowsMatchTheDaemonsRows(t *testing.T) {
+	path := filepath.Join("..", "..", "core", "cmd", "crossos", "pagedata.go")
+	for _, tc := range []struct {
+		name   string
+		daemon string
+		shell  any
+	}{
+		{"OnboardingRow", "onboardingRow", OnboardingRow{}},
+		{"OnboardingStep", "onboardingStep", OnboardingStep{}},
+	} {
+		daemon := daemonStructFields(t, path, tc.daemon)
+		typ := reflect.TypeOf(tc.shell)
+		got := wireFieldNames(tc.shell)
+		if len(got) != len(daemon) {
+			t.Errorf("%s has %d fields %v, the daemon's %s has %d — the row the shell "+
+				"renders and the row the daemon serves must be the same row",
+				tc.name, len(got), got, tc.daemon, len(daemon))
+			continue
+		}
+		for i := range daemon {
+			if got[i] != daemon[i].tag {
+				t.Errorf("%s field %d marshals as %q, the daemon's %s field %d sends %q — "+
+					"the wizard would render an empty field", tc.name, i, got[i], tc.daemon, i, daemon[i].tag)
+			}
+			if kind := wireKindName(typ.Field(i).Type); kind != daemon[i].kind {
+				t.Errorf("%s field %d is a %s, the daemon's %s field %d is a %s",
+					tc.name, i, kind, tc.daemon, i, daemon[i].kind)
+			}
+		}
+	}
+}
+
+// wireKindName spells a Go type the way daemonFieldKind spells the daemon's, so
+// the two sides of the module boundary are compared on JSON shape: a slice on
+// one side is a slice on the other, and a nested row on one side is a row on
+// the other, whatever the two modules call the type.
+func wireKindName(t reflect.Type) string {
+	switch t.Kind() {
+	case reflect.Slice:
+		return "[]" + wireKindName(t.Elem())
+	case reflect.Struct:
+		return "row"
+	}
+	return t.Kind().String()
+}
+
 // daemonField is one field of a struct read out of a daemon source file: the
 // tag is the key the daemon sends, the kind is the JSON type it arrives as.
 type daemonField struct {
@@ -749,17 +838,42 @@ func daemonStructFields(t *testing.T, path, name string) []daemonField {
 	return nil
 }
 
+// wireScalarNames are the type names a row field can carry that JSON encodes as
+// a scalar. Any other ident names a nested row, which the two modules spell
+// differently on purpose (onboardingStep here, OnboardingStep in the shell), so
+// it compares as "row" and the json tags do the real work.
+var wireScalarNames = map[string]bool{
+	"string": true, "bool": true, "int": true, "int64": true,
+	"uint32": true, "uint64": true, "float64": true, "any": true,
+}
+
 // daemonFieldKind names the JSON kind a daemon field's type marshals as. Only
-// the bare type names the pinned rows use are known, and anything else stops
-// the test rather than passing a comparison it did not make.
+// the bare type names and slices of them are known, and anything else stops the
+// test rather than passing a comparison it did not make.
+//
+// A slice reports "[]" plus its element's kind, so the two modules can be
+// compared on shape without the shell having to reuse the daemon's own type
+// names.
 func daemonFieldKind(t *testing.T, path, name string, expr ast.Expr) string {
 	t.Helper()
-	ident, ok := expr.(*ast.Ident)
-	if !ok {
-		t.Fatalf("%s: %s declares a field of type %T, which this reader does not name — extend it "+
-			"before pinning the row", path, name, expr)
+	switch e := expr.(type) {
+	case *ast.Ident:
+		if wireScalarNames[e.Name] {
+			return e.Name
+		}
+		return "row"
+	case *ast.ArrayType:
+		if _, ok := e.Len.(*ast.Ident); ok {
+			// [N]T is a fixed-size array, which JSON marshals as an array but
+			// which no row here declares; naming it would blur that.
+			t.Fatalf("%s: %s declares a fixed-size array, which this reader does not "+
+				"pin — extend it before pinning the row", path, name)
+		}
+		return "[]" + daemonFieldKind(t, path, name, e.Elt)
 	}
-	return ident.Name
+	t.Fatalf("%s: %s declares a field of type %T, which this reader does not name — extend it "+
+		"before pinning the row", path, name, expr)
+	return ""
 }
 
 // TestGeneratedModelsMatchWireTags is the test that would have caught the

@@ -135,6 +135,16 @@ type Core interface {
 	// Readiness returns the per-area readiness rows (core.readiness) the
 	// onboarding checklist renders.
 	Readiness() ([]ReadinessRow, error)
+	// OnboardingState returns the first-run wizard as the daemon derives it
+	// (core.onboardingState): the persisted done flag, the step the user is on,
+	// and the readiness rows those verdicts came from. Everything except the
+	// done flag is recomputed per read, so this never has to be cached here.
+	OnboardingState() (OnboardingRow, error)
+	// CompleteOnboarding latches the first-run wizard as finished
+	// (core.onboardingComplete). The daemon answers with the state it wrote;
+	// this returns only the error because the page re-reads OnboardingState for
+	// the row, and a write that failed is already an error worth surfacing.
+	CompleteOnboarding() error
 	// Profiles returns the profile cards (core.profiles): each bundle with the
 	// live rollup of its capabilities, so a card can say whether a click landed.
 	Profiles() ([]ProfileRow, error)
@@ -468,6 +478,30 @@ func (a *App) Readiness() ([]ReadinessRow, error) {
 		return nil, err
 	}
 	return sourceList(a, "Readiness", rows), nil
+}
+
+// OnboardingState serves the first-run wizard. A daemon that cannot answer it
+// leaves the wizard stuck on its first step, so the failure is returned AND
+// logged rather than answered with a row the user did not cause.
+func (a *App) OnboardingState() (OnboardingRow, error) {
+	state, err := a.core.OnboardingState()
+	if err != nil {
+		a.log.Append("OnboardingState: " + err.Error())
+		return OnboardingRow{}, err
+	}
+	return state, nil
+}
+
+// CompleteOnboarding dismisses the first-run wizard. It fails closed like every
+// other write here: a flag the daemon refused to persist must not leave the page
+// believing the wizard is finished, because that belief is exactly what the next
+// launch would contradict.
+func (a *App) CompleteOnboarding() error {
+	if err := a.core.CompleteOnboarding(); err != nil {
+		a.log.Append("CompleteOnboarding: " + err.Error())
+		return err
+	}
+	return nil
 }
 
 // Profiles serves the profile cards. An unavailable capability keeps its

@@ -532,6 +532,35 @@ func (c *IPCCore) Readiness() ([]ReadinessRow, error) {
 	return decodeList[ReadinessRow]("core.readiness", raw)
 }
 
+// OnboardingState implements Core via core.onboardingState. The result is a
+// pointer so a literal null is told apart from a real row: the contract
+// promises an object, and a null that decoded into the zero value would read as
+// a fresh install with no steps, which is a state the user would be told to go
+// fix.
+func (c *IPCCore) OnboardingState() (OnboardingRow, error) {
+	raw, err := c.call("core.onboardingState", nil)
+	if err != nil {
+		return OnboardingRow{}, err
+	}
+	var out *OnboardingRow
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return OnboardingRow{}, fmt.Errorf("shell: ipc decode core.onboardingState: %w", err)
+	}
+	if out == nil {
+		return OnboardingRow{}, fmt.Errorf("shell: ipc core.onboardingState: null result, want the wizard's row")
+	}
+	return *out, nil
+}
+
+// CompleteOnboarding implements Core via core.onboardingComplete. The daemon
+// answers with the wizard as it now stands; the caller does not need that row,
+// because the page re-reads OnboardingState and the page is what draws. A write
+// the daemon refused is already an error, so there is nothing else to carry.
+func (c *IPCCore) CompleteOnboarding() error {
+	_, err := c.call("core.onboardingComplete", nil)
+	return err
+}
+
 // The Wave 3 accessors below speak the method names core/cmd/crossos serves
 // for the profile cards, the decision trace, the plugin manifest facts, the app
 // list and the person-authored rule table.
