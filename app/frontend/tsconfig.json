@@ -9,6 +9,12 @@
     /* Bundler mode */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
+    // The Wails generator emits JavaScript, not declarations. Without this the
+    // binding import resolves to `any`, lib/service.ts's ServiceApi annotation
+    // silently stops checking anything, and a model field the generator renamed
+    // ships as `undefined` in a settings row. The generated files are @ts-check
+    // annotated, so reading their JSDoc types costs nothing and catches the drift.
+    "allowJs": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,

@@ -6,6 +6,12 @@
  * closing About block). What is CrossOS's own: the spacing scale and the
  * system-font stack, chosen to read as a native macOS settings pane inside a
  * webview rather than as a web page.
+ *
+ * The ctl-* vocabulary below is the styling contract for the control registry
+ * in src/controls. Class names, not element names, are the contract: a
+ * control arrives from Go with whatever element the renderer chose, so every
+ * rule here is written to hold for a div, a label or a real form control.
+ * Nothing in this file knows a page id, a control id or a plugin id.
  */
 
 :root {
@@ -16,9 +22,14 @@
   --bg-sunken: #f5f5f7;
   --accent: #0a66ff;
   --danger: #c8102e;
+  --sel-bg: #0a66ff; /* the active nav item: white on it clears 4.5:1 */
   --row-gap: 5px; /* mirrors the reference stack's spacing:5 */
+  --radius: 5px;
 }
 
+/* Dark mode is not a palette swap of the same values: the light accent and
+   danger sit below 4.5:1 on a near-black field, so each gets its own step
+   here. --sel-bg stays dark enough to keep white text readable. */
 @media (prefers-color-scheme: dark) {
   :root {
     --text: #f5f5f7;
@@ -26,6 +37,9 @@
     --line: #3a3a3c;
     --bg: #1e1e1e;
     --bg-sunken: #2a2a2c;
+    --accent: #5b9bff;
+    --danger: #ff6f81;
+    --sel-bg: #1f5fbf;
   }
 }
 
@@ -49,16 +63,27 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* One focus treatment for everything, including controls this file has never
+   seen. Never outline: none anywhere: the ring is the only way a keyboard
+   user knows where they are. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .window {
   display: flex;
   flex-direction: column;
   height: 100%;
 }
 
+/* --- masthead and the two status lines ------------------------------------ */
+
 .masthead {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 10px;
+  gap: 4px 10px;
   padding: 14px 20px 10px;
   border-bottom: 1px solid var(--line);
 }
@@ -75,6 +100,29 @@ body {
   font-size: 12px;
 }
 
+/* The tap error is the line that teaches the user which permission to grant,
+   so it is weighted as well as coloured: colour alone is not the signal. */
+.status.is-error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.faults {
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-sunken);
+}
+
+.faults p {
+  margin: 0;
+}
+
+.faults p + p {
+  margin-top: 4px;
+}
+
+/* --- page navigation ------------------------------------------------------- */
+
 .sections {
   display: flex;
   flex-wrap: wrap;
@@ -89,18 +137,28 @@ body {
   border: 1px solid var(--line);
   background: var(--bg);
   color: var(--text);
-  border-radius: 5px;
+  border-radius: var(--radius);
   padding: 3px 10px;
   font: inherit;
   font-size: 12px;
-  cursor: default;
+  cursor: pointer;
+  transition: background-color 120ms ease;
 }
 
+/* The active page is marked three ways, not one: the fill, aria-current in the
+   markup, and the weight below. */
 .section.is-active {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--sel-bg);
+  border-color: var(--sel-bg);
   color: #fff;
+  font-weight: 600;
 }
+
+.section:not(.is-active):hover {
+  background: var(--bg-sunken);
+}
+
+/* --- page body ------------------------------------------------------------- */
 
 .form {
   flex: 1;
@@ -117,57 +175,336 @@ body {
   color: var(--text-dim);
 }
 
-.row {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  margin-bottom: var(--row-gap);
-}
-
-.row-label {
-  flex: 0 0 220px;
-  color: var(--text);
-}
-
-.control {
-  appearance: none;
-  border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--text);
-  border-radius: 5px;
-  padding: 3px 10px;
-  font: inherit;
+.page-desc {
+  margin: -4px 0 12px;
+  color: var(--text-dim);
   font-size: 12px;
-  cursor: default;
-}
-
-.control.is-text {
-  border-color: transparent;
-  background: transparent;
-  color: var(--text-dim);
-  padding-left: 0;
-}
-
-.control.is-unhandled {
-  font-style: italic;
-  opacity: 0.6;
-}
-
-.steps {
-  margin: 0;
-  padding-left: 18px;
-  color: var(--text-dim);
+  max-width: 62ch;
 }
 
 .note {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
   margin: 10px 0 0;
   color: var(--text-dim);
   font-size: 12px;
 }
 
+.note-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.note-dismiss {
+  appearance: none;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
 .empty {
   color: var(--text-dim);
 }
+
+/* --- control vocabulary ----------------------------------------------------
+ *
+ * A control is a labelled row: ctl-head titles it, ctl-label names it,
+ * ctl-value or an input carries the value, ctl-actions holds the buttons.
+ * Rows stack to one column at 40em, which is where a 1280px window at 200%
+ * zoom lands, so the label never squeezes its control off the edge.
+ */
+
+.ctl {
+  display: grid;
+  grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.ctl-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* Everything after the label belongs in the value column. A control that
+   renders more than one thing (an empty state plus a note, a note plus a list)
+   then stacks on the right instead of wrapping under the label. */
+.ctl > :not(.ctl-head) {
+  grid-column: 2;
+}
+
+.ctl-label {
+  color: var(--text);
+}
+
+.ctl-value {
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ctl-head .ctl-value,
+.ctl .ctl-value:only-child {
+  color: var(--text-dim);
+}
+
+.ctl-input,
+.ctl-select {
+  appearance: none;
+  min-width: 0;
+  min-height: 26px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  padding: 3px 7px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.ctl-select {
+  padding-right: 22px;
+  /* Chevron drawn with borders: no image request, and it follows the theme. */
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 11px center, right 7px center;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+
+.ctl-slider {
+  width: 100%;
+  max-width: 220px;
+  accent-color: var(--accent);
+}
+
+.ctl-toggle {
+  position: relative;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  width: 40px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--bg-sunken);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+/* The knob. Its position is the on/off signal, so the switch still reads with
+   no colour perception at all. */
+.ctl-toggle::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 120ms ease;
+}
+
+.ctl-toggle:checked,
+.ctl-toggle[aria-checked='true'],
+.ctl-toggle.is-on {
+  background: var(--sel-bg);
+  border-color: var(--sel-bg);
+}
+
+.ctl-toggle:checked::after,
+.ctl-toggle[aria-checked='true']::after,
+.ctl-toggle.is-on::after {
+  transform: translateX(18px);
+  background: #fff;
+}
+
+.ctl-list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.ctl-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+.ctl-item:last-child {
+  border-bottom: 0;
+}
+
+.ctl-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ctl-empty {
+  margin: 4px 0;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.ctl-error {
+  color: var(--danger);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ctl-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ctl-actions button,
+.ctl-button {
+  appearance: none;
+  min-height: 26px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.ctl-actions button:hover,
+.ctl-button:hover {
+  background: var(--bg-sunken);
+}
+
+/* Tabular digits: a countdown must not reflow its own width on every tick. */
+.ctl-countdown {
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+@media (max-width: 40em) {
+  .ctl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Back to auto placement: pinning column 2 in a one-column grid would
+     conjure a second column and undo the stack. */
+  .ctl > :not(.ctl-head) {
+    grid-column: auto;
+  }
+
+  .masthead,
+  .sections,
+  .form,
+  .about,
+  .faults {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}
+
+/* --- activity timeline -----------------------------------------------------
+ *
+ * One line per event, newest first, monospace so the time column and the
+ * event text line up and a long params= blob wraps instead of pushing the row
+ * wide. Times come from the daemon's own line; a line without one gets no
+ * invented clock.
+ */
+
+.timeline {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.timeline .group-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.tl-meta,
+.tl-cap {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+.tl-cap {
+  margin: 0 0 6px;
+  font-size: 11px;
+}
+
+.tl {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.tl-row {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.tl-row:last-child {
+  border-bottom: 0;
+}
+
+/* No timestamp on the line: the message takes the whole width. */
+.tl-row.is-plain {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tl-time {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.tl-msg {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+/* --- about footer ---------------------------------------------------------- */
 
 .about {
   display: flex;
@@ -181,16 +518,30 @@ body {
 }
 
 .version {
+  flex: none;
   font-weight: 600;
   color: var(--text);
 }
 
-.activity {
+.about-msg {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.status.is-error {
-  color: var(--danger);
+/* --- motion ----------------------------------------------------------------
+ *
+ * The only motion in the shell is a 120ms state change on a control the user
+ * just operated, which is feedback rather than decoration. When reduced motion
+ * is asked for, it stops: an instant state change carries the same meaning. */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
