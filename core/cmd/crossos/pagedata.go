@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"crossos/core/internal/adapter"
 	"crossos/core/pkg/event"
 	"crossos/core/pkg/intent"
 	"crossos/core/pkg/ipc"
@@ -1263,6 +1264,51 @@ func (c *Core) handleOnboardingState(_ json.RawMessage) (any, *ipc.RPCError) {
 	}
 	if completed {
 		out.CurrentStep = "done"
+	}
+	return out, nil
+}
+
+// --- core.apps ---
+
+// handleApps serves the installed applications the rule editor's "IF App = …"
+// picker offers. adapter.ListApps is the only enumeration in the tree, so the
+// rows come from the platform seam rather than a table kept here — a list
+// assembled in the daemon would drift from what the machine actually runs.
+//
+// The shell reached this call before it had a handler and degraded to an
+// empty picker, so the rows are also asserted against the same field names
+// app/backend reads.
+func (c *Core) handleApps(_ json.RawMessage) (any, *ipc.RPCError) {
+	apps, err := adapter.ListApps(nil)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInternal, Message: "list apps: " + err.Error()}
+	}
+	type appRow struct {
+		BundleID    string
+		Executable  string
+		PID         int
+		DisplayName string
+		AppMode     string
+		Category    string
+	}
+	// Sorted by display name with the bundle id as tiebreak, so the picker
+	// does not reshuffle between polls.
+	sort.Slice(apps, func(i, j int) bool {
+		if apps[i].DisplayName != apps[j].DisplayName {
+			return apps[i].DisplayName < apps[j].DisplayName
+		}
+		return apps[i].BundleID < apps[j].BundleID
+	})
+	out := make([]appRow, 0, len(apps))
+	for _, a := range apps {
+		out = append(out, appRow{
+			BundleID:    a.BundleID,
+			Executable:  a.Executable,
+			PID:         a.PID,
+			DisplayName: a.DisplayName,
+			AppMode:     string(a.AppMode),
+			Category:    string(a.Category),
+		})
 	}
 	return out, nil
 }

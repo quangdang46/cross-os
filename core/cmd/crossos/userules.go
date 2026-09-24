@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"crossos/core/pkg/event"
+	"crossos/core/pkg/intent"
 	"crossos/core/pkg/ipc"
 	"crossos/core/pkg/userrules"
 )
@@ -195,3 +197,20 @@ func userRulesPath(settingsPath string) string {
 //
 // Until those are in the table these handlers are unreachable over the
 // socket, which is the dead-code case the note above methods() warns about.
+
+// table and grants expose the store to the decision path. The rule builder
+// is not a read-only surface: a saved rule that never reaches event.Compile
+// passes every unit test and does nothing on the keyboard.
+func (s *userRuleService) table() []event.CompiledRule {
+	if s == nil || s.store == nil {
+		return nil
+	}
+	return s.store.Table()
+}
+
+func (s *userRuleService) grants() map[string][]intent.Permission {
+	if s == nil || s.store == nil {
+		return nil
+	}
+	return s.store.Grants()
+}

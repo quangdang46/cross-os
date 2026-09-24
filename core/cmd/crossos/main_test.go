@@ -897,7 +897,7 @@ func TestEveryShellMethodIsRegistered(t *testing.T) {
 		// listed here as well because they are shell-called over the one
 		// socket, and a method that is registered on neither list is
 		// reachable from neither.
-		"core.profiles", "core.profileApply", "core.conflicts",
+		"core.profiles", "core.profileApply", "core.conflicts", "core.apps",
 		"core.traces", "core.pluginMeta", "core.onboardingState",
 		"config.getUserRules", "config.setUserRule",
 		"config.deleteUserRule", "config.getUserRuleVocabulary",

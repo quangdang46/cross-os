@@ -265,6 +265,19 @@ func (c *Core) decideLocked(ev event.Event, ctx event.FastContext) event.Outcome
 	c.mu.Unlock()
 	known := map[string]bool{}
 	var all []event.CompiledRule
+	// User rules are real rules: the rule builder saves them, the editor
+	// lists them, and the decision path has to compile them alongside the
+	// builtin table. Reading only builtin.All() left every stored rule
+	// inert — saving one looked right in the UI and did nothing on the
+	// keyboard, which is the worst possible shape for a feature.
+	grants := builtin.Grants()
+	userTable := c.userRules.table()
+	if userTable != nil {
+		all = append(all, userTable...)
+		for pluginID, perms := range c.userRules.grants() {
+			grants[pluginID] = append(grants[pluginID], perms...)
+		}
+	}
 	for _, r := range builtin.All() {
 		known[r.RuleID] = true
 		if !enabled[r.PluginID] {
@@ -287,7 +300,7 @@ func (c *Core) decideLocked(ev event.Event, ctx event.FastContext) event.Outcome
 	c.mu.Lock()
 	killed := c.killed
 	c.mu.Unlock()
-	rt := event.Compile(all, intent.DefaultRegistry(), builtin.Grants(), func() bool { return killed })
+	rt := event.Compile(all, intent.DefaultRegistry(), grants, func() bool { return killed })
 	out := rt.Decide(ev, ctx)
 	c.rec.OnOutcome(out)
 	return out
@@ -813,6 +826,7 @@ func (c *Core) methods() map[string]ipc.Handler {
 		"core.traces":          c.handleTraces,
 		"core.pluginMeta":      c.handlePluginMeta,
 		"core.onboardingState": c.handleOnboardingState,
+		"core.apps":            c.handleApps,
 		// The user-rule table (w2-userrules). The handlers live on
 		// userRuleService in userules.go, so these four entries are
 		// the whole of that file's publishing.

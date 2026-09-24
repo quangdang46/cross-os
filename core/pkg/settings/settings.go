@@ -248,7 +248,11 @@ func New(cfgPath string) (*Store, error) {
 // PanicStopped reports whether the user latched PANIC STOP. It survives
 // restarts: a daemon that re-arms the tap after a crash would otherwise
 // undo the emergency control without telling anyone.
-func (s *Store) PanicStopped() bool { return s.panicStop }
+func (s *Store) PanicStopped() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.panicStop
+}
 
 // ConfigPath is the user-layer file this store persists to, or "" for the
 // memory-only store. The ownership audit reads it to decide whether the file
@@ -257,7 +261,9 @@ func (s *Store) ConfigPath() string { return s.cfgPath }
 
 // SetPanicStopped latches (or clears) the kill switch and persists it.
 func (s *Store) SetPanicStopped(stopped bool) error {
+	s.mu.Lock()
 	s.panicStop = stopped
+	s.mu.Unlock()
 	return s.persistLocked()
 }
 
@@ -581,15 +587,21 @@ func (s *Store) persistLocked() error {
 	if s.cfgPath == "" {
 		return nil
 	}
+	// Deep-copy under the lock. Aliasing the maps and releasing it before
+	// commitLocked walks them is a data race, not a style choice: Go
+	// aborts the whole process on concurrent map iteration and map write,
+	// and the ipc server runs a handler per connection, so two quick UI
+	// toggles could take the daemon down. A shallow snapshot is what made
+	// this crash.
 	s.mu.RLock()
 	snap := state{
-		disabledRules: s.disabledRules,
-		overrides:     s.overrides,
-		shortcuts:     s.shortcuts,
-		zones:         s.zones,
+		disabledRules: cloneVerdicts(s.disabledRules),
+		overrides:     cloneVerdicts(s.overrides),
+		shortcuts:     append([]winlayout.Shortcut(nil), s.shortcuts...),
+		zones:         append([]winlayout.Zone(nil), s.zones...),
 		panicStop:     s.panicStop,
 		onboarding:    s.onboardingComplete,
-		plugins:       s.pluginsEnabled,
+		plugins:       cloneVerdicts(s.pluginsEnabled),
 		profile:       s.activeProfile,
 	}
 	s.mu.RUnlock()
