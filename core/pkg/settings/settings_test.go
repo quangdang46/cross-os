@@ -4,12 +4,16 @@ package settings
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 
+	"crossos/core/pkg/filetype"
 	"crossos/core/pkg/winlayout"
 )
 
@@ -270,6 +274,7 @@ func TestSchemaDeclaresFirstRunKeys(t *testing.T) {
 		"onboardingComplete": "bool",
 		"enabledPlugins":     "array",
 		"activeProfile":      "string",
+		"fileTypes":          "array",
 	} {
 		field, ok := schema[key]
 		if !ok {
@@ -295,6 +300,10 @@ func TestFullRoundTrip(t *testing.T) {
 	known := func(string) bool { return true }
 	shortcuts := winlayout.DefaultShortcuts()[:2]
 	zones := []winlayout.Zone{{ID: "tl", Name: "Top left", W: 0.5, H: 0.5}}
+	catalog := []filetype.FileType{
+		{Ext: "rs", BaseName: "main", DisplayName: "New Rust", Enabled: true, BuiltIn: false},
+		{Ext: "env", BaseName: "", DisplayName: "New .env", Enabled: true, BuiltIn: true},
+	}
 	for _, step := range []struct {
 		what string
 		do   func() error
@@ -308,6 +317,7 @@ func TestFullRoundTrip(t *testing.T) {
 		{"plugin on", func() error { return s.SetPluginEnabled("windows-keyboard", true, known) }},
 		{"plugin off", func() error { return s.SetPluginEnabled("windows-window", false, known) }},
 		{"profile", func() error { return s.SetActiveProfile("windows11") }},
+		{"file types", func() error { return s.SetFileTypes(catalog) }},
 	} {
 		if err := step.do(); err != nil {
 			t.Fatalf("%s: %v", step.what, err)
@@ -341,6 +351,134 @@ func TestFullRoundTrip(t *testing.T) {
 	}
 	if got := s2.ActiveProfile(); got != "windows11" {
 		t.Errorf("ActiveProfile()=%q, want windows11", got)
+	}
+	if got := s2.FileTypes(); !reflect.DeepEqual(got, catalog) {
+		t.Errorf("FileTypes() after reload=%+v, want %+v", got, catalog)
+	}
+}
+
+// TestFileTypesSeedsWhenNeverWritten: the Finder menu renders from this list,
+// so a store with nothing in it would hand "New >" an empty menu on a fresh
+// install. Two shapes of "never written" have to answer with the seeds: no
+// config file at all, and a config file that exists but predates the catalog
+// (the first unrelated write puts one on disk without the key).
+func TestFileTypesSeedsWhenNeverWritten(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	s, err := New(path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	got := s.FileTypes()
+	if got == nil {
+		t.Fatal("a store with no catalog must serve the seeds, not nil")
+	}
+	if want := filetype.Seeds(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("FileTypes()=%+v, want the %d seeds", got, len(want))
+	}
+	if err := s.SetPanicStopped(true); err != nil {
+		t.Fatalf("unrelated write: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if _, present := doc["fileTypes"]; !present {
+		t.Fatalf("the write path dropped the catalog key: %s", raw)
+	}
+	s2, err := New(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if got := s2.FileTypes(); !reflect.DeepEqual(got, filetype.Seeds()) {
+		t.Fatalf("seeds after a reload that carried no catalog=%+v", got)
+	}
+
+	// A hand-edited catalog that no longer validates is dropped back to the
+	// seeds, the same deal a bad zone list gets: a menu row the daemon
+	// refuses to create is worse than the default row.
+	if err := os.WriteFile(path, []byte(`{"fileTypes":[{"ext":"","displayName":"New Nothing"}]}`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s3, err := New(path)
+	if err != nil {
+		t.Fatalf("reopen after a hand edit: %v", err)
+	}
+	if got := s3.FileTypes(); !reflect.DeepEqual(got, filetype.Seeds()) {
+		t.Fatalf("an invalid catalog was served: %+v", got)
+	}
+}
+
+// TestFileTypesClearedStaysCleared: clearing the catalog is a user decision
+// ("I don't want New > to offer these"), so it has to come back cleared. A
+// store that restored the seeds on the next start would undo it silently —
+// and null would fail the schema check outright, leaving the previous
+// document on disk while the running set had already moved.
+func TestFileTypesClearedStaysCleared(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	s, err := New(path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := s.SetFileTypes(nil); err != nil {
+		t.Fatalf("clearing: %v", err)
+	}
+	if got := s.FileTypes(); got == nil || len(got) != 0 {
+		t.Fatalf("FileTypes()=%v, want an empty non-nil list", got)
+	}
+	s2, err := New(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if got := s2.FileTypes(); len(got) != 0 {
+		t.Fatalf("catalog after reload=%+v, want it still cleared", got)
+	}
+	// And the order the user listed is the order the menu renders: the index
+	// is a row someone can see, so it must not be sorted away.
+	listed := []filetype.FileType{
+		{Ext: "yml", DisplayName: "New YAML"},
+		{Ext: "env", DisplayName: "New .env"},
+		{Ext: "md", DisplayName: "New Markdown"},
+	}
+	if err := s2.SetFileTypes(listed); err != nil {
+		t.Fatalf("relisting: %v", err)
+	}
+	s3, err := New(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if got := s3.FileTypes(); !reflect.DeepEqual(got, listed) {
+		t.Fatalf("catalog after reload=%+v, want the rows in the order they were saved %+v", got, listed)
+	}
+}
+
+// TestFileTypesRejectsUnusableRow: one row the daemon cannot create refuses
+// the whole edit, leaving the running catalog and the file alone. A partial
+// write would put a row in the menu that the create path turns away.
+func TestFileTypesRejectsUnusableRow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	s, err := New(path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	before := s.FileTypes()
+	for _, bad := range [][]filetype.FileType{
+		{{Ext: "rs", DisplayName: "New Rust"}, {Ext: "  ", DisplayName: "New Nothing"}},
+		{{Ext: ".env"}},
+		{{Ext: "rs", BaseName: "main"}, {Ext: "/../../etc/passwd", BaseName: "x"}},
+	} {
+		if err := s.SetFileTypes(bad); err == nil {
+			t.Errorf("catalog %+v must be rejected", bad)
+		}
+		if got := s.FileTypes(); !reflect.DeepEqual(got, before) {
+			t.Fatalf("a rejected edit changed the running catalog: %+v", got)
+		}
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Error("a rejected catalog created a config file")
 	}
 }
 
@@ -531,5 +669,131 @@ func TestPluginsEnabledSorted(t *testing.T) {
 	want := []string{"alt-tab", "windows-keyboard", "windows-window"}
 	if got := s.PluginsEnabled(); !reflect.DeepEqual(got, want) {
 		t.Errorf("PluginsEnabled()=%v, want %v", got, want)
+	}
+}
+
+// TestFileTypesReadDuringWrite: a reader on the FileTypes() path must never
+// catch a write in flight. Two whole catalogs exist — the seeds and the
+// replacement — and every observation has to be one of them, never a mix and
+// never nothing. The file read is the same check from the other side: a
+// half-written document is one a fresh daemon cannot parse, and it would take
+// the user's whole settings layer down with it.
+func TestFileTypesReadDuringWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	s, err := New(path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	seeds := filetype.Seeds()
+	custom := []filetype.FileType{
+		{Ext: "rs", BaseName: "main", DisplayName: "New Rust", Enabled: true},
+		{Ext: "env", BaseName: "", DisplayName: "New .env", Enabled: true},
+	}
+	whole := func(got []filetype.FileType) bool {
+		return reflect.DeepEqual(got, seeds) || reflect.DeepEqual(got, custom)
+	}
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			if err := s.SetFileTypes(custom); err != nil {
+				t.Errorf("write custom: %v", err)
+				return
+			}
+			if err := s.SetFileTypes(seeds); err != nil {
+				t.Errorf("write seeds: %v", err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 500; i++ {
+			if got := s.FileTypes(); !whole(got) {
+				t.Errorf("FileTypes() read a partial catalog: %+v", got)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 500; i++ {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				// Nothing has been renamed into place yet; the write
+				// above has not run. Not a torn read.
+				continue
+			}
+			var doc document
+			if err := json.Unmarshal(raw, &doc); err != nil {
+				t.Errorf("the file was read half-written: %v (%s)", err, raw)
+				return
+			}
+			if doc.FileTypes == nil {
+				t.Errorf("the document carried no catalog: %s", raw)
+				return
+			}
+			if !whole(doc.FileTypes) {
+				t.Errorf("the document carried a partial catalog: %+v", doc.FileTypes)
+				return
+			}
+		}
+	}()
+	wg.Wait()
+	// A store reopened from the file agrees with the last writer's catalog.
+	s2, err := New(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if got := s2.FileTypes(); !whole(got) {
+		t.Fatalf("catalog after reload=%+v, want one of the two whole lists", got)
+	}
+}
+
+// TestConcurrentWritersDoNotLoseEachOther: a writer that returns nil is in the
+// file. The write path used to snapshot the state, drop the lock, and only
+// then rename — so two writers could snapshot the same before-state and the
+// second rename would silently drop the first one's change, leaving the
+// document and the running set disagreeing about what the user set.
+func TestConcurrentWritersDoNotLoseEachOther(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	s, err := New(path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	known := func(string) bool { return true }
+	const writers = 8
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for round := 0; round < 8; round++ {
+				rule := fmt.Sprintf("rule.%d", i)
+				if err := s.SetRuleEnabled(rule, false, known); err != nil {
+					t.Errorf("disable %s: %v", rule, err)
+					return
+				}
+				if err := s.SetOverride("com.apple.Finder", rule, true, known); err != nil {
+					t.Errorf("override %s: %v", rule, err)
+					return
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+	s2, err := New(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if got := len(s2.Overrides()); got != writers {
+		t.Errorf("overrides after reload=%d, want %d — a write was lost", got, writers)
+	}
+	for i := 0; i < writers; i++ {
+		rule := fmt.Sprintf("rule.%d", i)
+		if s2.IsRuleEnabled(rule) {
+			t.Errorf("%s came back enabled: a write was lost", rule)
+		}
 	}
 }

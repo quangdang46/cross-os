@@ -1,61 +1,64 @@
-// Naming tests — bead cross-os-vbl.1 (newfile Shared helpers port).
+// Naming tests — bead cross-os-vbl.1 (newfile Shared helpers port). The
+// file-type catalog tests moved with the catalog to crossos/core/pkg/filetype.
 package findersync
 
 import (
 	"testing"
 )
 
-func TestMenuTitle(t *testing.T) {
-	if got := (FileType{DisplayName: "New Markdown", Ext: "md"}).MenuTitle(); got != "New Markdown" {
-		t.Fatalf("explicit label: got %q", got)
-	}
-	if got := (FileType{DisplayName: "  ", Ext: "md"}).MenuTitle(); got != "New .md" {
-		t.Fatalf("blank label fallback: got %q, want New .md", got)
-	}
-}
-
-func TestSeeds(t *testing.T) {
-	if len(Seeds) != 8 {
-		t.Fatalf("seeds=%d, want 8 built-ins (SeedPresets parity)", len(Seeds))
-	}
-	enabled := 0
-	for _, s := range Seeds {
-		if !s.BuiltIn {
-			t.Fatalf("seed %+v must be built-in", s)
-		}
-		if s.Enabled {
-			enabled++
-		}
-		if s.MenuTitle() == "" {
-			t.Fatalf("seed %+v has no menu title", s)
-		}
-	}
-	if enabled != 1 {
-		t.Fatalf("enabled seeds=%d, want 1 (txt only, newfile parity)", enabled)
-	}
-}
-
-func TestUniqueName(t *testing.T) {
+// TestUniqueNameStripsRedundantSuffix: the base field is a file name, and
+// people type the whole name into it. "foo.txt" + txt is "foo.txt", not
+// "foo.txt.txt" — the double extension is the one that files the bug.
+func TestUniqueNameStripsRedundantSuffix(t *testing.T) {
 	never := func(string) bool { return false }
-	if got := UniqueName("/d", "Untitled", "md", never); got != "/d/Untitled.md" {
-		t.Fatalf("fresh: got %q", got)
+	if got := UniqueName("/d", "foo.txt", "txt", never); got != "/d/foo.txt" {
+		t.Fatalf("redundant suffix: got %q, want /d/foo.txt", got)
 	}
-	if got := UniqueName("/d", "", "env", never); got != "/d/.env" {
-		t.Fatalf("dotfile: got %q", got)
+	// Case-insensitively, because the filesystem the names land on is
+	// case-insensitive too: "foo.TXT" is still the name the user typed.
+	if got := UniqueName("/d", "foo.TXT", "txt", never); got != "/d/foo.txt" {
+		t.Fatalf("redundant suffix, other case: got %q, want /d/foo.txt", got)
 	}
-	// Redundant suffix stripped: "data.json" + json → data.json, not data.json.json.
+	// A different extension is not redundant: "foo.md" + md stays "foo.md",
+	// and "data.json" + json is likewise the name, not data.json.json.
 	if got := UniqueName("/d", "data.json", "json", never); got != "/d/data.json" {
-		t.Fatalf("suffix strip: got %q", got)
+		t.Fatalf("matching suffix: got %q, want /d/data.json", got)
 	}
-	// Collisions increment: existing {Untitled.md, Untitled 2.md} → Untitled 3.md.
+	if got := UniqueName("/d", "Untitled", "md", never); got != "/d/Untitled.md" {
+		t.Fatalf("plain base: got %q", got)
+	}
+}
+
+// TestUniqueNameDotfileForm: a blank base name is a dotfile, not a file called
+// ".env" would be wrong — it is the whole name, extension included
+// (FileTypeRow.swift:43-51, the base field's own hint).
+func TestUniqueNameDotfileForm(t *testing.T) {
+	never := func(string) bool { return false }
+	if got := UniqueName("/d", "", "env", never); got != "/d/.env" {
+		t.Fatalf("dotfile: got %q, want /d/.env", got)
+	}
+	if got := UniqueName("/d", "", "gitignore", never); got != "/d/.gitignore" {
+		t.Fatalf("multi-part dotfile: got %q, want /d/.gitignore", got)
+	}
+}
+
+// TestUniqueNameIncrementsOnCollision: the number is appended inside the
+// extension, so the created file keeps working tools' idea of its type, and
+// the dotfile form counts the same way.
+func TestUniqueNameIncrementsOnCollision(t *testing.T) {
 	taken := boolMap{"/d/Untitled.md": true, "/d/Untitled 2.md": true}
 	if got := UniqueName("/d", "Untitled", "md", taken.Contains); got != "/d/Untitled 3.md" {
-		t.Fatalf("collision: got %q", got)
+		t.Fatalf("collision: got %q, want /d/Untitled 3.md", got)
 	}
-	// Dotfile collisions increment the same way.
-	taken2 := boolMap{"/d/.env": true}
-	if got := UniqueName("/d", "", "env", taken2.Contains); got != "/d/.env 2" {
-		t.Fatalf("dotfile collision: got %q", got)
+	dotTaken := boolMap{"/d/.env": true}
+	if got := UniqueName("/d", "", "env", dotTaken.Contains); got != "/d/.env 2" {
+		t.Fatalf("dotfile collision: got %q, want /d/.env 2", got)
+	}
+	// A gap in the taken list is not a licence to reuse a number: the first
+	// free slot wins, and " 3" is free here.
+	gappy := boolMap{"/d/data.json": true, "/d/data 3.json": true}
+	if got := UniqueName("/d", "data", "json", gappy.Contains); got != "/d/data 2.json" {
+		t.Fatalf("gap: got %q, want /d/data 2.json", got)
 	}
 }
 

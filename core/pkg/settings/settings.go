@@ -30,6 +30,7 @@ import (
 	"sync"
 
 	"crossos/core/pkg/config"
+	"crossos/core/pkg/filetype"
 	"crossos/core/pkg/winlayout"
 )
 
@@ -61,8 +62,13 @@ type Store struct {
 	// Experience" card the spec sells. Free text, like the per-app bundle IDs
 	// below: the catalog of profiles is the daemon's, not the store's.
 	activeProfile string
-	cfg           *config.Manager
-	cfgPath       string
+	// fileTypes is the user's file-type catalog, seeded from
+	// filetype.Seeds(). The seeds are the fallback, not the answer: a catalog
+	// a user edited has to be here after a restart, or the Finder menu quietly
+	// offers back the eight presets they deleted.
+	fileTypes []filetype.FileType
+	cfg       *config.Manager
+	cfgPath   string
 }
 
 // Override is one stored per-app verdict on a matrix rule. The json tags are
@@ -115,6 +121,7 @@ type document struct {
 	OnboardingComplete bool                 `json:"onboardingComplete"`
 	EnabledPlugins     []string             `json:"enabledPlugins"`
 	ActiveProfile      string               `json:"activeProfile"`
+	FileTypes          []filetype.FileType  `json:"fileTypes"`
 }
 
 // state is the whole persisted value at one instant. Writes render the
@@ -130,6 +137,7 @@ type state struct {
 	onboarding    bool
 	plugins       map[string]bool
 	profile       string
+	fileTypes     []filetype.FileType
 }
 
 // ShortcutSchema constrains the persisted shortcuts document: the shortcut
@@ -161,6 +169,10 @@ func ShortcutSchema() config.Schema {
 		"onboardingComplete": {Type: "bool", Required: false},
 		"enabledPlugins":     {Type: "array", Required: false},
 		"activeProfile":      {Type: "string", Required: false},
+		// The file-type catalog rides the same user layer for the same
+		// reason: an undeclared key is a rejected whole layer, so a catalog
+		// the user edited would be gone on the next launch.
+		"fileTypes": {Type: "array", Required: false},
 	}
 }
 
@@ -174,6 +186,7 @@ func New(cfgPath string) (*Store, error) {
 		Zones:          []winlayout.Zone{},
 		Overrides:      []Override{},
 		EnabledPlugins: []string{},
+		FileTypes:      []filetype.FileType{},
 	})
 	cfg, err := config.New(defaults, ShortcutSchema())
 	if err != nil {
@@ -185,6 +198,7 @@ func New(cfgPath string) (*Store, error) {
 		pluginsEnabled: map[string]bool{},
 		shortcuts:      winlayout.DefaultShortcuts(),
 		zones:          winlayout.DefaultZones(),
+		fileTypes:      filetype.Seeds(),
 		cfg:            cfg,
 		cfgPath:        cfgPath,
 	}
@@ -212,6 +226,17 @@ func New(cfgPath string) (*Store, error) {
 					}
 					if verr := winlayout.ValidateZones(doc.Zones); verr == nil {
 						s.zones = doc.Zones
+					}
+					// Absent key = the seeds, same deal as the shortcut
+					// table: a document written before the catalog existed
+					// must not read as "no presets". A list that no longer
+					// validates (hand-edited file) is dropped back to them
+					// rather than served — a menu row nothing can create is
+					// worse than the default.
+					if doc.FileTypes != nil {
+						if verr := filetype.Validate(doc.FileTypes); verr == nil {
+							s.fileTypes = doc.FileTypes
+						}
 					}
 					for _, o := range doc.Overrides {
 						if o.App != "" && o.RuleID != "" {
@@ -261,10 +286,7 @@ func (s *Store) ConfigPath() string { return s.cfgPath }
 
 // SetPanicStopped latches (or clears) the kill switch and persists it.
 func (s *Store) SetPanicStopped(stopped bool) error {
-	s.mu.Lock()
-	s.panicStop = stopped
-	s.mu.Unlock()
-	return s.persistLocked()
+	return s.update(func(next *state) { next.panicStop = stopped })
 }
 
 // OnboardingComplete reports whether the first-run wizard has been finished.
@@ -278,10 +300,7 @@ func (s *Store) OnboardingComplete() bool {
 
 // SetOnboardingComplete latches (or clears) the wizard's done state.
 func (s *Store) SetOnboardingComplete(done bool) error {
-	s.mu.Lock()
-	s.onboardingComplete = done
-	s.mu.Unlock()
-	return s.persistLocked()
+	return s.update(func(next *state) { next.onboarding = done })
 }
 
 // PluginsEnabled returns the plugin IDs the user has turned on, sorted. Absent
@@ -301,14 +320,13 @@ func (s *Store) SetPluginEnabled(pluginID string, enabled bool, known func(strin
 	if !known(pluginID) {
 		return fmt.Errorf("settings: unknown plugin %q", pluginID)
 	}
-	s.mu.Lock()
-	if enabled {
-		s.pluginsEnabled[pluginID] = true
-	} else {
-		delete(s.pluginsEnabled, pluginID)
-	}
-	s.mu.Unlock()
-	return s.persistLocked()
+	return s.update(func(next *state) {
+		if enabled {
+			next.plugins[pluginID] = true
+		} else {
+			delete(next.plugins, pluginID)
+		}
+	})
 }
 
 // ActiveProfile returns the selected profile ID, or "" when none is chosen.
@@ -325,10 +343,7 @@ func (s *Store) SetActiveProfile(name string) error {
 	if err := checkProfile(name); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	s.activeProfile = name
-	s.mu.Unlock()
-	return s.persistLocked()
+	return s.update(func(next *state) { next.profile = name })
 }
 
 func checkProfile(name string) error {
@@ -364,14 +379,13 @@ func (s *Store) SetRuleEnabled(ruleID string, enabled bool, known func(string) b
 	if !known(ruleID) {
 		return fmt.Errorf("settings: unknown rule %q", ruleID)
 	}
-	s.mu.Lock()
-	if enabled {
-		delete(s.disabledRules, ruleID)
-	} else {
-		s.disabledRules[ruleID] = true
-	}
-	s.mu.Unlock()
-	return s.persistLocked()
+	return s.update(func(next *state) {
+		if enabled {
+			delete(next.disabledRules, ruleID)
+		} else {
+			next.disabledRules[ruleID] = true
+		}
+	})
 }
 
 // Shortcuts returns the current shortcut table (copy).
@@ -390,10 +404,9 @@ func (s *Store) SetShortcuts(set []winlayout.Shortcut) error {
 	if err := winlayout.ValidateShortcuts(set); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	s.shortcuts = append([]winlayout.Shortcut(nil), set...)
-	s.mu.Unlock()
-	return s.persistLocked()
+	return s.update(func(next *state) {
+		next.shortcuts = append([]winlayout.Shortcut(nil), set...)
+	})
 }
 
 // overrideKey packs the (app, rule) pair into one map key. NUL cannot appear
@@ -448,10 +461,9 @@ func (s *Store) SetOverride(app, ruleID string, enabled bool, known func(string)
 	if !known(ruleID) {
 		return fmt.Errorf("settings: unknown rule %q", ruleID)
 	}
-	s.mu.Lock()
-	s.overrides[overrideKey(app, ruleID)] = enabled
-	s.mu.Unlock()
-	return s.persistLocked()
+	return s.update(func(next *state) {
+		next.overrides[overrideKey(app, ruleID)] = enabled
+	})
 }
 
 // Override reports the stored verdict for one (app, rule) pair, and whether
@@ -488,10 +500,35 @@ func (s *Store) SetZones(zones []winlayout.Zone) error {
 	if err := winlayout.ValidateZones(zones); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	s.zones = append([]winlayout.Zone(nil), zones...)
-	s.mu.Unlock()
-	return s.persistLocked()
+	return s.update(func(next *state) {
+		next.zones = append([]winlayout.Zone(nil), zones...)
+	})
+}
+
+// FileTypes returns the file-type catalog (copy), in the order the editor
+// listed it. A store that has never had the catalog written hands back the
+// eight seeds rather than nothing: the Finder menu renders from this list,
+// and "no file types" would leave New > empty on a fresh install. Never nil,
+// for the reason Zones() is never nil.
+func (s *Store) FileTypes() []filetype.FileType {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]filetype.FileType, len(s.fileTypes))
+	copy(out, s.fileTypes)
+	return out
+}
+
+// SetFileTypes replaces the catalog after filetype validation, and persists
+// it. The validator runs over the whole list first, so one unusable extension
+// cannot leave half the menu replaced — the page would show a row the daemon
+// refuses to create, and the user would be hunting which one.
+func (s *Store) SetFileTypes(set []filetype.FileType) error {
+	if err := filetype.Validate(set); err != nil {
+		return err
+	}
+	return s.update(func(next *state) {
+		next.fileTypes = append([]filetype.FileType(nil), set...)
+	})
 }
 
 // validate checks every element of the plan against the caller's catalogs
@@ -525,52 +562,85 @@ func (s *Store) ApplyBatch(p Plan, cat Catalog) error {
 	if err := p.validate(cat); err != nil {
 		return err
 	}
+	return s.update(func(next *state) {
+		for _, t := range p.Rules {
+			if t.Enabled {
+				delete(next.disabledRules, t.ID)
+			} else {
+				next.disabledRules[t.ID] = true
+			}
+		}
+		for _, t := range p.Plugins {
+			if t.Enabled {
+				next.plugins[t.ID] = true
+			} else {
+				delete(next.plugins, t.ID)
+			}
+		}
+		if p.OnboardingComplete != nil {
+			next.onboarding = *p.OnboardingComplete
+		}
+		if p.ActiveProfile != nil {
+			next.profile = *p.ActiveProfile
+		}
+	})
+}
+
+// update is the one write path. The running state is copied, the copy is
+// changed, the document is landed, and only a document that lands is adopted —
+// so a failed write leaves the running set as it was, instead of moving it and
+// leaving the file behind (the disagreement this store keeps being bitten by).
+//
+// The write lock is held from the copy to the rename, which is what serializes
+// the path: two concurrent setters take it in turn, so they cannot snapshot the
+// same before-state and race each other's document to disk, and a reader sees
+// either the state before the write or the state after it, never a document
+// mid-flight. The ipc server runs a handler per connection, so "two quick UI
+// toggles" is the normal case, not a stress test.
+func (s *Store) update(mutate func(*state)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// The plan lands on copies: the live maps are replaced only after the new
-	// document is on disk, so nothing below can leave them half-applied and
-	// there is no rollback path to get wrong.
-	next := state{
+	next := s.snapshotLocked()
+	mutate(&next)
+	if err := s.commitLocked(next); err != nil {
+		return err
+	}
+	s.adoptLocked(next)
+	return nil
+}
+
+// snapshotLocked deep-copies the running state. Aliasing the maps and walking
+// them after the lock is released is a data race, not a style choice: Go aborts
+// the whole process on concurrent map iteration and map write. A shallow
+// snapshot is what made this crash.
+func (s *Store) snapshotLocked() state {
+	return state{
 		disabledRules: cloneVerdicts(s.disabledRules),
-		overrides:     s.overrides,
-		shortcuts:     s.shortcuts,
-		zones:         s.zones,
+		overrides:     cloneVerdicts(s.overrides),
+		shortcuts:     append([]winlayout.Shortcut(nil), s.shortcuts...),
+		zones:         append([]winlayout.Zone(nil), s.zones...),
 		panicStop:     s.panicStop,
 		onboarding:    s.onboardingComplete,
 		plugins:       cloneVerdicts(s.pluginsEnabled),
 		profile:       s.activeProfile,
+		fileTypes:     append([]filetype.FileType(nil), s.fileTypes...),
 	}
-	for _, t := range p.Rules {
-		if t.Enabled {
-			delete(next.disabledRules, t.ID)
-		} else {
-			next.disabledRules[t.ID] = true
-		}
-	}
-	for _, t := range p.Plugins {
-		if t.Enabled {
-			next.plugins[t.ID] = true
-		} else {
-			delete(next.plugins, t.ID)
-		}
-	}
-	if p.OnboardingComplete != nil {
-		next.onboarding = *p.OnboardingComplete
-	}
-	if p.ActiveProfile != nil {
-		next.profile = *p.ActiveProfile
-	}
-	if err := s.commitLocked(next); err != nil {
-		return err
-	}
-	s.disabledRules = next.disabledRules
-	s.pluginsEnabled = next.plugins
-	s.onboardingComplete = next.onboarding
-	s.activeProfile = next.profile
-	return nil
 }
 
-// cloneVerdicts copies a verdict map. The batch path mutates its own copy so a
+// adoptLocked installs a committed state as the running one.
+func (s *Store) adoptLocked(next state) {
+	s.disabledRules = next.disabledRules
+	s.overrides = next.overrides
+	s.shortcuts = next.shortcuts
+	s.zones = next.zones
+	s.panicStop = next.panicStop
+	s.onboardingComplete = next.onboarding
+	s.pluginsEnabled = next.plugins
+	s.activeProfile = next.profile
+	s.fileTypes = next.fileTypes
+}
+
+// cloneVerdicts copies a verdict map. The write path mutates its own copy so a
 // rejected write never touches the live one.
 func cloneVerdicts(in map[string]bool) map[string]bool {
 	out := make(map[string]bool, len(in))
@@ -580,37 +650,11 @@ func cloneVerdicts(in map[string]bool) map[string]bool {
 	return out
 }
 
-// persistLocked writes the user layer (everything in state) through the Config
-// Manager (validated) to cfgPath atomically. No path = memory only (tests).
-// Validation failure → error, running set untouched.
-func (s *Store) persistLocked() error {
-	if s.cfgPath == "" {
-		return nil
-	}
-	// Deep-copy under the lock. Aliasing the maps and releasing it before
-	// commitLocked walks them is a data race, not a style choice: Go
-	// aborts the whole process on concurrent map iteration and map write,
-	// and the ipc server runs a handler per connection, so two quick UI
-	// toggles could take the daemon down. A shallow snapshot is what made
-	// this crash.
-	s.mu.RLock()
-	snap := state{
-		disabledRules: cloneVerdicts(s.disabledRules),
-		overrides:     cloneVerdicts(s.overrides),
-		shortcuts:     append([]winlayout.Shortcut(nil), s.shortcuts...),
-		zones:         append([]winlayout.Zone(nil), s.zones...),
-		panicStop:     s.panicStop,
-		onboarding:    s.onboardingComplete,
-		plugins:       cloneVerdicts(s.pluginsEnabled),
-		profile:       s.activeProfile,
-	}
-	s.mu.RUnlock()
-	return s.commitLocked(snap)
-}
-
 // commitLocked renders one state into the persisted document and lands it:
 // schema check first, then a temp file plus rename so a reader never sees a
-// half-written config. Caller holds the lock (write lock for a batch).
+// half-written config. No path = memory only (tests). Caller is update(),
+// holding the write lock, so the rename is the last thing between the caller's
+// change and the disk.
 func (s *Store) commitLocked(snap state) error {
 	doc, err := marshalDocument(snap)
 	if err != nil {
@@ -645,6 +689,8 @@ func (s *Store) commitLocked(snap state) error {
 // marshalDocument renders the persisted user layer. Every list is sorted, so
 // two writes of the same state produce the same bytes and a diff of a user's
 // config shows what changed rather than what Go's map order felt like that day.
+// The file-type catalog is the one list that keeps the user's order instead:
+// its index is the menu row they can see.
 func marshalDocument(snap state) ([]byte, error) {
 	disabled := make([]string, 0, len(snap.disabledRules))
 	for id, off := range snap.disabledRules {
@@ -662,5 +708,6 @@ func marshalDocument(snap state) ([]byte, error) {
 		OnboardingComplete: snap.onboarding,
 		EnabledPlugins:     orEmpty(enabledIDs(snap.plugins)),
 		ActiveProfile:      snap.profile,
+		FileTypes:          orEmpty(snap.fileTypes),
 	})
 }
