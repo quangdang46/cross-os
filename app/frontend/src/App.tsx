@@ -16,11 +16,20 @@
 // STRUCTURE transfers, not its implementation. Tracked in
 // third_party/rectangle/ATTRIBUTION.md.
 //
+// The nav rail below is a second port, of menumate's sidebar rather than its
+// manifest: a fixed-width left column with a small section cap over each run of
+// items (tmp/research/menumate/App/UI/MenuHubScreen.swift:65 the 326pt rail, and
+// :692-710 SectionCap — a 9.5pt semibold, tracked label above a group). Both
+// ports transfer layout, not code; menumate's entry is in
+// third_party/menumate/ATTRIBUTION.md.
+//
 // What is CrossOS's own: the rows are not hardcoded. The Go Host discovers the
 // pages and their controls (§3.6c) and this file renders whatever the Service
 // serves, so a new settings page is a Go change and never a UI change. Control
 // kinds live in ./controls; a page id or a control id in a conditional below
-// would be a defect, not a convenience.
+// would be a defect, not a convenience. The same rule covers the nav: its
+// order, its groups and its opening page all come off the wire, because the
+// Host is the only place that knows which page a fresh profile lands on.
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 // The generated bindings are named in exactly one module (lib/service), so
@@ -31,6 +40,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 // and the two log sources); handing it the checked copy instead would just move
 // that gap rather than close it.
 import { Service, service } from './lib/service'
+import { humanize } from './lib/format'
 import type { Status } from './types/controls'
 import { renderControl, type ControlContext } from './controls'
 
@@ -42,18 +52,57 @@ type Control = Parameters<typeof renderControl>[0]
 // App reads, and nothing else. The rest of the payload is the registry's
 // business, and Schema stays unknown because json.RawMessage crosses the bridge
 // either already decoded or as text.
+//
+// Group, Order and FirstRun are the host's nav answer, not decoration. The Host
+// sorts one flat list by Order and, while the profile is still fresh, lets the
+// first-run page lead; Group is what the shell groups that sorted list by, and
+// FirstRun is the host's projection of the schema flag below. All three are
+// PascalCase because the Go struct carries no json tags.
 interface Page {
   ID: string
   Title: string
+  Group: string
+  Order: number
+  FirstRun: boolean
   Schema: unknown
 }
 
-// A page schema as the Go side declares it (§3.6c): a description and a list of
-// controls. Nothing else is read, so a page may carry fields the shell has
-// never heard of without breaking the shell.
+// A page schema as the Go side declares it (§3.6c): a description, a first-run
+// marker and a list of controls. Nothing else is read, so a page may carry
+// fields the shell has never heard of without breaking the shell — but a field
+// the daemon DOES send is read here rather than dropped, which is what makes
+// firstRun below work.
 interface PageSchema {
   description?: string
+  firstRun?: boolean
   controls?: Control[]
+}
+
+// A nav group is a run of pages that share a Group value, in served order. The
+// Host serves each group's pages together, so grouping by first appearance is
+// enough and nothing is reordered here: a nav that disagreed with the host's
+// order would be a second answer to the same question.
+interface NavGroup {
+  group: string
+  pages: Page[]
+}
+
+function navGroups(pages: Page[]): NavGroup[] {
+  const groups: NavGroup[] = []
+  for (const page of pages) {
+    const open = groups.find((g) => g.group === page.Group)
+    if (open) open.pages.push(page)
+    else groups.push({ group: page.Group, pages: [page] })
+  }
+  return groups
+}
+
+// The opening page is the first page the host served. It is not "the first
+// page alphabetically" and it is not a page named in a list here: the host is
+// what knows a fresh profile lands on the wizard and a finished one lands on
+// Home, and re-deciding that in the shell would let the two disagree.
+function landingId(pages: Page[]): string {
+  return pages[0]?.ID ?? ''
 }
 
 // Failures are tracked per source and cleared when that source recovers, so
@@ -88,10 +137,10 @@ function schemaOf(page: Page): PageSchema {
 // of the list under a thousand identical lines.
 const MAX_TRACES = 200
 
-// core.eventLogs lines carry no clock of their own (the recorder appends
-// winner, action, params), so a time is shown only when the daemon already
-// wrote one. A per-event clock invented here would be a fiction; the snapshot
-// stamp is the one time this shell can state truthfully.
+// Event-log lines carry no clock of their own (the recorder appends winner,
+// action, params), so a time is shown only when the daemon already wrote one. A
+// per-event clock invented here would be a fiction; the snapshot stamp is the
+// one time this shell can state truthfully.
 const LEADING_STAMP =
   /^(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?|\d{2}:\d{2}:\d{2})(?=\s|$)/
 
@@ -185,8 +234,9 @@ export default function App() {
         setPages(found)
         // A page can vanish between polls (its plugin was uninstalled). Keep
         // the current one while it still exists rather than pulling the user
-        // off it mid-edit.
-        setActive((cur) => (found.some((p) => p.ID === cur) ? cur : found[0]?.ID ?? ''))
+        // off it mid-edit; only when it is gone does the host's own first page
+        // take over, which is how the first poll opens on the wizard.
+        setActive((cur) => (found.some((p) => p.ID === cur) ? cur : landingId(found)))
         clearFault('settings pages')
       })
       .catch((e) => reportFault('settings pages', e))
@@ -272,70 +322,84 @@ export default function App() {
         </div>
       ) : null}
 
-      <nav className="sections" aria-label="Settings pages">
-        {pages.map((p) => (
-          <button
-            key={p.ID}
-            type="button"
-            className={p.ID === active ? 'section is-active' : 'section'}
-            aria-current={p.ID === active ? 'page' : undefined}
-            onClick={() => {
-              setActive(p.ID)
-              // A note about the page just left would otherwise sit under the
-              // next page's controls and read as if it belonged to them.
-              setNote('')
-            }}
-          >
-            {p.Title || p.ID}
-          </button>
-        ))}
-      </nav>
+      <div className="body">
+        <nav className="sections" aria-label="Settings pages">
+          {navGroups(pages).map((group) => (
+            <div className="nav-group" key={group.group}>
+              {/* A group the daemon left unnamed gets no cap rather than a
+                  placeholder word: an empty header is noise, and the pages
+                  below it still read as a list. */}
+              {group.group ? <h2 className="nav-group-title">{humanize(group.group)}</h2> : null}
+              {group.pages.map((p) => (
+                <button
+                  key={p.ID}
+                  type="button"
+                  className={p.ID === active ? 'section is-active' : 'section'}
+                  aria-current={p.ID === active ? 'page' : undefined}
+                  onClick={() => {
+                    setActive(p.ID)
+                    // A note about the page just left would otherwise sit under
+                    // the next page's controls and read as if it belonged to them.
+                    setNote('')
+                  }}
+                >
+                  <span className="section-label">{p.Title || p.ID}</span>
+                  {/* The first-run marker is read out of the page's own schema,
+                      which is the declaration the host sorted on. Naming the
+                      page here instead would make the wizard a hardcoded row. */}
+                  {schemaOf(p).firstRun ? <span className="section-flag">Start here</span> : null}
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
 
-      <main className="form">
-        {page ? (
-          <>
-            <h2 className="group-title">{page.Title || page.ID}</h2>
-            {schema.description ? <p className="page-desc">{schema.description}</p> : null}
-            {controls.length === 0 ? (
-              <p className="ctl-empty">This page declares no controls yet.</p>
-            ) : (
-              controls.map((ctl, i) => (
-                // Positional key: the list is schema-ordered and stable, and
-                // naming a control field here would couple the shell to a
-                // shape the registry owns.
-                <Fragment key={i}>{renderControl(ctl, ctx)}</Fragment>
-              ))
-            )}
-          </>
-        ) : (
-          <p className="ctl-empty">
-            {pages.length ? 'Pick a page to see its settings.' : 'No settings pages discovered.'}
-          </p>
-        )}
+        <main className="form">
+          {page ? (
+            <>
+              <h2 className="group-title">{page.Title || page.ID}</h2>
+              {schema.description ? <p className="page-desc">{schema.description}</p> : null}
+              {controls.length === 0 ? (
+                <p className="ctl-empty">This page declares no controls yet.</p>
+              ) : (
+                controls.map((ctl, i) => (
+                  // Positional key: the list is schema-ordered and stable, and
+                  // naming a control field here would couple the shell to a
+                  // shape the registry owns.
+                  <Fragment key={i}>{renderControl(ctl, ctx)}</Fragment>
+                ))
+              )}
+            </>
+          ) : (
+            <p className="ctl-empty">
+              {pages.length ? 'Pick a page to see its settings.' : 'No settings pages discovered.'}
+            </p>
+          )}
 
-        {note ? (
-          <p className="note">
-            <span className="note-text">{note}</span>
-            <button
-              type="button"
-              className="note-dismiss"
-              aria-label="Dismiss this message"
-              onClick={() => setNote('')}
-            >
-              Dismiss
-            </button>
-          </p>
-        ) : null}
+          {note ? (
+            <p className="note">
+              <span className="note-text">{note}</span>
+              <button
+                type="button"
+                className="note-dismiss"
+                aria-label="Dismiss this message"
+                onClick={() => setNote('')}
+              >
+                Dismiss
+              </button>
+            </p>
+          ) : null}
 
-        {ownsTrace ? null : <Timeline logs={logs} readAt={readAt} />}
-      </main>
+          {ownsTrace ? null : <Timeline logs={logs} readAt={readAt} />}
+        </main>
+      </div>
 
       {/* About block: version plus the newest shell log line, mirroring
           rectangle's version label and check-for-updates row. */}
       <footer className="about">
-        {/* Version is served by the daemon (core.CurrentVersion); until the
-            first status lands the block shows the name alone rather than a
-            placeholder version that could be mistaken for the real one. */}
+        {/* Version is served by the daemon; until the first status lands the
+            block shows the name alone rather than a placeholder version that
+            could be mistaken for the real one. */}
         <span className="version">CrossOS{status?.Version ? ` ${status.Version}` : ''}</span>
         {shellLog ? <span className="about-msg">{shellLog}</span> : null}
       </footer>

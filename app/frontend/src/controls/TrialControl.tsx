@@ -74,7 +74,7 @@ export function TrialControl(props: ControlProps): ReactElement {
   }, [deadline])
 
   const remaining = deadline === 0 ? 0 : Math.max(0, deadline - now)
-  // Which buttons exist is the page's decision: core.safety declares
+  // Which buttons exist is the page's decision: the owning page declares
   // safety.confirmTrial and safety.rollbackTrial on this control, and a page
   // that does not declare them gets no buttons for them.
   const declared = Array.isArray(control.actions) ? control.actions : []

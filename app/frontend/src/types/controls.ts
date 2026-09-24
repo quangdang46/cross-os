@@ -16,12 +16,13 @@
 //  2. THE PROPERTY SPELLINGS BELOW MUST MATCH THE GENERATOR'S OUTPUT, and the
 //     generator follows encoding/json: a Go field with a `json:"name"` tag is
 //     emitted as `name`, and a field with no tag is emitted under its Go name.
-//     So the eight tagged rows (MatrixRow … ReadinessRow) are snake_case here,
-//     exactly as the daemon serves them, while Status/PluginState/Page are
-//     PascalCase because those Go structs carry no json tags. This is not a
-//     preference: with the PascalCase spelling these interfaces are satisfied
-//     only by a hand-written shim, and every one of those properties is
-//     `undefined` at runtime against the bindings Wails actually generates.
+//     So the sixteen tagged rows (MatrixRow … UserRuleRow) are snake_case
+//     here, exactly as the daemon serves them, while Status/PluginState/Page
+//     and AppRow are PascalCase because those Go structs carry no json tags.
+//     This is not a preference: with the PascalCase spelling these interfaces
+//     are satisfied only by a hand-written shim, and every one of those
+//     properties is `undefined` at runtime against the bindings Wails actually
+//     generates.
 //
 //  3. No list of page ids, control ids or plugin ids appears anywhere below.
 //     Those are runtime data (§3.6c: a page is a Go change with zero UI
@@ -85,14 +86,14 @@ export interface ZoneRow {
   h: number
 }
 
-/** One command-palette entry (core.commands). Commands arrive as data. */
+/** One command-palette entry. Commands arrive as data, not as code paths. */
 export interface CommandRow {
   id: string
   title: string
   plugin: string
 }
 
-/** One plugin's declarative config_schema (core.pluginSchemas). */
+/** One plugin's declarative config_schema, already decoded by the daemon. */
 export interface SchemaRow {
   plugin: string
   title: string
@@ -120,12 +121,146 @@ export interface TrialState {
   timeout_ms: number
 }
 
-/** One readiness checklist item (core.readiness). Detail says what to do. */
+/** One readiness checklist item. Detail says what to do, not merely that not. */
 export interface ReadinessRow {
   id: string
   label: string
   ready: boolean
   detail: string
+}
+
+/**
+ * One capability a profile bundles, with the rollup the profile card shows.
+ *
+ * Enabled/Total count only the behavior-matrix rules, so a capability that
+ * ships no rules (a window zone, say) reads 0 of 0 rather than "1 of 21
+ * shortcuts on" for a list it does not have. RuleIDs keeps both vocabularies
+ * the daemon declares, which is why it is a list of plain strings here.
+ */
+export interface ProfileCapabilityRow {
+  id: string
+  label: string
+  plugin: string
+  available: boolean
+  reason?: string
+  rule_ids: string[]
+  enabled: number
+  total: number
+  live: boolean
+}
+
+/**
+ * One profile card. The profile is the product ("a Windows-like setup in one
+ * click") and its capabilities are the rollup that answers whether the click
+ * landed, so the card arrives with both rather than making a control fetch a
+ * second source to find out.
+ */
+export interface ProfileRow {
+  id: string
+  label: string
+  description: string
+  active: boolean
+  capabilities: ProfileCapabilityRow[]
+}
+
+/** The physical input one decision was made from. */
+export interface TraceEvent {
+  keys: string
+  source: string
+  device?: string
+  key_code: number
+}
+
+/** The cached decision context the router logged. Never a live query. */
+export interface TraceContext {
+  app_id: string
+  app_mode: string
+  window_id?: string
+  win_class?: string
+}
+
+/** One pipeline step, in the order it ran. */
+export interface StageRow {
+  stage: string
+  detail: string
+}
+
+/**
+ * One recorded decision as fields. The flattened event log this replaces was
+ * a sentence per decision; stages, the focused app and the losing rules are
+ * all still in the record, so a page reads them instead of parsing prose.
+ */
+export interface TraceRow {
+  at: string
+  decision: string
+  event: TraceEvent
+  context: TraceContext
+  winner: string
+  losers: string[]
+  intent: string
+  action: string
+  stages: StageRow[]
+  params: string
+}
+
+/**
+ * One registered plugin's manifest facts. Name and Version are the manifest's
+ * own and are empty when a plugin ships none — the row then carries the
+ * reason, which is why neither field is defaulted to the id here.
+ */
+export interface PluginMetaRow {
+  id: string
+  name: string
+  version: string
+  permissions: string[]
+  loaded: boolean
+  reason?: string
+}
+
+/**
+ * One application a rule may be scoped to — the row behind a rule builder's
+ * "when the front app is X" picker.
+ *
+ * PascalCase because this row carries no json tags: it is the adapter's own
+ * application-identity record, served verbatim so the picker's row and the
+ * matcher's row cannot drift into two shapes for one application.
+ */
+export interface AppRow {
+  BundleID: string
+  Executable: string
+  PID: number
+  DisplayName: string
+  AppMode: string
+  Category: string
+}
+
+/**
+ * One person-authored rule.
+ *
+ * The first block is the stored rule's own dimensions, under the keys the
+ * write path takes them: an edit sends a row back and the editor never
+ * composes a payload. Chord, Action, Priority, Specificity and Scope are
+ * DERIVED by the daemon for display — sending one back would be a number the
+ * person can change without changing the rule — which is why they are grouped
+ * here and the comment above the write call repeats the point.
+ */
+export interface UserRuleRow {
+  id: string
+  key: string
+  modifiers: string[]
+  app_modes: string[]
+  app_ids: string[]
+  device_id: string
+  capability: string
+  parameters?: Record<string, unknown>
+  emit: boolean
+
+  // Derived for display; the daemon recomputes these on every write.
+  chord: string
+  action: string
+  priority: number
+  specificity: number
+  scope: string
 }
 
 /**
@@ -198,4 +333,18 @@ export interface ServiceApi {
   OwnershipAudit(): Promise<AuditRow[]>
   TrialState(): Promise<TrialState>
   Readiness(): Promise<ReadinessRow[]>
+
+  // Wave 3: the profile cards, the decision trace, the manifest facts, the
+  // app picker, and the person-authored rule table. Same rule as the ten
+  // above — these are sources a page may declare, never per-page endpoints.
+  Profiles(): Promise<ProfileRow[]>
+  ApplyProfile(profileID: string): Promise<Record<string, unknown> | null>
+  Traces(): Promise<TraceRow[]>
+  PluginMeta(): Promise<PluginMetaRow[]>
+  Apps(): Promise<AppRow[]>
+  UserRules(): Promise<UserRuleRow[]>
+  /** Creates or updates one rule; the daemon returns the id it derived. */
+  SetUserRule(rule: UserRuleRow): Promise<string>
+  /** Removes one rule and returns the table as it now stands. */
+  DeleteUserRule(id: string): Promise<UserRuleRow[]>
 }

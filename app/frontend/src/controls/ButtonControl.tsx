@@ -12,8 +12,8 @@
 // hosts — and "Reset Everything" removes the user's login item, so the one
 // affordance standing between them and that must be a real, focusable control.
 //
-// Confirming that button currently buys a PLAN, not a cleanup: core.reset
-// returns safety.PlanReset's step strings and removes no file, no login item
+// Confirming that button currently buys a PLAN, not a cleanup: the reset call
+// returns the plan's step strings and removes no file, no login item
 // and no process (main.go handleReset). Reported() below is the only thing
 // standing between those verbs and a sentence that reads as a finished reset.
 

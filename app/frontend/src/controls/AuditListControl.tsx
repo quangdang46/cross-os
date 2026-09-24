@@ -5,7 +5,7 @@
 // whether to let CrossOS clean up needs to see what it is about to touch before
 // it touches it.
 //
-// The page declares a per-row action (core.safety declares safety.rollback) and
+// The owning page declares the per-row action and
 // this deliberately draws no button for it. The daemon's method table has no
 // rollback handler and the frozen bridge exposes no command for one, so there
 // is nothing to call — and the tempting shortcut, wiring the row to

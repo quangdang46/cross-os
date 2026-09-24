@@ -3,9 +3,10 @@
  * Structure follows the rectangle preferences form it was ported from
  * (tmp/research/rectangle/Rectangle/PrefsWindow/SettingsViewController.swift:
  * a vertical, leading-aligned stack of label-beside-control rows with a
- * closing About block). What is CrossOS's own: the spacing scale and the
- * system-font stack, chosen to read as a native macOS settings pane inside a
- * webview rather than as a web page.
+ * closing About block), and the nav rail follows menumate's sidebar (see the
+ * page-navigation section below). What is CrossOS's own: the spacing scale and
+ * the system-font stack, chosen to read as a native macOS settings pane inside
+ * a webview rather than as a web page.
  *
  * The ctl-* vocabulary below is the styling contract for the control registry
  * in src/controls. Class names, not element names, are the contract: a
@@ -121,47 +122,98 @@ body {
   margin-top: 4px;
 }
 
-/* --- page navigation ------------------------------------------------------- */
+/* --- page navigation -------------------------------------------------------
+ *
+ * A fixed-width left rail with a small cap over each group of pages, ported
+ * from menumate's sidebar (tmp/research/menumate/App/UI/MenuHubScreen.swift:65
+ * the 326pt rail beside a detail pane, :692-710 SectionCap the 9.5pt
+ * semibold tracked label over a section). Layout and label treatment transfer;
+ * the SwiftUI drawing does not, and nothing in this file knows a group name.
+ */
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
 
 .sections {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--row-gap);
-  padding: 10px 20px;
-  border-bottom: 1px solid var(--line);
+  flex: none;
+  width: 200px;
+  overflow-y: auto;
+  padding: 8px 8px 16px;
+  border-right: 1px solid var(--line);
   background: var(--bg-sunken);
+}
+
+.nav-group + .nav-group {
+  margin-top: 10px;
+}
+
+.nav-group-title {
+  margin: 0;
+  padding: 4px 6px 3px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
 }
 
 .section {
   appearance: none;
-  border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--text);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  border: 0;
   border-radius: var(--radius);
-  padding: 3px 10px;
+  background: transparent;
+  color: var(--text);
+  padding: 4px 6px;
   font: inherit;
   font-size: 12px;
+  text-align: left;
   cursor: pointer;
   transition: background-color 120ms ease;
+}
+
+.section-label {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The first-run marker is a hint, not a warning, so it stays in the dim ink
+   the inactive rows use and is hidden on the active row — the fill already
+   says which page is open. */
+.section-flag {
+  flex: none;
+  font-size: 9.5px;
+  color: var(--text-dim);
+}
+
+.section.is-active .section-flag {
+  color: inherit;
 }
 
 /* The active page is marked three ways, not one: the fill, aria-current in the
    markup, and the weight below. */
 .section.is-active {
   background: var(--sel-bg);
-  border-color: var(--sel-bg);
   color: #fff;
   font-weight: 600;
 }
 
 .section:not(.is-active):hover {
-  background: var(--bg-sunken);
+  background: var(--bg);
 }
 
 /* --- page body ------------------------------------------------------------- */
 
 .form {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
   padding: 16px 20px 24px;
 }

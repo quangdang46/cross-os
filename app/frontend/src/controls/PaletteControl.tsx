@@ -7,8 +7,8 @@
 // else's to reach it.
 //
 // Running a command is the part this build cannot do, and the row says so.
-// core.shortcuts declares a command.execute permission and the daemon serves the
-// list, but no bound method executes one — so a Run button here would be a
+// the owning page declares a command.execute permission and the daemon serves
+// the list, but no bound method executes one — so a Run button here would be a
 // button that does nothing while looking exactly like one that works. The id is
 // shown instead, because that is what a person needs in order to run the
 // command the way the daemon does support today.

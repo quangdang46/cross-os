@@ -9,7 +9,7 @@
 // Guessing is how a `type: "array"` property turns into a free-text box that
 // silently writes a string where the plugin expects a list.
 //
-// The values are the honest limit of this build. core.pluginSchemas serves the
+// The values are the honest limit of this build. The schema source serves the
 // SCHEMA, not what the user currently has saved, and no bound method writes a
 // plugin's config — so the widgets are drawn disabled under one plain sentence
 // per form. Drawing them live would mean inventing a starting value, and a

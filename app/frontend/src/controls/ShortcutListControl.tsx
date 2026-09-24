@@ -7,8 +7,8 @@
 // second. The replace is also why Save is armed on the draft rather than on the
 // fetch: see save() below.
 //
-// Which pages get the editor is the page's call, not this file's. core.windows
-// declares editable:true; core.shortcuts declares editLinks:"owner" and stays
+// Which pages get the editor is the page's call, not this file's. A page that
+// declares editable:true gets it; a page that declares editLinks:"owner" stays
 // read-only, because per-rule editing belongs to the owning page and a second
 // editor would be a second source of truth for the same chords.
 //

@@ -39,3 +39,13 @@ CrossOS destination: core/pkg/plugin/pack.go (parse layering: ParsePackManifest 
 Modification: concept only (mtime cache + atomic save stay in Config Manager §3.8, not duplicated here)
 Reason for modification: avoid a second config authority; pack loader parses, Config Manager owns persistence
 CrossOS license: MIT
+
+Source repository: Hibrielle/menumate
+Source commit: 017d6dae1e8569b9d92513036503b013dc528283
+Source file: App/UI/MenuHubScreen.swift (:63-68 the fixed-width sidebar beside a detail pane; :94 the sidebar column; :692-710 SectionCap, a 9.5pt semibold tracked label over each section)
+Original license: MIT
+Original copyright: Copyright (c) 2026 Hibrielle
+CrossOS destination: app/frontend/src/App.tsx (navGroups + the nav rail markup), app/frontend/public/style.css (the .sections / .nav-group / .nav-group-title rules)
+Modification: structural port, no code copied — a left rail of grouped page buttons with a section cap per group; the reference is SwiftUI on macOS and the destination is React in a webview, so the layout and the label treatment transfer and the drawing does not. The group names, the group order and the pages under each group are the daemon's (Host.Group / Host.Order), not the reference's menu sections.
+Reason for modification: CrossOS navigates discovered UIContributions rather than an extension list, and its rail is rendered from a webview; the reference's own sections, search field and filter segmented control are not part of the settings nav.
+CrossOS license: MIT

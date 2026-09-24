@@ -1,7 +1,7 @@
 // The version row (bead cross-os-itq).
 //
-// The value is status.Version, which the bridge reads from the daemon
-// (core.CurrentVersion) — never a literal in this file. A settings window that
+// The value is status.Version, which the bridge reads from the daemon's own
+// version constant — never a literal in this file. A settings window that
 // reports a version the running daemon does not have is worse than one that
 // says it does not know yet, so an empty status renders the empty state.
 

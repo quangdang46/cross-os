@@ -1,6 +1,6 @@
 // The readiness checklist (bead cross-os-itq).
 //
-// Rows come from core.readiness, which is the daemon's own answer about what is
+// Rows come from the readiness source, which is the daemon's own answer about what is
 // ready and — the part that matters to a person — what to do about the parts
 // that are not. A page also declares the ids it expects (`items`), and those
 // are shown too: a checklist that quietly drops an item the page asked for
