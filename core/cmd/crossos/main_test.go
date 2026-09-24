@@ -14,6 +14,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -992,10 +994,342 @@ func TestEveryShellMethodIsRegistered(t *testing.T) {
 		"config.getZones", "config.setZones", "core.commands",
 		"core.pluginSchemas", "safety.ownershipAudit", "safety.trialState",
 		"core.readiness",
+		// The second wave's page sources, and the user-rule table's four.
+		// pagedata_test.go pins the same six from the page side; they are
+		// listed here as well because they are shell-called over the one
+		// socket, and a method that is registered on neither list is
+		// reachable from neither.
+		"core.profiles", "core.profileApply", "core.conflicts",
+		"core.traces", "core.pluginMeta", "core.onboardingState",
+		"config.getUserRules", "config.setUserRule",
+		"config.deleteUserRule", "config.getUserRuleVocabulary",
+		// Observe mode and the permissions deep link.
+		"core.setObserve", "permissions.openSettings",
 	}
 	for _, name := range shellCalls {
 		if _, ok := reg[name]; !ok {
 			t.Errorf("shell calls %q but the daemon never registers it", name)
 		}
+	}
+}
+
+// TestUserRuleMethodsAreReachableOverTheSocket: the four handlers in
+// userules.go are published by the method table, and each answer is read
+// back over real JSON-RPC framing. Registration alone would not catch a
+// handler wired to the wrong table or a service built without its store.
+func TestUserRuleMethodsAreReachableOverTheSocket(t *testing.T) {
+	c, err := NewCoreWithSettings(builtin.All(), builtin.Grants(), "")
+	if err != nil {
+		t.Fatalf("NewCoreWithSettings: %v", err)
+	}
+	reg := c.methods()
+	for _, name := range []string{
+		"config.getUserRules", "config.setUserRule",
+		"config.deleteUserRule", "config.getUserRuleVocabulary",
+	} {
+		if _, ok := reg[name]; !ok {
+			t.Fatalf("%s is not in the method table (TestEveryShellMethodIsRegistered lists it too)", name)
+		}
+	}
+	created, rerr := reg["config.setUserRule"](json.RawMessage(
+		`{"key":"C","modifiers":["Ctrl"],"app_modes":["native"],"capability":"clipboard.copyPath"}`))
+	if rerr != nil {
+		t.Fatalf("config.setUserRule: %v", rerr)
+	}
+	id, _ := created.(map[string]any)["id"].(string)
+	if id == "" {
+		t.Fatalf("config.setUserRule returned no stored id: %+v", created)
+	}
+	listed, rerr := reg["config.getUserRules"](nil)
+	if rerr != nil {
+		t.Fatalf("config.getUserRules: %v", rerr)
+	}
+	raw, _ := json.Marshal(listed)
+	if !strings.Contains(string(raw), id) {
+		t.Fatalf("getUserRules does not carry the created rule %q: %s", id, raw)
+	}
+	vocab, rerr := reg["config.getUserRuleVocabulary"](nil)
+	if rerr != nil {
+		t.Fatalf("config.getUserRuleVocabulary: %v", rerr)
+	}
+	if raw, _ := json.Marshal(vocab); !strings.Contains(string(raw), `"capabilities"`) {
+		t.Fatalf("vocabulary is missing the capability list: %s", raw)
+	}
+	after, rerr := reg["config.deleteUserRule"](json.RawMessage(`{"id":"` + id + `"}`))
+	if rerr != nil {
+		t.Fatalf("config.deleteUserRule: %v", rerr)
+	}
+	if raw, _ := json.Marshal(after); strings.Contains(string(raw), id) {
+		t.Fatalf("delete must answer with the table as it now stands: %s", raw)
+	}
+}
+
+// TestPluginEnablementSurvivesRestart: a plugin switched off in one run is
+// still off in the next. main() seeds the enable map from the settings
+// document rather than re-enabling every builtin, so a daemon that came
+// back with all three on would make the Extensions page toggle a lie — and
+// would quietly undo a rollback the user was told had happened.
+func TestPluginEnablementSurvivesRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	run := func(t *testing.T) *Core {
+		t.Helper()
+		c, err := NewCoreWithSettings(builtin.All(), builtin.Grants(), path)
+		if err != nil {
+			t.Fatalf("NewCoreWithSettings: %v", err)
+		}
+		// The same call main() makes at startup. main() itself blocks on a
+		// signal and cannot be driven from here, so what this pins is the
+		// round trip — the store keeps the verdict, and the seeding reads
+		// it back instead of assuming "on".
+		c.loadPluginEnablement()
+		return c
+	}
+	first := run(t)
+	if got := first.pluginEnableMap(); len(got) != len(builtin.BuiltinIDs) {
+		t.Fatalf("first run registered %d plugins, want %d", len(got), len(builtin.BuiltinIDs))
+	}
+	for _, id := range builtin.BuiltinIDs {
+		if first.pluginEnableMap()[id] {
+			t.Errorf("%s starts enabled on a document nobody has written", id)
+		}
+	}
+	if _, rerr := first.handlePluginSetEnabled(
+		json.RawMessage(`{"id":"developer","enabled":true}`)); rerr != nil {
+		t.Fatalf("enable developer: %v", rerr)
+	}
+	// Second run: the plugin the user switched on is on, the two they never
+	// touched are still off.
+	second := run(t)
+	if !second.pluginEnableMap()["developer"] {
+		t.Error("developer was enabled in run 1 and is off again after a restart")
+	}
+	for _, id := range []string{"windows-keyboard", "launcher"} {
+		if second.pluginEnableMap()[id] {
+			t.Errorf("%s was never enabled and came back on", id)
+		}
+	}
+	// Third run: the way back off is persisted too.
+	if _, rerr := second.handlePluginSetEnabled(
+		json.RawMessage(`{"id":"developer","enabled":false}`)); rerr != nil {
+		t.Fatalf("disable developer: %v", rerr)
+	}
+	for id, on := range run(t).pluginEnableMap() {
+		if on {
+			t.Errorf("%s is enabled after both directions were persisted", id)
+		}
+	}
+}
+
+// TestRolledBackTrialStaysOffAfterRestart: the safety page's rollback and
+// its confirm are the other two writers of the enable map, and they promise
+// the same durability. A rollback that only lived in memory would bring the
+// plugin back on the next launch, which is the opposite of what "disabled"
+// means to someone who just watched a trial fail.
+func TestRolledBackTrialStaysOffAfterRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	c, err := NewCoreWithSettings(builtin.All(), builtin.Grants(), path)
+	if err != nil {
+		t.Fatalf("run 1: %v", err)
+	}
+	c.loadPluginEnablement()
+	if _, rerr := c.handleBeginTrial(json.RawMessage(`{"pluginId":"launcher"}`)); rerr != nil {
+		t.Fatalf("begin trial: %v", rerr)
+	}
+	if _, rerr := c.handleRollbackTrial(
+		json.RawMessage(`{"pluginId":"launcher","reason":"user cancel"}`)); rerr != nil {
+		t.Fatalf("rollback: %v", rerr)
+	}
+	restarted, err := NewCoreWithSettings(builtin.All(), builtin.Grants(), path)
+	if err != nil {
+		t.Fatalf("run 2: %v", err)
+	}
+	restarted.loadPluginEnablement()
+	if restarted.pluginEnableMap()["launcher"] {
+		t.Error("a rolled-back plugin came back enabled after a restart")
+	}
+}
+
+// TestSetObserveReachesTheRecorder: the toggle has to reach the recorder,
+// not just answer. The recorder's dry-run stage (record.go) is the whole
+// of observe mode, and a handler that set a field on the daemon instead
+// would leave the Activity page showing traces with no would-execute line.
+func TestSetObserveReachesTheRecorder(t *testing.T) {
+	c, err := NewCore(nil, nil)
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	if c.rec.DryRun() {
+		t.Fatal("a fresh recorder must not be in observe mode")
+	}
+	// A payload without the flag must be refused, not read as "off": the
+	// toggle the user pressed and the toggle that took effect have to be
+	// the same one.
+	if _, rerr := c.handleSetObserve(json.RawMessage(`{}`)); rerr == nil ||
+		rerr.Code != ipc.ErrBadParams {
+		t.Fatalf("setObserve without the flag must be ErrBadParams, got %v", rerr)
+	}
+	if c.rec.DryRun() {
+		t.Fatal("a rejected setObserve must not change the recorder")
+	}
+	if _, rerr := c.handleSetObserve(json.RawMessage(`{"enabled":true}`)); rerr != nil {
+		t.Fatalf("setObserve on: %v", rerr)
+	}
+	if !c.rec.DryRun() {
+		t.Fatal("setObserve on did not reach the recorder's dry-run flag")
+	}
+	// The flag's whole purpose: an action's trace now carries the
+	// would-execute stage the Observe panel renders. Ctrl+C in a native
+	// app is the windows-keyboard copy rule, which resolves to
+	// clipboard.copy — a capability with no dispatch route, so the trace is
+	// the only place the observation shows up.
+	c.registerBuiltin("windows-keyboard", true)
+	_, rerr := c.handleKeyEvent(json.RawMessage(
+		`{"keyCode":67,"modifiers":1,"appId":"com.apple.Finder","appMode":"native"}`))
+	if rerr != nil {
+		t.Fatalf("keyEvent: %v", rerr)
+	}
+	traces := c.rec.Traces()
+	if len(traces) == 0 {
+		t.Fatal("the recorder stored no trace for the observed key press")
+	}
+	found := false
+	for _, st := range traces[len(traces)-1].Stages {
+		if strings.Contains(st.Detail, "dry-run: Would-execute") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("observe mode recorded no would-execute stage: %+v", traces[len(traces)-1].Stages)
+	}
+	if _, rerr := c.handleSetObserve(json.RawMessage(`{"enabled":false}`)); rerr != nil {
+		t.Fatalf("setObserve off: %v", rerr)
+	}
+	if c.rec.DryRun() {
+		t.Fatal("setObserve off did not clear the recorder's dry-run flag")
+	}
+}
+
+// TestOpenSettingsOpensTheAccessibilityPane: the deep link is the only way
+// the daemon can put a user in front of the permission it is missing, so
+// the URL is pinned here and the `open` call is captured rather than run —
+// the suite must not open System Settings on the machine running it.
+func TestOpenSettingsOpensTheAccessibilityPane(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the deep link is macOS-only; the handler says so everywhere else")
+	}
+	c, err := NewCore(nil, nil)
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	var got string
+	real := openSettingsFn
+	openSettingsFn = func(url string) error { got = url; return nil }
+	defer func() { openSettingsFn = real }()
+
+	res, rerr := c.handleOpenSettings(nil)
+	if rerr != nil {
+		t.Fatalf("openSettings: %v", rerr)
+	}
+	if got != accessibilityPane {
+		t.Fatalf("opened %q, want the accessibility pane %q", got, accessibilityPane)
+	}
+	if m, _ := res.(map[string]any); m["pane"] != "accessibility" {
+		t.Fatalf("reply names %v, want accessibility", m["pane"])
+	}
+	// A pane this daemon cannot open is refused rather than quietly swapped
+	// for Accessibility: sending someone to a screen that cannot fix their
+	// problem is worse than an error.
+	if _, rerr := c.handleOpenSettings(json.RawMessage(`{"pane":"automation"}`)); rerr == nil ||
+		rerr.Code != ipc.ErrInvalid {
+		t.Fatalf("an unknown pane must be refused as invalid, got %v", rerr)
+	}
+	// A failure to launch is reported, never swallowed into a green reply.
+	openSettingsFn = func(string) error { return errors.New("no launch services") }
+	if _, rerr := c.handleOpenSettings(nil); rerr == nil {
+		t.Fatal("a failed open must be reported, not answered as opened")
+	}
+}
+
+// TestExplorerCapabilitiesRouteThroughDispatch: the six non-window
+// capabilities the Explorer pack needs have a dispatch case, so a request
+// for one is answered on its own terms rather than with "no adapter for
+// capability" — a message that cannot tell the user whether the capability
+// is unknown or merely unimplemented.
+func TestExplorerCapabilitiesRouteThroughDispatch(t *testing.T) {
+	c, err := NewCore(nil, nil)
+	if err != nil {
+		t.Fatalf("NewCore: %v", err)
+	}
+	dir := t.TempDir()
+	call := func(capability, params string) error {
+		t.Helper()
+		req := intent.Request{
+			PluginID:   "developer",
+			Intent:     intent.Intent{ID: capability, Version: 1, Source: intent.SourceKeyboard, Parameters: json.RawMessage(params)},
+			Capability: intent.CapabilityDescriptor{ID: capability, Version: "1"},
+		}
+		return c.dispatch(req)
+	}
+
+	// Filesystem actions act on the path they are given.
+	folder := filepath.Join(dir, "new folder")
+	if err := call("filesystem.createFolder", `{"path":`+strconv.Quote(folder)+`}`); err != nil {
+		t.Fatalf("filesystem.createFolder: %v", err)
+	}
+	if st, serr := os.Stat(folder); serr != nil || !st.IsDir() {
+		t.Fatalf("createFolder left no directory at %s (stat err %v)", folder, serr)
+	}
+	// An existing folder is the state the user asked for, not an error.
+	if err := call("filesystem.createFolder", `{"path":`+strconv.Quote(folder)+`}`); err != nil {
+		t.Fatalf("re-creating an existing folder must be a no-op, got %v", err)
+	}
+	file := filepath.Join(folder, "note.txt")
+	if err := call("filesystem.createFile", `{"path":`+strconv.Quote(file)+`,"template":"hello"}`); err != nil {
+		t.Fatalf("filesystem.createFile: %v", err)
+	}
+	if body, rerr := os.ReadFile(file); rerr != nil || string(body) != "hello" {
+		t.Fatalf("createFile wrote %q (err %v), want the template", body, rerr)
+	}
+	// "Create a new file" must not truncate one that is already there.
+	if err := call("filesystem.createFile", `{"path":`+strconv.Quote(file)+`}`); err == nil {
+		t.Fatal("createFile over an existing path must refuse, not truncate")
+	}
+	if body, _ := os.ReadFile(file); string(body) != "hello" {
+		t.Fatalf("the refused create still changed the file: %q", body)
+	}
+
+	// The rule table's unfilled templates are refused by name. Acting on
+	// one would mkdir a directory literally called "{finderDir}".
+	if err := call("terminal.openAt", `{"path":"{finderDir}"}`); err == nil ||
+		!strings.Contains(err.Error(), "unresolved template") {
+		t.Fatalf("an unresolved {finderDir} must be refused by name, got %v", err)
+	}
+
+	// Each of the six answers on its own terms rather than falling through
+	// to the default. The message is the assertion: a request that reached
+	// the default fails with "no adapter for capability", which cannot tell
+	// the user whether the capability is unknown or merely unwired. The
+	// parameters are all ones the readers reject, so the suite never opens
+	// a Terminal window, rewrites the clipboard, or touches the trash.
+	for _, tc := range []struct{ capability, params string }{
+		{"clipboard.copyPath", `{}`},
+		{"filesystem.createFile", `{"path":"{finderDir}"}`},
+		{"filesystem.createFolder", `{"path":"{finderDir}"}`},
+		{"file.moveToTrash", `{}`},
+		{"app.open", `{"target":""}`},
+		{"terminal.openAt", `{"path":"{finderDir}"}`},
+	} {
+		err := call(tc.capability, tc.params)
+		if err == nil {
+			continue // it ran; there is no message left to be wrong about
+		}
+		if strings.Contains(err.Error(), "no adapter") {
+			t.Errorf("%s still falls through to the default: %v", tc.capability, err)
+		}
+	}
+	// A capability with no route at all keeps failing closed, and says so.
+	if err := call("clipboard.read", `{}`); err == nil ||
+		!strings.Contains(err.Error(), "no adapter") {
+		t.Fatalf("an unrouted capability must still say so, got %v", err)
 	}
 }

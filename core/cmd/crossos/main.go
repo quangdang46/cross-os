@@ -15,8 +15,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -34,6 +36,7 @@ import (
 	"crossos/core/pkg/safety"
 	"crossos/core/pkg/settings"
 	"crossos/core/pkg/update"
+	"crossos/core/pkg/userrules"
 	"crossos/core/pkg/winlayout"
 	builtin "crossos/core/rules"
 )
@@ -58,14 +61,18 @@ func DefaultSocketPath() string {
 // plugin enable map + trial map (handlers run on independent connection
 // goroutines). The settings Store owns its own lock internally.
 type Core struct {
-	mu      sync.Mutex
-	daemon  *daemon.Daemon
-	router  *event.Router
-	rec     *record.Recorder
-	set     *settings.Store
-	plugins map[string]bool // id → enabled
-	trials  map[string]*safety.Trial
-	order   []string
+	mu     sync.Mutex
+	daemon *daemon.Daemon
+	router *event.Router
+	rec    *record.Recorder
+	set    *settings.Store
+	// userRules is the rule builder's handler set (userules.go). Held as
+	// the service, not the raw store, so the four user-rule methods cost one
+	// field and four table entries instead of four of each.
+	userRules *userRuleService
+	plugins   map[string]bool // id → enabled
+	trials    map[string]*safety.Trial
+	order     []string
 	// interception reports whether the live keyboard tap is installed and
 	// running (bead cross-os-2io). Injected as a func so the daemon serves a
 	// truthful on/off without the core package knowing about cgo.
@@ -110,13 +117,18 @@ func NewCoreWithSettings(rules []event.CompiledRule, grants map[string][]intent.
 	if err != nil {
 		return nil, err
 	}
+	ruleStore, err := userrules.New(userRulesPath(settingsPath))
+	if err != nil {
+		return nil, err
+	}
 	c := &Core{
-		daemon:  d,
-		router:  event.Compile(rules, reg, grants, nil),
-		rec:     record.NewRecorder(),
-		set:     set,
-		plugins: map[string]bool{},
-		trials:  map[string]*safety.Trial{},
+		daemon:    d,
+		router:    event.Compile(rules, reg, grants, nil),
+		rec:       record.NewRecorder(),
+		set:       set,
+		userRules: newUserRuleService(ruleStore),
+		plugins:   map[string]bool{},
+		trials:    map[string]*safety.Trial{},
 	}
 	return c, nil
 }
@@ -138,6 +150,22 @@ func (c *Core) registerBuiltin(id string, enabled bool) {
 		c.order = append(c.order, id)
 	}
 	c.plugins[id] = enabled
+}
+
+// loadPluginEnablement seeds the running enable map from the settings
+// document, so a restart comes up with the verdicts the user left rather
+// than re-enabling everything. An id the document does not name is OFF:
+// the document is the whole of the user's intent, and defaulting a missing
+// id to true is how a plugin someone switched off came back after a
+// crash-loop respawn.
+func (c *Core) loadPluginEnablement() {
+	enabled := map[string]bool{}
+	for _, id := range c.set.PluginsEnabled() {
+		enabled[id] = true
+	}
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, enabled[id])
+	}
 }
 
 // handleStatus serves core.status: running/safe_mode/killed plus live
@@ -182,7 +210,10 @@ func (c *Core) handlePluginList(_ json.RawMessage) (any, *ipc.RPCError) {
 	return out, nil
 }
 
-// handlePluginSetEnabled serves plugin.setEnabled: {id, enabled}.
+// handlePluginSetEnabled serves plugin.setEnabled: {id, enabled}. The
+// verdict is written to the settings document as well as the running map:
+// a toggle that evaporates on restart is the one thing the Extensions page
+// promises it will not do.
 func (c *Core) handlePluginSetEnabled(raw json.RawMessage) (any, *ipc.RPCError) {
 	var p struct {
 		ID      string `json:"id"`
@@ -192,9 +223,20 @@ func (c *Core) handlePluginSetEnabled(raw json.RawMessage) (any, *ipc.RPCError) 
 		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "need {id, enabled}"}
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if err := c.enableLocked(p.ID, p.Enabled); err != nil {
+	err := c.enableLocked(p.ID, p.Enabled)
+	c.mu.Unlock()
+	if err != nil {
 		return nil, &ipc.RPCError{Code: ipc.ErrInvalid, Message: err.Error()}
+	}
+	// Outside mu: pluginKnown takes the same lock, and a write that
+	// cannot reach disk must not leave the daemon and the document
+	// disagreeing — so a failed write puts the running map back and
+	// reports why the toggle did not take.
+	if err := c.set.SetPluginEnabled(p.ID, p.Enabled, c.pluginKnown); err != nil {
+		c.mu.Lock()
+		_ = c.enableLocked(p.ID, !p.Enabled)
+		c.mu.Unlock()
+		return nil, &ipc.RPCError{Code: ipc.ErrInternal, Message: err.Error()}
 	}
 	return map[string]any{"id": p.ID, "enabled": p.Enabled}, nil
 }
@@ -344,6 +386,71 @@ func (c *Core) handleReset(_ json.RawMessage) (any, *ipc.RPCError) {
 func (c *Core) handleEventLogs(_ json.RawMessage) (any, *ipc.RPCError) {
 	return observe.SanitizeForDisplay(c.rec.Traces()), nil
 }
+
+// handleSetObserve serves core.setObserve: {"enabled":true|false} — the
+// Observe toggle on the Activity page (UX-05). The flag is the recorder's
+// dry-run: record.go then writes a "dry-run: Would-execute <capability>"
+// stage onto every trace an action would have produced, which is how a user
+// reads back what their rules do without disturbing the desktop.
+//
+// Required, not defaulted: a payload missing the flag must not be read as
+// "stop observing" (or "start") — the toggle the user pressed and the
+// toggle that took effect have to be the same one.
+func (c *Core) handleSetObserve(raw json.RawMessage) (any, *ipc.RPCError) {
+	var p struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil || p.Enabled == nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: `need {"enabled":true|false}`}
+	}
+	c.rec.SetDryRun(*p.Enabled)
+	return map[string]any{"observe": *p.Enabled}, nil
+}
+
+// accessibilityPane is the one system-settings deep link this daemon can
+// act on: the focused-window watcher cannot prime without Accessibility
+// consent, so every not-ready keyboard row points the user here.
+const accessibilityPane = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+
+// openSettingsFn is the seam the deep link goes through. Tests swap it to
+// capture the URL, so asserting the handler never opens System Settings on
+// the machine running the suite.
+var openSettingsFn = openSystemSettings
+
+// handleOpenSettings serves permissions.openSettings. There is exactly one
+// pane to open, so the method takes no pane: a caller that names a
+// different one is told so rather than quietly handed Accessibility,
+// which would send someone to a screen that cannot fix their problem.
+func (c *Core) handleOpenSettings(raw json.RawMessage) (any, *ipc.RPCError) {
+	if len(raw) > 0 {
+		var p struct {
+			Pane string `json:"pane"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "need {} or {\"pane\":\"accessibility\"}"}
+		}
+		if pane := strings.TrimSpace(p.Pane); pane != "" && pane != "accessibility" {
+			return nil, &ipc.RPCError{
+				Code:    ipc.ErrInvalid,
+				Message: fmt.Sprintf("core: unknown settings pane %q (this daemon opens only accessibility)", pane),
+			}
+		}
+	}
+	if runtime.GOOS != "darwin" {
+		return nil, &ipc.RPCError{
+			Code:    ipc.ErrInvalid,
+			Message: "core: the settings deep link is macOS-only; grant accessibility consent in your OS settings",
+		}
+	}
+	if err := openSettingsFn(accessibilityPane); err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInternal, Message: err.Error()}
+	}
+	return map[string]any{"pane": "accessibility", "opened": true}, nil
+}
+
+// openSystemSettings hands a URL to Launch Services. `open` is the only
+// door to a settings pane that needs no extra entitlement of ours.
+func openSystemSettings(url string) error { return launch("open", url) }
 
 // handleKeyEvent serves core.keyEvent: one synthetic key event through the
 // decision path (router + recorder tap), for shell diagnostics, Activity
@@ -588,16 +695,25 @@ func (c *Core) handleConfirmTrial(raw json.RawMessage) (any, *ipc.RPCError) {
 		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "need {pluginId, confirmed, healthy}"}
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	tr, ok := c.trials[p.PluginID]
+	c.mu.Unlock()
 	if !ok || tr == nil {
 		return nil, &ipc.RPCError{Code: ipc.ErrInvalid, Message: fmt.Sprintf("core: no trial for plugin %q (begin trial first)", p.PluginID)}
 	}
 	if err := tr.Confirm(p.Confirmed, p.Healthy); err != nil {
 		return nil, &ipc.RPCError{Code: ipc.ErrInvalid, Message: err.Error()}
 	}
+	// Persist BEFORE the running map flips, and outside mu for the
+	// same reason plugin.setEnabled does: a confirmed trial that enabled
+	// the plugin in memory but not on disk comes back disabled on the
+	// next start, with the user told the opposite.
+	if err := c.set.SetPluginEnabled(p.PluginID, true, c.pluginKnown); err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInternal, Message: err.Error()}
+	}
+	c.mu.Lock()
 	delete(c.trials, p.PluginID)
 	c.plugins[p.PluginID] = true
+	c.mu.Unlock()
 	return map[string]any{"pluginId": p.PluginID, "state": "enabled"}, nil
 }
 
@@ -612,8 +728,8 @@ func (c *Core) handleRollbackTrial(raw json.RawMessage) (any, *ipc.RPCError) {
 		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "need {pluginId}"}
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	tr, ok := c.trials[p.PluginID]
+	c.mu.Unlock()
 	if !ok || tr == nil {
 		return nil, &ipc.RPCError{Code: ipc.ErrInvalid, Message: fmt.Sprintf("core: no trial for plugin %q", p.PluginID)}
 	}
@@ -624,8 +740,16 @@ func (c *Core) handleRollbackTrial(raw json.RawMessage) (any, *ipc.RPCError) {
 	if err := tr.Abort(reason); err != nil {
 		return nil, &ipc.RPCError{Code: ipc.ErrInvalid, Message: err.Error()}
 	}
+	// Same contract as the confirm path: the verdict reaches the
+	// document before the running map moves, or a rolled-back plugin
+	// reappears on the next start.
+	if err := c.set.SetPluginEnabled(p.PluginID, false, c.pluginKnown); err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInternal, Message: err.Error()}
+	}
+	c.mu.Lock()
 	delete(c.trials, p.PluginID)
 	c.plugins[p.PluginID] = false
+	c.mu.Unlock()
 	return map[string]any{"pluginId": p.PluginID, "state": "disabled"}, nil
 }
 
@@ -688,6 +812,18 @@ func (c *Core) methods() map[string]ipc.Handler {
 		"core.traces":          c.handleTraces,
 		"core.pluginMeta":      c.handlePluginMeta,
 		"core.onboardingState": c.handleOnboardingState,
+		// The user-rule table (w2-userrules). The handlers live on
+		// userRuleService in userules.go, so these four entries are
+		// the whole of that file's publishing.
+		"config.getUserRules":          c.userRules.getUserRules,
+		"config.setUserRule":           c.userRules.setUserRule,
+		"config.deleteUserRule":        c.userRules.deleteUserRule,
+		"config.getUserRuleVocabulary": c.userRules.getUserRuleVocabulary,
+		// Observe mode (UX-05) and the deep link that fixes the one
+		// permission the daemon can actually ask for: Accessibility,
+		// which the focused-window watcher needs before it can prime.
+		"core.setObserve":          c.handleSetObserve,
+		"permissions.openSettings": c.handleOpenSettings,
 	}
 }
 
@@ -783,10 +919,10 @@ func main() {
 	// Builtin plugins: matrices compiled into the router via core/rules
 	// (data port of the plugin matrices — core cannot import the plugin
 	// modules back; parity pinned by core/rules TestBuiltinParity).
-	// registerBuiltin seeds the enable map the shell toggles.
-	for _, id := range builtin.BuiltinIDs {
-		c.registerBuiltin(id, true)
-	}
+	// loadPluginEnablement seeds the enable map from the document the
+	// user last wrote, so a restart resumes the Extensions page as it was
+	// left rather than switching every plugin back on.
+	c.loadPluginEnablement()
 	// Live keyboard tap (bead cross-os-2io). Best-effort: a TCC denial is
 	// NOT fatal — the daemon still serves IPC and core.status reports
 	// interception=off with the reason, so the user can grant consent and
@@ -927,6 +1063,18 @@ func (c *Core) dispatch(req intent.Request) error {
 	switch req.Capability.ID {
 	case "window.move", "window.minimize", "window.maximize", "window.close":
 		return c.windowDispatch(req, c.windowCache)
+	case "clipboard.copyPath":
+		return copyPaths(req.Intent.Parameters)
+	case "filesystem.createFile":
+		return createFile(req.Intent.Parameters)
+	case "filesystem.createFolder":
+		return createFolder(req.Intent.Parameters)
+	case "file.moveToTrash":
+		return moveToTrash(req.Intent.Parameters)
+	case "app.open":
+		return openTarget(req.Intent.Parameters)
+	case "terminal.openAt":
+		return openTerminalAt(req.Intent.Parameters)
 	default:
 		return fmt.Errorf("core: no adapter for capability %q (not implemented yet)", req.Capability.ID)
 	}
@@ -970,6 +1118,285 @@ func (c *Core) windowDispatch(req intent.Request, cache *appCache) error {
 		return fmt.Errorf("core: %s not implemented in the adapter yet", req.Capability.ID)
 	}
 	return wq.MoveResize(m)
+}
+
+// --- Explorer-pack capabilities ---
+//
+// The Finder context menu is the only surface that knows which files the
+// user acted on, so these capabilities read their paths out of the intent
+// parameters the caller supplies. A rule fired from the keyboard carries
+// none — or carries the rule table's unresolved {finderDir} template — and
+// is refused by name rather than acted on a guess. The error travels back
+// through the dispatch worker, which is the same channel that already lets
+// a failed window action pass the original key through.
+
+// dispatchParams decodes a capability's parameters. An absent or empty
+// object is the valid "takes no parameters" case, so a nil map only ever
+// means the request itself was unreadable.
+func dispatchParams(raw json.RawMessage) (map[string]json.RawMessage, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var p map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("core: capability parameters must be a JSON object: %w", err)
+	}
+	return p, nil
+}
+
+// stringParam reads one required, non-blank string parameter.
+func stringParam(params map[string]json.RawMessage, name string) (string, error) {
+	raw, ok := params[name]
+	if !ok {
+		return "", fmt.Errorf("core: missing %q", name)
+	}
+	var v string
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return "", fmt.Errorf("core: %q must be a string", name)
+	}
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", fmt.Errorf("core: %q is empty", name)
+	}
+	return v, nil
+}
+
+// unresolvedTemplate reports a value the rule table left for the context
+// to fill in. Acting on one would create a folder literally named
+// "{finderDir}", which is worse than refusing: the user would find it
+// later and have no idea which press made it.
+func unresolvedTemplate(v string) bool {
+	return strings.HasPrefix(v, "{") && strings.HasSuffix(v, "}")
+}
+
+// pathParam is stringParam for the parameters that name a location.
+func pathParam(params map[string]json.RawMessage, name string) (string, error) {
+	v, err := stringParam(params, name)
+	if err != nil {
+		return "", err
+	}
+	if unresolvedTemplate(v) {
+		return "", fmt.Errorf("core: %q is the rule table's unresolved template %s, not a path", name, v)
+	}
+	return v, nil
+}
+
+// pathList reads a path list from a capability's parameters, taking the
+// registry's "paths" array or the single "path" the file capabilities
+// name. One reader for both shapes, so a request is never refused for
+// spelling a field a sibling accepted.
+func pathList(raw json.RawMessage) ([]string, error) {
+	params, err := dispatchParams(raw)
+	if err != nil {
+		return nil, err
+	}
+	if list, ok := params["paths"]; ok {
+		var names []string
+		if err := json.Unmarshal(list, &names); err != nil {
+			return nil, fmt.Errorf("core: %q must be an array of strings", "paths")
+		}
+		out := make([]string, 0, len(names))
+		for _, name := range names {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				return nil, fmt.Errorf("core: %q holds an empty path", "paths")
+			}
+			if unresolvedTemplate(name) {
+				return nil, fmt.Errorf("core: %s is the rule table's unresolved template, not a path", name)
+			}
+			out = append(out, name)
+		}
+		if len(out) == 0 {
+			return nil, fmt.Errorf("core: %q names no path", "paths")
+		}
+		return out, nil
+	}
+	p, err := pathParam(params, "path")
+	if err != nil {
+		return nil, err
+	}
+	return []string{p}, nil
+}
+
+// createFile runs filesystem.createFile: {path, template?}. O_EXCL, so
+// "create a new file" cannot quietly truncate one that is already there —
+// the caller gets the error and the original key passes through.
+func createFile(raw json.RawMessage) error {
+	params, err := dispatchParams(raw)
+	if err != nil {
+		return err
+	}
+	path, err := pathParam(params, "path")
+	if err != nil {
+		return err
+	}
+	body := ""
+	if tmpl, ok := params["template"]; ok {
+		if err := json.Unmarshal(tmpl, &body); err != nil {
+			return fmt.Errorf("core: %q must be a string", "template")
+		}
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("core: create %s: %w", path, err)
+	}
+	if _, err := f.WriteString(body); err != nil {
+		f.Close()
+		return fmt.Errorf("core: create %s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("core: create %s: %w", path, err)
+	}
+	return nil
+}
+
+// createFolder runs filesystem.createFolder: {path}. MkdirAll rather than
+// Mkdir: a folder that is already there is the state the user asked for,
+// and an error over it would be a false alarm from their own menu click.
+func createFolder(raw json.RawMessage) error {
+	params, err := dispatchParams(raw)
+	if err != nil {
+		return err
+	}
+	path, err := pathParam(params, "path")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return fmt.Errorf("core: create folder %s: %w", path, err)
+	}
+	return nil
+}
+
+// moveToTrash runs file.moveToTrash: {paths:[…]}. ~/.Trash is the user's
+// own trash, so the file comes back through the mechanism they already
+// know — which is the whole difference between "trash" and "delete".
+//
+// Rename only. A file on another volume cannot be renamed into ~/.Trash
+// and is reported as a failure rather than copied-then-deleted: a
+// cross-volume move that runs out of space halfway is a lost file, and
+// the reversible path is worth more than the convenience of covering it.
+func moveToTrash(raw json.RawMessage) error {
+	paths, err := pathList(raw)
+	if err != nil {
+		return err
+	}
+	if err := darwinOnly("file.moveToTrash"); err != nil {
+		return err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("core: locate the trash: %w", err)
+	}
+	trash := filepath.Join(home, ".Trash")
+	for _, path := range paths {
+		dst, err := freeTrashName(trash, filepath.Base(path))
+		if err != nil {
+			return err
+		}
+		if err := os.Rename(path, dst); err != nil {
+			return fmt.Errorf("core: move %s to trash: %w", path, err)
+		}
+	}
+	return nil
+}
+
+// freeTrashName picks a destination inside the trash that nothing
+// occupies. os.Rename overwrites on POSIX, so trashing "notes.txt" twice
+// would destroy the first copy — the one file whose whole purpose is that
+// it comes back.
+func freeTrashName(dir, name string) (string, error) {
+	free := func(candidate string) bool {
+		_, err := os.Lstat(candidate)
+		return os.IsNotExist(err)
+	}
+	if candidate := filepath.Join(dir, name); free(candidate) {
+		return candidate, nil
+	}
+	ext, stem := filepath.Ext(name), strings.TrimSuffix(name, filepath.Ext(name))
+	for i := 2; i < 1000; i++ {
+		candidate := filepath.Join(dir, fmt.Sprintf("%s %d%s", stem, i, ext))
+		if free(candidate) {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("core: the trash already holds %d copies of %s", 999, name)
+}
+
+// copyPaths runs clipboard.copyPath: {paths:[…]} or {path}. One
+// newline-joined payload, the shape Finder's own "Copy file paths" writes,
+// so a paste into a terminal or an editor lands the same way.
+func copyPaths(raw json.RawMessage) error {
+	paths, err := pathList(raw)
+	if err != nil {
+		return err
+	}
+	if err := darwinOnly("clipboard.copyPath"); err != nil {
+		return err
+	}
+	cmd := exec.Command("pbcopy")
+	cmd.Stdin = strings.NewReader(strings.Join(paths, "\n"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("core: copy paths: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// openTarget runs app.open: {target} — hand a file or URL to whichever app
+// claims it.
+func openTarget(raw json.RawMessage) error {
+	params, err := dispatchParams(raw)
+	if err != nil {
+		return err
+	}
+	target, err := stringParam(params, "target")
+	if err != nil {
+		return err
+	}
+	if err := darwinOnly("app.open"); err != nil {
+		return err
+	}
+	return launch("open", target)
+}
+
+// openTerminalAt runs terminal.openAt: {path} — a terminal sitting in that
+// directory, the workflow the developer matrix's Ctrl+Shift+Enter claims.
+func openTerminalAt(raw json.RawMessage) error {
+	params, err := dispatchParams(raw)
+	if err != nil {
+		return err
+	}
+	path, err := pathParam(params, "path")
+	if err != nil {
+		return err
+	}
+	if err := darwinOnly("terminal.openAt"); err != nil {
+		return err
+	}
+	return launch("open", "-a", "Terminal", path)
+}
+
+// darwinOnly refuses a capability this daemon cannot perform on the
+// running platform, naming both. Naming the capability is the point: the
+// dispatch path suppresses the key only when the action ran, and a
+// capability that quietly did nothing is the one failure the user cannot
+// see from the keyboard they are still holding down.
+func darwinOnly(capability string) error {
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("core: %s has no adapter on %s yet", capability, runtime.GOOS)
+	}
+	return nil
+}
+
+// launch runs a command and reports its stderr. `open` is the only door to
+// a handler or a settings pane that costs us no entitlement of our own, and
+// its failures come back on stderr rather than as an exit status alone.
+func launch(name string, args ...string) error {
+	out, err := exec.Command(name, args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("core: %s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // --- focused-app cache (bead cross-os-heu) ---
