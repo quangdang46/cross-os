@@ -126,11 +126,14 @@ export const UNBOUND_ACTIONS: Record<string, UnboundAction> = {
     what: 'remove one thing CrossOS created',
     waitsOn: 'no daemon method serves it; the audit row is listed but not reversible yet',
   },
-  'pack.enableAction': { what: 'enable one Finder menu action', waitsOn: 'a bound pack call; the Explorer page has no renderer yet' },
-  'pack.disableAction': { what: 'disable one Finder menu action', waitsOn: 'a bound pack call; the Explorer page has no renderer yet' },
-  'pack.reorderAction': { what: 'reorder the Finder menu', waitsOn: 'a bound pack call; the Explorer page has no renderer yet' },
-  'pack.installLocal': { what: 'install a Finder pack from disk', waitsOn: 'a bound pack call; the Explorer page has no renderer yet' },
-  'pack.remove': { what: 'remove a Finder pack', waitsOn: 'a bound pack call; the Explorer page has no renderer yet' },
+  // The five pack.* refusals are GONE, and their absence is the point. The
+  // Explorer page (app/backend/finder.go) no longer declares them — finder_test.go
+  // pins that it does not — and nothing else in the repo names them. A refusal
+  // for a capability no page declares is the entry keeping a retired id alive: a
+  // button nobody can draw, described in a table whose whole job is to name the
+  // gaps someone still has to close. With the id gone from the schema, the
+  // honest state is that it is absent, and this table goes back to naming only
+  // the gaps a served page actually has.
 }
 
 function rowId(args?: ActionArgs): string {
