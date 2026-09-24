@@ -1,5 +1,5 @@
-// IPC client tests — bead cross-os-80g bridge criterion, plus the ten page
-// sources added in cross-os-72g.
+// IPC client tests — bead cross-os-80g bridge criterion, the ten page sources
+// added in cross-os-72g, and the Wave 3 set added in w3-shell-bridge.
 //
 // Pass criteria mapping:
 //  1. Bridge calls reach Core over IPC → TestIPCClientRoundTrip (in-memory
@@ -7,13 +7,16 @@
 //     TestIPCClientFraming (byte-level request shape matches core/pkg/ipc).
 //  2. Bridge/IPC failures in UI logs, never silent → TestIPCClientDialFailure
 //     (unreachable transport surfaces a typed error the bridge logs).
-//  3. The ten sources cross the wire with the contract's exact key names and
-//     RPC names → TestIPCSourcesRoundTrip, TestIPCSourceRPCNames,
-//     TestIPCSourceWriteParams, TestIPCSourceKeysMatchContract.
+//  3. The sources cross the wire with the contract's exact key names and RPC
+//     names → TestIPCSourcesRoundTrip, TestIPCSourceRPCNames,
+//     TestIPCSourceWriteParams, TestIPCSourceKeysMatchContract, and for the
+//     Wave 3 rows TestIPCWave3SourcesRoundTrip, TestIPCWave3RPCNames,
+//     TestIPCWave3WriteParams.
 //  4. A null, empty, broken or refused source is never silently "nothing" →
 //     TestIPCEmptyCollectionsAreEmptyNotNil, TestIPCNullCollectionIsEmptyNotNil,
 //     TestIPCTrialStateNullIsAnError, TestIPCSourceDecodeFailureIsNotEmptiness,
-//     TestIPCSourceFailuresPropagate.
+//     TestIPCSourceFailuresPropagate. The first two iterate sourceReaders(), so
+//     the Wave 3 lists are covered by the same two rules as the ten.
 package shell
 
 import (
@@ -159,15 +162,99 @@ func routeStub(method string, id any, params json.RawMessage) string {
 		}
 		return enc(map[string]any{"count": len(p.Zones)})
 
+	// The Wave 3 sources (bead w3-shell-bridge), spelled as JSON text for the
+	// same reason the ten above are: the literals pin the daemon's keys, so a
+	// tag renamed on either side fails here instead of agreeing with itself.
+	case "core.profiles":
+		return encRaw(ipcProfilesResult, id)
+	case "core.profileApply":
+		// The reply repeats the id it applied with, the way handleProfileApply
+		// echoes the bundle it resolved — so a card that rendered "applied" for
+		// a different profile than it asked for cannot pass here.
+		var p struct {
+			Profile string `json:"profile"`
+		}
+		if jerr := json.Unmarshal(params, &p); jerr != nil {
+			return errResp(-32602, "profileApply params: "+jerr.Error())
+		}
+		return encRaw(`{"profile":`+mustJSON(p.Profile)+`,"rules":21,"plugins":2}`, id)
+	case "core.traces":
+		return encRaw(ipcTracesResult, id)
+	case "core.pluginMeta":
+		return encRaw(ipcPluginMetaResult, id)
+	case "core.apps":
+		// The Go field names, because ctx.ApplicationInfo declares no tags.
+		return encRaw(ipcAppsResult, id)
+	case "config.getUserRules":
+		return encRaw(ipcUserRulesResult, id)
+	case "config.setUserRule":
+		// Decoded into the write's own keys rather than the shell's row: the
+		// display half is not on this call, and the echoed id is DERIVED from the
+		// dimensions the way userrules.DeriveID derives it. A payload whose key,
+		// modifier or scope never arrived therefore answers with a different id,
+		// and the test notices.
+		var p struct {
+			ID         string         `json:"id"`
+			Key        string         `json:"key"`
+			Modifiers  []string       `json:"modifiers"`
+			AppModes   []string       `json:"app_modes"`
+			AppIDs     []string       `json:"app_ids"`
+			DeviceID   string         `json:"device_id"`
+			Capability string         `json:"capability"`
+			Parameters map[string]any `json:"parameters"`
+			Emit       bool           `json:"emit"`
+		}
+		if jerr := json.Unmarshal(params, &p); jerr != nil {
+			return errResp(-32602, "setUserRule params: "+jerr.Error())
+		}
+		return encRaw(`{"id":`+mustJSON(deriveStubUserRuleID(p.Key, p.Modifiers, p.AppModes, p.AppIDs, p.DeviceID))+`}`, id)
+	case "config.deleteUserRule":
+		// Answers the table as it now stands, so an editor can update from one
+		// response. Deleting the only rule leaves the empty collection.
+		var p struct {
+			ID string `json:"id"`
+		}
+		if jerr := json.Unmarshal(params, &p); jerr != nil {
+			return errResp(-32602, "deleteUserRule params: "+jerr.Error())
+		}
+		return encRaw(ipcEmptyCollections, id)
+
 	default:
 		return errResp(-32601, "no such method: "+method)
 	}
 }
 
+// deriveStubUserRuleID reproduces userrules.DeriveID's shape — the lowercased
+// chord, then the scope the rule constrains — so the setUserRule stub answers
+// with the name the real store would derive. It is a test fixture, not a second
+// implementation: what it pins is that the shell's payload carried the
+// dimensions, because every part of the answer is built from them.
+func deriveStubUserRuleID(key string, modifiers, appModes, appIDs []string, deviceID string) string {
+	chord := make([]string, 0, len(modifiers)+1)
+	for _, m := range modifiers {
+		chord = append(chord, strings.ToLower(m))
+	}
+	chord = append(chord, strings.ToLower(key))
+	scope := make([]string, 0, len(appModes)+len(appIDs)+1)
+	if deviceID != "" {
+		scope = append(scope, deviceID)
+	}
+	scope = append(scope, appModes...)
+	scope = append(scope, appIDs...)
+	if len(scope) == 0 {
+		scope = []string{"any"}
+	}
+	return "user." + strings.Join(chord, "+") + "@" + strings.Join(scope, ",")
+}
+
 // The literal daemon results for the ten sources, exactly as the frozen
 // contract spells them. Keys here are the whole point of this file's new
 // half: an empty collection is [], an object keeps every key, and no field is
-// renamed on the way.
+// renamed on the way. The Wave 3 literals below follow the same rule, and the
+// two that are easy to get wrong are called out where they are: core.apps is
+// PascalCase because the row it serves declares no json tags, and the user
+// rule carries its picked dimensions before the derived display fields, in the
+// order the daemon's row embeds them.
 const (
 	ipcMatrixResult     = `[{"rule_id":"windows-keyboard.ctrl-c-copy","plugin":"win-kb","action":"copy","keys":"Ctrl+C","contexts":["any","finder"],"enabled":true}]`
 	ipcOverridesResult  = `[{"app":"Finder","rule_id":"mac-finder.copy","action":"copy","keys":"Cmd+C","enabled":false}]`
@@ -178,6 +265,38 @@ const (
 	ipcTrialResult      = `{"plugin":"win-wm","state":"trial","remaining_ms":12000,"timeout_ms":30000}`
 	ipcReadinessResult  = `[{"id":"keyboard","label":"Keyboard","ready":true,"detail":""},{"id":"windows","label":"Window management","ready":false,"detail":"grant Accessibility"}]`
 	ipcEmptyCollections = `[]`
+
+	// A live capability beside an unavailable one: the gap keeps its reason
+	// rather than being dropped, and rule_ids mixes a matrix rule with a window
+	// zone name, which is what the profile bundle really declares.
+	ipcProfilesResult = `[{"id":"windows-11","label":"Windows 11 Experience",` +
+		`"description":"Win/Alt shortcuts, Snap Layouts and Explorer muscle memory","active":true,` +
+		`"capabilities":[{"id":"window-layouts","label":"Snap Layouts","plugin":"win-wm",` +
+		`"available":true,"rule_ids":["windows.window.left","left"],"enabled":1,"total":1,"live":true},` +
+		`{"id":"win-keyboard","label":"Win/Alt keyboard","plugin":"win-kb",` +
+		`"available":false,"reason":"Win/Alt swapping is not implemented yet",` +
+		`"rule_ids":[],"enabled":0,"total":0,"live":false}]}]`
+
+	ipcTracesResult = `[{"at":"2026-09-24T21:00:00Z","decision":"handled",` +
+		`"event":{"keys":"Win+Left","source":"tap","key_code":25},` +
+		`"context":{"app_id":"com.apple.Finder","app_mode":"native"},` +
+		`"winner":"windows.window.move.left","losers":[],"intent":"window.move",` +
+		`"action":"Left Half","stages":[{"stage":"classify","detail":"Finder → native"}],` +
+		`"params":"zone=left"}]`
+
+	// Name and version empty with the reason present: the builtin plugins are
+	// compiled from the rule table and no manifest is loaded.
+	ipcPluginMetaResult = `[{"id":"win-kb","name":"","version":"",` +
+		`"permissions":["keyboard","accessibility"],"loaded":false,` +
+		`"reason":"no manifest is loaded — the builtin plugins are compiled from the rule table"}]`
+
+	ipcAppsResult = `[{"BundleID":"com.apple.Finder","Executable":"Finder","PID":301,` +
+		`"DisplayName":"Finder","AppMode":"native","Category":"system"}]`
+
+	ipcUserRulesResult = `[{"id":"user.win+left@com.apple.Finder","key":"Left","modifiers":["Win"],` +
+		`"app_modes":[],"app_ids":["com.apple.Finder"],"device_id":"","capability":"window.move",` +
+		`"parameters":{"zone":"left"},"emit":false,"chord":"Win+Left","action":"Left Half",` +
+		`"priority":80,"specificity":3,"scope":"app"}]`
 )
 
 // encRaw wraps a literal JSON result in the JSON-RPC envelope, so the payload
@@ -439,6 +558,235 @@ func TestIPCSourceRPCNames(t *testing.T) {
 	}
 }
 
+// The Wave 3 source tests (bead w3-shell-bridge) read their payloads from the
+// same JSON-text stub the ten do, so the new rows are pinned against the
+// daemon's spelling rather than against the shell's own structs.
+
+// TestIPCWave3SourcesRoundTrip is the "one honest row per source" pass over the
+// new payloads: every field a page renders is read back off the wire, and a
+// healthy read stays out of the error log.
+func TestIPCWave3SourcesRoundTrip(t *testing.T) {
+	app := NewApp(NewIPCCore(pipeTransport{stubServer}))
+
+	profiles, err := app.Profiles()
+	if err != nil {
+		t.Fatalf("Profiles: %v", err)
+	}
+	if len(profiles) != 1 || profiles[0].ID != "windows-11" || !profiles[0].Active {
+		t.Fatalf("Profiles=%+v, want the active windows-11 card", profiles)
+	}
+	// An unavailable capability keeps its reason and is not ticked, and its
+	// rollup counts only the behavior-matrix rules — the declared list mixes a
+	// rule id with a window zone, so "0 of 0" is the honest count here.
+	caps := profiles[0].Capabilities
+	if len(caps) != 2 {
+		t.Fatalf("Capabilities=%+v, want the live and the declared-but-unavailable one", caps)
+	}
+	if caps[0].ID != "window-layouts" || !caps[0].Live || caps[0].Enabled != 1 || caps[0].Total != 1 {
+		t.Fatalf("live capability=%+v, want 1 of 1 rules live", caps[0])
+	}
+	if len(caps[0].RuleIDs) != 2 || caps[0].RuleIDs[1] != "left" {
+		t.Fatalf("live capability rule_ids=%v, want the declared pair including the window zone", caps[0].RuleIDs)
+	}
+	if caps[1].Available || caps[1].Live || caps[1].Reason == "" {
+		t.Fatalf("unavailable capability=%+v, want the reason kept and no tick", caps[1])
+	}
+
+	traces, err := app.Traces()
+	if err != nil {
+		t.Fatalf("Traces: %v", err)
+	}
+	if len(traces) != 1 {
+		t.Fatalf("Traces=%+v, want the one recorded decision", traces)
+	}
+	tr := traces[0]
+	if tr.At != "2026-09-24T21:00:00Z" || tr.Decision != "handled" || tr.Winner != "windows.window.move.left" ||
+		tr.Intent != "window.move" || tr.Action != "Left Half" || tr.Params != "zone=left" {
+		t.Fatalf("Traces[0]=%+v, want the handled window.move decision", tr)
+	}
+	if tr.Event.Keys != "Win+Left" || tr.Event.Source != "tap" || tr.Event.KeyCode != 25 || tr.Event.Device != "" {
+		t.Fatalf("Traces[0].Event=%+v, want the physical chord with its virtual-key code", tr.Event)
+	}
+	if tr.Context.AppID != "com.apple.Finder" || tr.Context.AppMode != "native" {
+		t.Fatalf("Traces[0].Context=%+v, want the cached Finder context", tr.Context)
+	}
+	if len(tr.Stages) != 1 || tr.Stages[0].Stage != "classify" || tr.Stages[0].Detail == "" {
+		t.Fatalf("Traces[0].Stages=%+v, want the classify step with its detail", tr.Stages)
+	}
+	if len(tr.Losers) != 0 {
+		t.Fatalf("Traces[0].Losers=%v, want none — the daemon sends [] for an uncontested chord", tr.Losers)
+	}
+
+	meta, err := app.PluginMeta()
+	if err != nil {
+		t.Fatalf("PluginMeta: %v", err)
+	}
+	if len(meta) != 1 || meta[0].ID != "win-kb" || meta[0].Loaded || meta[0].Name != "" || meta[0].Reason == "" {
+		t.Fatalf("PluginMeta=%+v, want win-kb unloaded with the reason kept", meta)
+	}
+	if strings.Join(meta[0].Permissions, ",") != "keyboard,accessibility" {
+		t.Fatalf("PluginMeta[0].Permissions=%v, want the two grants in order", meta[0].Permissions)
+	}
+
+	apps, err := app.Apps()
+	if err != nil {
+		t.Fatalf("Apps: %v", err)
+	}
+	if len(apps) != 1 || apps[0].BundleID != "com.apple.Finder" || apps[0].DisplayName != "Finder" ||
+		apps[0].PID != 301 || apps[0].AppMode != "native" || apps[0].Category != "system" {
+		t.Fatalf("Apps=%+v, want the Finder row under the daemon's Go field names", apps)
+	}
+
+	rules, err := app.UserRules()
+	if err != nil {
+		t.Fatalf("UserRules: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("UserRules=%+v, want the one stored rule", rules)
+	}
+	rule := rules[0]
+	if rule.ID != "user.win+left@com.apple.Finder" || rule.Key != "Left" || rule.Capability != "window.move" ||
+		rule.Chord != "Win+Left" || rule.Action != "Left Half" || rule.Scope != "app" ||
+		rule.Priority != 80 || rule.Specificity != 3 {
+		t.Fatalf("UserRules[0]=%+v, want the rule with its derived fields", rule)
+	}
+	if strings.Join(rule.Modifiers, ",") != "Win" || strings.Join(rule.AppIDs, ",") != "com.apple.Finder" ||
+		len(rule.AppModes) != 0 || rule.Emit {
+		t.Fatalf("UserRules[0] scope=%+v, want a Win+Left rule scoped to one app, not emitted", rule)
+	}
+	// Parameters is an object on the wire, decoded as one — the page renders
+	// the capability's arguments instead of re-parsing a JSON string.
+	if rule.Parameters["zone"] != "left" {
+		t.Fatalf("UserRules[0].Parameters=%v, want the decoded {zone:left}", rule.Parameters)
+	}
+	if logs := app.UILogs(); len(logs) != 0 {
+		t.Fatalf("a healthy Wave 3 read must not be logged as a failure: %v", logs)
+	}
+}
+
+// TestIPCWave3RPCNames pins the Wave 3 method names in the order the bridge
+// calls them. A rename on either side of this boundary is a "no such method" at
+// runtime, which is how the daemon's method table and the shell quietly stop
+// agreeing.
+func TestIPCWave3RPCNames(t *testing.T) {
+	var seen []recordedCall
+	app := NewApp(NewIPCCore(pipeTransport{stubServerWith(&seen)}))
+	if _, err := app.Profiles(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.ApplyProfile("windows-11"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Traces(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.PluginMeta(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Apps(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.UserRules(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SetUserRule(UserRuleRow{Key: "C", Modifiers: []string{"Ctrl"}, Capability: "clipboard.copy"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.DeleteUserRule("user.win+left@com.apple.Finder"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"core.profiles", "core.profileApply", "core.traces", "core.pluginMeta", "core.apps",
+		"config.getUserRules", "config.setUserRule", "config.deleteUserRule",
+	}
+	var got []string
+	for _, c := range seen {
+		got = append(got, c.Method)
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("Wave 3 IPC methods=%v, want %v", got, want)
+	}
+}
+
+// TestIPCWave3WriteParams is the write half: the profile the card names, the
+// rule dimensions the editor picked, and the reply each is read back through.
+//
+// The rule payload is the one worth asserting byte-for-byte. config.setUserRule
+// decodes into userrules.Rule, which knows nothing of chord, action, priority,
+// specificity or scope — so a payload carrying them is a page setting a derived
+// rank, and a payload missing one of the picked keys is a rule that compiles to
+// something the user did not ask for.
+func TestIPCWave3WriteParams(t *testing.T) {
+	var seen []recordedCall
+	app := NewApp(NewIPCCore(pipeTransport{stubServerWith(&seen)}))
+
+	res, err := app.ApplyProfile("windows-11")
+	if err != nil {
+		t.Fatalf("ApplyProfile: %v", err)
+	}
+	// The reply is the daemon's own counts, so the card shows what landed.
+	if res["profile"] != "windows-11" || res["rules"] != float64(21) || res["plugins"] != float64(2) {
+		t.Fatalf("core.profileApply reply=%v, want the applied profile with its counts", res)
+	}
+	if got := strings.Join(jsonKeySet(t, seen[0].Params), ","); got != "profile" {
+		t.Fatalf("core.profileApply params keys=%s, want profile", got)
+	}
+
+	id, err := app.SetUserRule(UserRuleRow{
+		Key: "Left", Modifiers: []string{"Win"}, AppIDs: []string{"com.apple.Finder"},
+		Capability: "window.move", Parameters: map[string]any{"zone": "left"},
+		Chord: "Win+Left", Action: "Left Half", Priority: 999, Specificity: 7, Scope: "window",
+	})
+	if err != nil {
+		t.Fatalf("SetUserRule: %v", err)
+	}
+	// The id is derived server-side from the dimensions that arrived: a payload
+	// whose key, modifier or app scope went missing would derive a different
+	// name. The chord is lowercased and the scope is not — a bundle id is
+	// already spelled the one way macOS knows it.
+	if id != "user.win+left@com.apple.Finder" {
+		t.Fatalf("config.setUserRule id=%q, want the id derived from the picked dimensions", id)
+	}
+	if got := strings.Join(jsonKeySet(t, seen[1].Params), ","); got != "app_ids,app_modes,capability,device_id,emit,id,key,modifiers,parameters" {
+		t.Fatalf("config.setUserRule params keys=%s, want the nine keys userrules.Rule declares", got)
+	}
+	var wp struct {
+		Chord      string         `json:"chord"`
+		Action     string         `json:"action"`
+		Params     map[string]any `json:"parameters"`
+		AppIDs     []string       `json:"app_ids"`
+		Capability string         `json:"capability"`
+	}
+	if jerr := json.Unmarshal(seen[1].Params, &wp); jerr != nil {
+		t.Fatalf("config.setUserRule params: %v", jerr)
+	}
+	// The display half is absent from the payload, so the fields the page
+	// renders read empty here — which is the point: the daemon derives them.
+	if wp.Chord != "" || wp.Action != "" {
+		t.Fatalf("config.setUserRule params carried the display half: %s", seen[1].Params)
+	}
+	if len(wp.AppIDs) != 1 || wp.AppIDs[0] != "com.apple.Finder" || wp.Params["zone"] != "left" ||
+		wp.Capability != "window.move" {
+		t.Fatalf("config.setUserRule params=%s, want the app id, capability and arguments", seen[1].Params)
+	}
+
+	rows, err := app.DeleteUserRule("user.win+left@com.apple.Finder")
+	if err != nil {
+		t.Fatalf("DeleteUserRule: %v", err)
+	}
+	// The reply is the table as it now stands, so the editor updates from one
+	// response; an empty table is [] and not a null.
+	if rows == nil || len(rows) != 0 {
+		t.Fatalf("config.deleteUserRule rows=%v, want the emptied table", rows)
+	}
+	if got := strings.Join(jsonKeySet(t, seen[2].Params), ","); got != "id" {
+		t.Fatalf("config.deleteUserRule params keys=%s, want id", got)
+	}
+	if logs := app.UILogs(); len(logs) != 0 {
+		t.Fatalf("a healthy Wave 3 write must not be logged as a failure: %v", logs)
+	}
+}
+
 // TestIPCSourceWriteParams asserts the two write payloads byte-for-byte. The
 // params are snake_case per the frozen contract — the older calls in
 // ipc_client.go use the daemon's camelCase pluginId/ruleId, and "normalizing"
@@ -504,6 +852,21 @@ func TestIPCSourceKeysMatchContract(t *testing.T) {
 		{"AuditRow", AuditRow{Resource: "login-item"}, "created_at,id,owner,resource"},
 		{"TrialState", TrialState{Plugin: "p", State: "none"}, "plugin,remaining_ms,state,timeout_ms"},
 		{"ReadinessRow", ReadinessRow{ID: "keyboard"}, "detail,id,label,ready"},
+		{"ProfileRow", ProfileRow{ID: "p"}, "active,capabilities,description,id,label"},
+		// Reason and the two optional trace/event keys are filled here because
+		// jsonKeySet lists what is ON the wire, and omitempty means an unset
+		// field is not on it.
+		{"ProfileCapabilityRow", ProfileCapabilityRow{ID: "c", Reason: "gap"}, "available,enabled,id,label,live,plugin,reason,rule_ids,total"},
+		{"TraceRow", TraceRow{At: "t"}, "action,at,context,decision,event,intent,losers,params,stages,winner"},
+		{"TraceEvent", TraceEvent{Keys: "Ctrl+C", Device: "kbd0"}, "device,key_code,keys,source"},
+		{"TraceContext", TraceContext{AppID: "a", WindowID: "7", WinClass: "AXWindow"}, "app_id,app_mode,win_class,window_id"},
+		{"StageRow", StageRow{Stage: "classify"}, "detail,stage"},
+		{"PluginMetaRow", PluginMetaRow{ID: "win-kb", Reason: "no manifest"}, "id,loaded,name,permissions,reason,version"},
+		// The one untagged row: its keys ARE the Go field names, because the
+		// daemon serves ctx.ApplicationInfo, which declares no tags. This is the
+		// spell TestAppRowMatchesTheDaemonsRow holds to the daemon's struct.
+		{"AppRow", AppRow{BundleID: "com.apple.Finder"}, "AppMode,BundleID,Category,DisplayName,Executable,PID"},
+		{"UserRuleRow", UserRuleRow{ID: "user.ctrl+c", Parameters: map[string]any{"zone": "left"}}, "action,app_ids,app_modes,capability,chord,device_id,emit,id,key,modifiers,parameters,priority,scope,specificity"},
 	}
 	for _, c := range cases {
 		if got := strings.Join(jsonKeySet(t, c.row), ","); got != c.want {
@@ -553,7 +916,10 @@ func TestIPCEmptyCollectionsAreEmptyNotNil(t *testing.T) {
 		"config.getMatrix": ipcEmptyCollections, "config.getOverrides": ipcEmptyCollections,
 		"config.getZones": ipcEmptyCollections, "core.commands": ipcEmptyCollections,
 		"core.pluginSchemas": ipcEmptyCollections, "safety.ownershipAudit": ipcEmptyCollections,
-		"core.readiness": ipcEmptyCollections,
+		"core.readiness": ipcEmptyCollections, "core.profiles": ipcEmptyCollections,
+		"core.traces": ipcEmptyCollections, "core.pluginMeta": ipcEmptyCollections,
+		"core.apps": ipcEmptyCollections, "config.getUserRules": ipcEmptyCollections,
+		"config.deleteUserRule": ipcEmptyCollections,
 	}
 	app := NewApp(NewIPCCore(pipeTransport{serve: empty.serve}))
 	for _, c := range sourceReaders() {
@@ -572,7 +938,9 @@ func TestIPCNullCollectionIsEmptyNotNil(t *testing.T) {
 	nulls := fixed{
 		"config.getMatrix": "null", "config.getOverrides": "null", "config.getZones": "null",
 		"core.commands": "null", "core.pluginSchemas": "null", "safety.ownershipAudit": "null",
-		"core.readiness": "null",
+		"core.readiness": "null", "core.profiles": "null", "core.traces": "null",
+		"core.pluginMeta": "null", "core.apps": "null", "config.getUserRules": "null",
+		"config.deleteUserRule": "null",
 	}
 	app := NewApp(NewIPCCore(pipeTransport{serve: nulls.serve}))
 	for _, c := range sourceReaders() {
@@ -626,7 +994,9 @@ func TestIPCSourceFailuresPropagate(t *testing.T) {
 	methods := []string{
 		"config.getMatrix", "config.getOverrides", "config.setOverride", "config.getZones",
 		"config.setZones", "core.commands", "core.pluginSchemas", "safety.ownershipAudit",
-		"safety.trialState", "core.readiness",
+		"safety.trialState", "core.readiness", "core.profiles", "core.profileApply",
+		"core.traces", "core.pluginMeta", "core.apps", "config.getUserRules",
+		"config.setUserRule", "config.deleteUserRule",
 	}
 	for _, m := range methods {
 		app := NewApp(NewIPCCore(pipeTransport{serve: erroring{method: m}.serve}))
@@ -676,6 +1046,30 @@ func callSource(t *testing.T, a *App, method string) error {
 		return err
 	case "core.readiness":
 		_, err := a.Readiness()
+		return err
+	case "core.profiles":
+		_, err := a.Profiles()
+		return err
+	case "core.profileApply":
+		_, err := a.ApplyProfile("windows-11")
+		return err
+	case "core.traces":
+		_, err := a.Traces()
+		return err
+	case "core.pluginMeta":
+		_, err := a.PluginMeta()
+		return err
+	case "core.apps":
+		_, err := a.Apps()
+		return err
+	case "config.getUserRules":
+		_, err := a.UserRules()
+		return err
+	case "config.setUserRule":
+		_, err := a.SetUserRule(UserRuleRow{Key: "C", Modifiers: []string{"Ctrl"}, Capability: "clipboard.copy"})
+		return err
+	case "config.deleteUserRule":
+		_, err := a.DeleteUserRule("user.win+left@com.apple.Finder")
 		return err
 	}
 	t.Fatalf("no bridge method speaks %s", method)

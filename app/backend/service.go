@@ -87,7 +87,10 @@ func (s *Service) SetShortcuts(shortcuts []map[string]any) (int, error) {
 
 // The ten source bindings below are the Wails-bound surface the pages read
 // (bead cross-os-72g). Their names ARE the frontend API — App.tsx calls them
-// and nothing else, so they change only with the shim, never per page.
+// and nothing else, so they change only with the shim, never per page. The
+// Wave 3 bindings after them follow the same rule for the same reason: a page
+// that needs a new source calls one of these names rather than growing a
+// private path to the daemon.
 
 // GetMatrix serves the Keyboard page behavior matrix.
 func (s *Service) GetMatrix() ([]MatrixRow, error) {
@@ -137,4 +140,38 @@ func (s *Service) TrialState() (TrialState, error) {
 // Readiness serves the onboarding readiness checklist.
 func (s *Service) Readiness() ([]ReadinessRow, error) {
 	return s.app.Readiness()
+}
+
+// The Wave 3 source bindings (bead w3-shell-bridge): the profile cards, the
+// decision trace, the plugin manifest facts, the app list the rule builder
+// picks from, and the person-authored rule table.
+
+// Profiles serves the profile cards.
+func (s *Service) Profiles() ([]ProfileRow, error) { return s.app.Profiles() }
+
+// ApplyProfile activates one profile's capabilities in one plan.
+func (s *Service) ApplyProfile(profileID string) (map[string]any, error) {
+	return s.app.ApplyProfile(profileID)
+}
+
+// Traces serves the recorded decisions as rows.
+func (s *Service) Traces() ([]TraceRow, error) { return s.app.Traces() }
+
+// PluginMeta serves the plugin manifest facts.
+func (s *Service) PluginMeta() ([]PluginMetaRow, error) { return s.app.PluginMeta() }
+
+// Apps serves the installed applications a rule may be scoped to.
+func (s *Service) Apps() ([]AppRow, error) { return s.app.Apps() }
+
+// UserRules serves the person-authored rule table.
+func (s *Service) UserRules() ([]UserRuleRow, error) { return s.app.UserRules() }
+
+// SetUserRule creates or updates one rule (returns the derived id).
+func (s *Service) SetUserRule(rule UserRuleRow) (string, error) {
+	return s.app.SetUserRule(rule)
+}
+
+// DeleteUserRule removes one rule (returns the table as it now stands).
+func (s *Service) DeleteUserRule(id string) ([]UserRuleRow, error) {
+	return s.app.DeleteUserRule(id)
 }

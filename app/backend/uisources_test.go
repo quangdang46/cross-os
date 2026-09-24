@@ -12,7 +12,8 @@
 //     → TestOverrideAndZoneWritesFailClosed.
 //  5. The Go Service and the generated TypeScript bindings declare the same
 //     methods, and the generated models carry the same keys the daemon serves
-//     → TestBindingsShimParity, TestGeneratedModelsMatchWireTags.
+//     → TestBindingsShimParity, TestGeneratedModelsMatchWireTags,
+//     TestAppRowMatchesTheDaemonsRow.
 package shell
 
 import (
@@ -27,6 +28,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"crossos/core/pkg/ctx"
 )
 
 // populatedCore is a Core serving one honest row per new source — enough to
@@ -124,6 +127,91 @@ func TestPageSourcesServed(t *testing.T) {
 	}
 }
 
+// The Wave 3 stubs below complete stubCore's Core surface (bead
+// w3-shell-bridge). The struct itself lives in shell_test.go, which owns the
+// ten sources' fields, so these carry no rows of their own: the zero value
+// returns a nil list, which is exactly what the null-source rules below need,
+// and the daemon's own spelling for every Wave 3 row is pinned over the IPC
+// stub in ipc_client_test.go instead — where it is JSON text rather than a
+// struct agreeing with itself.
+func (s *stubCore) Profiles() ([]ProfileRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	return nil, nil
+}
+
+// ApplyProfile refuses an id no profile declares, the way core.profileApply
+// does: the store's active-profile field is free text, so the catalog of what
+// may be applied is the daemon's alone. A stub that accepted one would let the
+// delegation test pass against a bridge that reports "applied" for a bundle
+// that does not exist.
+func (s *stubCore) ApplyProfile(profileID string) (map[string]any, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	if profileID != "windows-11" {
+		return nil, errors.New("shell: unknown profile " + profileID)
+	}
+	return map[string]any{"profile": profileID, "rules": 21, "plugins": 2}, nil
+}
+
+func (s *stubCore) Traces() ([]TraceRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	return nil, nil
+}
+
+func (s *stubCore) PluginMeta() ([]PluginMetaRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	return nil, nil
+}
+
+func (s *stubCore) Apps() ([]AppRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	return nil, nil
+}
+
+func (s *stubCore) UserRules() ([]UserRuleRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	return nil, nil
+}
+
+// SetUserRule refuses a rule with no key or no capability, which is the store's
+// own first gate: a rule that cannot be compiled has no id to derive.
+func (s *stubCore) SetUserRule(rule UserRuleRow) (string, error) {
+	if s.failSources != nil {
+		return "", s.failSources
+	}
+	if rule.Key == "" || rule.Capability == "" {
+		return "", errors.New("shell: a rule needs a key and a capability")
+	}
+	if rule.ID == "" {
+		return "user.ctrl+c@native", nil // derived server-side
+	}
+	return rule.ID, nil
+}
+
+// DeleteUserRule refuses an empty id rather than reading it as "delete the one
+// unnamed rule": config.deleteUserRule answers a missing id with bad-params, and
+// a stub that guessed would test the opposite contract.
+func (s *stubCore) DeleteUserRule(id string) ([]UserRuleRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	if id == "" {
+		return nil, errors.New("shell: no rule id to delete")
+	}
+	return nil, nil
+}
+
 // sourceReader names one bridge call so the null and failure rules below can
 // be asserted once for every source instead of per method.
 type sourceReader struct {
@@ -131,7 +219,8 @@ type sourceReader struct {
 	read func(*App) error
 }
 
-// sourceReaders are the list-shaped sources.
+// sourceReaders are the list-shaped sources — the ten the pages already ask for
+// plus the Wave 3 set, so every rule below covers the new rows for free.
 func sourceReaders() []sourceReader {
 	return []sourceReader{
 		{"GetMatrix", func(a *App) error { _, err := a.GetMatrix(); return err }},
@@ -141,6 +230,12 @@ func sourceReaders() []sourceReader {
 		{"PluginSchemas", func(a *App) error { _, err := a.PluginSchemas(); return err }},
 		{"OwnershipAudit", func(a *App) error { _, err := a.OwnershipAudit(); return err }},
 		{"Readiness", func(a *App) error { _, err := a.Readiness(); return err }},
+		{"Profiles", func(a *App) error { _, err := a.Profiles(); return err }},
+		{"Traces", func(a *App) error { _, err := a.Traces(); return err }},
+		{"PluginMeta", func(a *App) error { _, err := a.PluginMeta(); return err }},
+		{"Apps", func(a *App) error { _, err := a.Apps(); return err }},
+		{"UserRules", func(a *App) error { _, err := a.UserRules(); return err }},
+		{"DeleteUserRule", func(a *App) error { _, err := a.DeleteUserRule("user.ctrl+c@terminal"); return err }},
 	}
 }
 
@@ -166,6 +261,11 @@ func TestSourceFailuresLogged(t *testing.T) {
 		sourceReader{"SetOverride", func(a *App) error { _, err := a.SetOverride("Finder", "mac-finder.copy", true); return err }},
 		sourceReader{"SetZones", func(a *App) error { _, err := a.SetZones([]ZoneRow{{ID: "left", W: 1, H: 1}}); return err }},
 		sourceReader{"TrialState", func(a *App) error { _, err := a.TrialState(); return err }},
+		sourceReader{"ApplyProfile", func(a *App) error { _, err := a.ApplyProfile("windows-11"); return err }},
+		sourceReader{"SetUserRule", func(a *App) error {
+			_, err := a.SetUserRule(UserRuleRow{Key: "C", Capability: "clipboard.copy"})
+			return err
+		}},
 	)
 	for _, c := range calls {
 		app := NewApp(&stubCore{failSources: boom})
@@ -192,6 +292,15 @@ func TestFailedWriteReturnsNoOptimisticRow(t *testing.T) {
 	}
 	if n, err := app.SetZones([]ZoneRow{{ID: "left", W: 1, H: 1}}); err == nil || n != 0 {
 		t.Fatalf("SetZones=%d,%v, want 0 and the daemon error", n, err)
+	}
+	// The same rule for the two Wave 3 writes: a refused rule edit hands back no
+	// id for the editor to keep, and a refused delete hands back no table for it
+	// to render as if the rule were gone.
+	if id, err := app.SetUserRule(UserRuleRow{Key: "C", Modifiers: []string{"Ctrl"}, Capability: "clipboard.copy"}); err == nil || id != "" {
+		t.Fatalf("SetUserRule=%q,%v, want no id and the daemon error", id, err)
+	}
+	if rows, err := app.DeleteUserRule("user.win+left@com.apple.Finder"); err == nil || rows != nil {
+		t.Fatalf("DeleteUserRule=%v,%v, want no rows and the daemon error", rows, err)
 	}
 }
 
@@ -269,19 +378,45 @@ func TestOverrideAndZoneWritesFailClosed(t *testing.T) {
 // TestServiceExposesFrozenSources pins the Wails-bound names. The frontend
 // calls these by string, so a rename is a runtime TypeError in the window —
 // and nothing in app/backend would otherwise notice.
+//
+// The list is EXHAUSTIVE in both directions. A name added here without a
+// binding is a page calling a method that was never generated, and a binding
+// added to service.go without a name here is a method the frontend cannot
+// discover — the Wails generator publishes every exported method, so the second
+// failure is silent until someone writes the call. Listing every method is what
+// makes the next addition a deliberate act: the generator cannot widen the
+// frontend API without this test naming what it widened.
 func TestServiceExposesFrozenSources(t *testing.T) {
 	svc := NewService(NewApp(populatedCore()), NewHost())
 	frozen := []string{
+		// Page discovery, dashboard and the update/safety controls.
+		"Pages", "GetStatus", "TogglePlugin", "ResetEverything", "GetEventLogs",
+		"UILogs", "CheckForUpdate", "ApplyUpdate", "PanicStop", "Resume",
+		"BeginTrial", "ConfirmTrial", "RollbackTrial", "SetRuleEnabled",
+		"Shortcuts", "SetShortcuts",
+		// The ten page sources.
 		"GetMatrix", "GetOverrides", "SetOverride", "GetZones", "SetZones",
 		"Commands", "PluginSchemas", "OwnershipAudit", "TrialState", "Readiness",
+		// Wave 3: profile cards, decision trace, plugin meta, the app list and
+		// the person-authored rule table.
+		"Profiles", "ApplyProfile", "Traces", "PluginMeta", "Apps",
+		"UserRules", "SetUserRule", "DeleteUserRule",
 	}
 	declared := map[string]bool{}
 	for _, m := range serviceMethodNames(t) {
 		declared[m] = true
 	}
+	listed := map[string]bool{}
 	for _, name := range frozen {
+		listed[name] = true
 		if !declared[name] {
 			t.Errorf("Service is missing the frozen bound method %s", name)
+		}
+	}
+	for _, m := range serviceMethodNames(t) {
+		if !listed[m] {
+			t.Errorf("Service.%s is bound but absent from the frozen list — add it to "+
+				"TestServiceExposesFrozenSources or the frontend has no way to call it", m)
 		}
 	}
 	// And the same names must actually delegate, not exist as stubs.
@@ -294,11 +429,15 @@ func TestServiceExposesFrozenSources(t *testing.T) {
 	if ready, err := svc.Readiness(); err != nil || len(ready) != 2 {
 		t.Fatalf("Service.Readiness=%v,%v, want 2 rows", ready, err)
 	}
+	// A Wave 3 name delegates the same way: a real error out of Core, logged.
+	if _, err := svc.ApplyProfile("ghost-profile"); err == nil {
+		t.Fatal("Service.ApplyProfile must surface the daemon rejection")
+	}
 	if _, err := svc.SetOverride("Finder", "nope", true); err == nil {
 		t.Fatal("Service.SetOverride must surface the daemon rejection")
 	}
-	if len(svc.UILogs()) == 0 {
-		t.Fatal("Service.SetOverride denial must reach the UI log")
+	if logs := svc.UILogs(); len(logs) != 2 {
+		t.Fatalf("both denials must reach the UI log, got %v", logs)
 	}
 }
 
@@ -396,7 +535,10 @@ func containsString(list []string, want string) bool {
 }
 
 // wireModels is every Go struct the generator turns into a TypeScript model,
-// paired with the shape the shell's frontend reads it as.
+// paired with the shape the shell's frontend reads it as. The Wave 3 rows are
+// here for the same reason the ten are: a model the generator did not emit, or
+// emitted with a property the daemon does not send, is a row of `undefined` in
+// the window.
 var wireModels = []struct {
 	name string
 	row  any
@@ -409,9 +551,53 @@ var wireModels = []struct {
 	{"AuditRow", AuditRow{}},
 	{"TrialState", TrialState{}},
 	{"ReadinessRow", ReadinessRow{}},
+	{"ProfileRow", ProfileRow{}},
+	{"ProfileCapabilityRow", ProfileCapabilityRow{}},
+	{"TraceRow", TraceRow{}},
+	{"TraceEvent", TraceEvent{}},
+	{"TraceContext", TraceContext{}},
+	{"StageRow", StageRow{}},
+	{"PluginMetaRow", PluginMetaRow{}},
+	{"AppRow", AppRow{}},
+	{"UserRuleRow", UserRuleRow{}},
 	{"Status", Status{}},
 	{"PluginState", PluginState{}},
 	{"Page", Page{}},
+}
+
+// TestAppRowMatchesTheDaemonsRow pins the one row with no json tags. The
+// daemon serves its app list as ctx.ApplicationInfo, so the wire keys ARE that
+// struct's Go field names — and the shell's AppRow is a hand copy of it. This
+// is the test that keeps the copy honest: a field added to the daemon's row
+// (or a json tag added there) fails here rather than decoding to a column the
+// picker never fills.
+func TestAppRowMatchesTheDaemonsRow(t *testing.T) {
+	daemon := reflect.TypeOf(ctx.ApplicationInfo{})
+	got := wireFieldNames(AppRow{})
+	if len(got) != daemon.NumField() {
+		t.Fatalf("AppRow has %d fields %v, ctx.ApplicationInfo has %d — the picker's "+
+			"row and the daemon's row must be the same row", len(got), got, daemon.NumField())
+	}
+	for i := range got {
+		if want := daemon.Field(i).Name; got[i] != want {
+			t.Errorf("AppRow field %d is %q, ctx.ApplicationInfo field %d is %q — the daemon "+
+				"sends the Go field name, so a picker column keyed on %q reads empty",
+				i, got[i], i, want, want)
+		}
+	}
+	// And the two must keep the same JSON kinds, not just the same names: a
+	// field the shell declares as a string where the daemon sends a number
+	// decodes to the zero value instead of failing. The comparison is on Kind
+	// rather than Type because two of the daemon's fields are NAMED string
+	// types (ctx.AppMode, ctx.AppCategory) and the shell declares the bare
+	// kind, which is the same JSON string to a page and the same one in a
+	// picker.
+	for i := 0; i < daemon.NumField(); i++ {
+		f := reflect.TypeOf(AppRow{}).Field(i)
+		if want := daemon.Field(i).Type.Kind(); f.Type.Kind() != want {
+			t.Errorf("AppRow.%s is a %s, ctx.ApplicationInfo.%s is a %s", f.Name, f.Type.Kind(), daemon.Field(i).Name, want)
+		}
+	}
 }
 
 // TestGeneratedModelsMatchWireTags is the test that would have caught the

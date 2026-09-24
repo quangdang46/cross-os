@@ -134,6 +134,38 @@ type Core interface {
 	// Readiness returns the per-area readiness rows (core.readiness) the
 	// onboarding checklist renders.
 	Readiness() ([]ReadinessRow, error)
+	// Profiles returns the profile cards (core.profiles): each bundle with the
+	// live rollup of its capabilities, so a card can say whether a click landed.
+	Profiles() ([]ProfileRow, error)
+	// ApplyProfile activates one profile's available capabilities as ONE
+	// settings plan (core.profileApply). The daemon applies it all-or-nothing
+	// and answers the counts; the shell never applies it rule by rule, because
+	// a profile that saved half its edits is the outcome the store's atomicity
+	// exists to prevent.
+	ApplyProfile(profileID string) (map[string]any, error)
+	// Traces returns the recorded decisions (core.traces) as rows, oldest
+	// first and truncated to the tail the daemon keeps.
+	Traces() ([]TraceRow, error)
+	// PluginMeta returns each registered plugin's manifest facts
+	// (core.pluginMeta) — permissions, load state, and the reason a fact is
+	// missing rather than a prettified guess.
+	PluginMeta() ([]PluginMetaRow, error)
+	// Apps returns the installed applications a rule may be scoped to
+	// (core.apps, the page-data spelling of the "core:apps" control source
+	// core.profiles and core.pluginMeta already live in). Empty is the answer
+	// on a platform with no cheap enumeration — the adapter returns a list it
+	// is sure of — and it is not a failure.
+	Apps() ([]AppRow, error)
+	// UserRules returns the person-authored rules (config.getUserRules) with
+	// the derived fields the editor displays beside them.
+	UserRules() ([]UserRuleRow, error)
+	// SetUserRule creates or updates one rule (config.setUserRule) and returns
+	// the id the daemon derived. An id the table does not have is rejected
+	// there, so a stale editor cannot get a duplicate row instead of an answer.
+	SetUserRule(rule UserRuleRow) (string, error)
+	// DeleteUserRule removes one rule (config.deleteUserRule) and returns the
+	// table as it now stands, so the editor updates from one response.
+	DeleteUserRule(id string) ([]UserRuleRow, error)
 }
 
 // App is the Wails-bound service (§7.3 shape: GetStatus, TogglePlugin,
@@ -424,4 +456,95 @@ func (a *App) Readiness() ([]ReadinessRow, error) {
 		return nil, err
 	}
 	return sourceList(a, "Readiness", rows), nil
+}
+
+// Profiles serves the profile cards. An unavailable capability keeps its
+// reason: a profile the spec promises and CrossOS does not deliver is shown as
+// a gap, so the row arrives whole and the card decides.
+func (a *App) Profiles() ([]ProfileRow, error) {
+	rows, err := a.core.Profiles()
+	if err != nil {
+		a.log.Append("Profiles: " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "Profiles", rows), nil
+}
+
+// ApplyProfile turns a whole profile on. A denial returns the daemon's error
+// and no counts: a card that rendered "0 rules, 0 plugins" from a rejected
+// call would read as a profile that applied and did nothing.
+func (a *App) ApplyProfile(profileID string) (map[string]any, error) {
+	res, err := a.core.ApplyProfile(profileID)
+	if err != nil {
+		a.log.Append("ApplyProfile " + profileID + ": " + err.Error())
+		return nil, err
+	}
+	return res, nil
+}
+
+// Traces serves the decision trace as rows.
+func (a *App) Traces() ([]TraceRow, error) {
+	rows, err := a.core.Traces()
+	if err != nil {
+		a.log.Append("Traces: " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "Traces", rows), nil
+}
+
+// PluginMeta serves the plugin manifest facts the Plugins page shows.
+func (a *App) PluginMeta() ([]PluginMetaRow, error) {
+	rows, err := a.core.PluginMeta()
+	if err != nil {
+		a.log.Append("PluginMeta: " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "PluginMeta", rows), nil
+}
+
+// Apps serves the installed-application list behind the rule builder's app
+// picker. A machine with no cheap enumeration answers [], which is a value the
+// picker renders as "type the bundle id" — never an error page.
+func (a *App) Apps() ([]AppRow, error) {
+	rows, err := a.core.Apps()
+	if err != nil {
+		a.log.Append("Apps: " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "Apps", rows), nil
+}
+
+// UserRules serves the person-authored rule table.
+func (a *App) UserRules() ([]UserRuleRow, error) {
+	rows, err := a.core.UserRules()
+	if err != nil {
+		a.log.Append("UserRules: " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "UserRules", rows), nil
+}
+
+// SetUserRule creates or updates one rule and returns the id the daemon
+// derived from the dimensions. The id is the only part of the reply the editor
+// could not have computed — an edit that re-picks the chord renames the rule —
+// and the next delete has to name the row that exists.
+func (a *App) SetUserRule(rule UserRuleRow) (string, error) {
+	id, err := a.core.SetUserRule(rule)
+	if err != nil {
+		a.log.Append("SetUserRule: " + err.Error())
+		return "", err
+	}
+	return id, nil
+}
+
+// DeleteUserRule removes one rule and answers with the table as it now stands.
+// The same rows a fresh read would give, so the editor updates from one
+// response instead of re-reading to find out whether its write landed.
+func (a *App) DeleteUserRule(id string) ([]UserRuleRow, error) {
+	rows, err := a.core.DeleteUserRule(id)
+	if err != nil {
+		a.log.Append("DeleteUserRule " + id + ": " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "DeleteUserRule", rows), nil
 }

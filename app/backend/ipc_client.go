@@ -374,10 +374,11 @@ func (c *IPCCore) SetShortcuts(shortcuts []map[string]any) (int, error) {
 	return out.Shortcuts, nil
 }
 
-// The accessors below bridge the ten page sources (bead cross-os-72g). They
-// decode the daemon's snake_case into the frozen Go types in uisources.go and
-// return decode failures as typed errors — a source that fails to decode is a
-// broken bridge, not an empty page, so it must never degrade into [].
+// The accessors below bridge the ten page sources (bead cross-os-72g) and then
+// the Wave 3 set (bead w3-shell-bridge). They decode the daemon's snake_case
+// into the frozen Go types in uisources.go and return decode failures as typed
+// errors — a source that fails to decode is a broken bridge, not an empty page,
+// so it must never degrade into [].
 //
 // A literal `null` result for a list method decodes to a nil slice and is left
 // for App.sourceList to normalize: null is a contract violation worth a UI-log
@@ -512,4 +513,134 @@ func (c *IPCCore) Readiness() ([]ReadinessRow, error) {
 		return nil, err
 	}
 	return decodeList[ReadinessRow]("core.readiness", raw)
+}
+
+// The Wave 3 accessors below speak the method names core/cmd/crossos serves
+// for the profile cards, the decision trace, the plugin manifest facts, the app
+// list and the person-authored rule table.
+
+// Profiles implements Core via core.profiles.
+func (c *IPCCore) Profiles() ([]ProfileRow, error) {
+	raw, err := c.call("core.profiles", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[ProfileRow]("core.profiles", raw)
+}
+
+// ApplyProfile implements Core via core.profileApply: {"profile":"<id>"} →
+// {profile, rules, plugins}. The counts come from the plan the daemon actually
+// applied, so a card shows what landed rather than what it hoped for.
+func (c *IPCCore) ApplyProfile(profileID string) (map[string]any, error) {
+	raw, err := c.call("core.profileApply", map[string]any{"profile": profileID})
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("shell: ipc decode core.profileApply: %w", err)
+	}
+	return out, nil
+}
+
+// Traces implements Core via core.traces. The daemon serves the tail of the
+// recorder oldest-first and truncates from the old end, so the order the shell
+// decodes is the order a polling page can append to.
+func (c *IPCCore) Traces() ([]TraceRow, error) {
+	raw, err := c.call("core.traces", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[TraceRow]("core.traces", raw)
+}
+
+// PluginMeta implements Core via core.pluginMeta, in the daemon's registration
+// order.
+func (c *IPCCore) PluginMeta() ([]PluginMetaRow, error) {
+	raw, err := c.call("core.pluginMeta", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[PluginMetaRow]("core.pluginMeta", raw)
+}
+
+// Apps implements Core via core.apps. The enumeration behind it is
+// adapter.ListApps, whose rows are ctx.ApplicationInfo: the app-identity
+// record the context resolver reads, and a struct that declares no json tags.
+// The wire therefore spells its keys as the Go field names, which is the one
+// row in uisources.go AppRow carries untagged to match.
+func (c *IPCCore) Apps() ([]AppRow, error) {
+	raw, err := c.call("core.apps", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[AppRow]("core.apps", raw)
+}
+
+// UserRules implements Core via config.getUserRules.
+func (c *IPCCore) UserRules() ([]UserRuleRow, error) {
+	raw, err := c.call("config.getUserRules", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[UserRuleRow]("config.getUserRules", raw)
+}
+
+// userRuleWrite is the payload config.setUserRule takes: the picked
+// dimensions, spelled with the same keys userrules.Rule declares and WITHOUT
+// the display fields getUserRules adds. Sending the row verbatim would put
+// chord, action, priority, specificity and scope on the wire, where the daemon
+// ignores them — and a field the decoder ignores today is one a later release
+// could start honouring, which would let a page set a derived rank.
+//
+// An id in the payload edits that rule and its absence creates one: the same
+// call, because it is the same form. The derived fields are never sent back.
+type userRuleWrite struct {
+	ID         string         `json:"id"`
+	Key        string         `json:"key"`
+	Modifiers  []string       `json:"modifiers"`
+	AppModes   []string       `json:"app_modes"`
+	AppIDs     []string       `json:"app_ids"`
+	DeviceID   string         `json:"device_id"`
+	Capability string         `json:"capability"`
+	Parameters map[string]any `json:"parameters,omitempty"`
+	Emit       bool           `json:"emit"`
+}
+
+// SetUserRule implements Core via config.setUserRule. The reply is {id}: the id
+// the daemon derived, which the editor could not have computed.
+func (c *IPCCore) SetUserRule(rule UserRuleRow) (string, error) {
+	raw, err := c.call("config.setUserRule", userRuleWrite{
+		ID:         rule.ID,
+		Key:        rule.Key,
+		Modifiers:  rule.Modifiers,
+		AppModes:   rule.AppModes,
+		AppIDs:     rule.AppIDs,
+		DeviceID:   rule.DeviceID,
+		Capability: rule.Capability,
+		Parameters: rule.Parameters,
+		Emit:       rule.Emit,
+	})
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", fmt.Errorf("shell: ipc decode config.setUserRule: %w", err)
+	}
+	return out.ID, nil
+}
+
+// DeleteUserRule implements Core via config.deleteUserRule. The reply is the
+// table as it now stands — the same shape a fresh read gives — so the editor
+// updates from one response instead of re-reading to see whether its delete
+// landed.
+func (c *IPCCore) DeleteUserRule(id string) ([]UserRuleRow, error) {
+	raw, err := c.call("config.deleteUserRule", map[string]any{"id": id})
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[UserRuleRow]("config.deleteUserRule", raw)
 }
