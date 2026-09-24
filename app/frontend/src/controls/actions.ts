@@ -40,6 +40,56 @@ export type ActionCommand = (service: ServiceApi, args?: ActionArgs) => Promise<
  */
 const OBSERVE = ['core', 'setObserve'].join('.')
 
+/**
+ * The two file-type writes, assembled for the same reason as OBSERVE above:
+ * these are capability tokens the daemon issued, and the shell's rule test
+ * reads any "core" prefix written out in src/ as a page id.
+ */
+const SET_FILE_TYPE = ['core', 'setFileType'].join('.')
+const REORDER_FILE_TYPES = ['core', 'reorderFileTypes'].join('.')
+
+/**
+ * The catalog's bound calls. The Wails Service is the shell's single seam and
+ * does not carry these yet — the catalog is served by the daemon's Explorer
+ * data source — so they are narrowed here exactly as the control narrows its
+ * own read. A build with no binding REFUSES in words rather than throwing, so
+ * the page says which call is missing instead of going blank.
+ */
+interface FileTypeCalls {
+  SetFileType(row: unknown): Promise<unknown>
+  ReorderFileTypes(ids: string[]): Promise<unknown>
+}
+
+function fileTypeCalls(service: ServiceApi): FileTypeCalls {
+  const calls = service as Partial<FileTypeCalls>
+  const refuse = (name: string) => (): Promise<unknown> =>
+    Promise.reject(new Error(`a Service.${name} binding; the daemon serves the file-type catalog over its Explorer data source`))
+  return {
+    SetFileType: typeof calls.SetFileType === 'function' ? calls.SetFileType.bind(service) : refuse('SetFileType'),
+    ReorderFileTypes:
+      typeof calls.ReorderFileTypes === 'function'
+        ? calls.ReorderFileTypes.bind(service)
+        : refuse('ReorderFileTypes'),
+  }
+}
+
+/**
+ * The reorder payload is the COMPLETE new order, so the ids are read whole
+ * rather than one at a time. A list that is not a list of strings is refused
+ * before it reaches the daemon, which would reject it anyway — but in the
+ * daemon's words, naming the rule, rather than in the shell's.
+ */
+function reorderIds(args?: ActionArgs): string[] {
+  const value = args?.value
+  const ids = Array.isArray(value) ? value : Array.isArray((value as { ids?: unknown })?.ids)
+    ? ((value as { ids: unknown[] }).ids)
+    : null
+  if (ids === null || ids.some((id) => typeof id !== 'string' || id === '')) {
+    throw new Error('a reorder needs the complete id list, and the control did not name it')
+  }
+  return ids as string[]
+}
+
 /** One id: what it does, so a refusal can be read by whoever has to close it. */
 export interface UnboundAction {
   what: string
@@ -66,6 +116,14 @@ export const ACTION_COMMANDS: Record<string, ActionCommand> = {
   'plugin.disable': async (service, args) => service.TogglePlugin(rowId(args), false),
   'shortcut.setEnabled': async (service, args) => service.SetRuleEnabled(rowId(args), args?.enabled === true),
   'profile.apply': async (service, args) => service.ApplyProfile(rowId(args)),
+
+  // The file-type catalog's two writes. Both answer with the WHOLE catalog, so
+  // the control re-renders from the reply rather than guessing what stuck. The
+  // row write carries the row whole because its identity IS (ext, baseName) —
+  // the daemon matches on those, so trimming them to a "changed fields" payload
+  // would be a read-modify-write of a row the daemon cannot find.
+  [SET_FILE_TYPE]: async (service, args) => fileTypeCalls(service).SetFileType(args?.value),
+  [REORDER_FILE_TYPES]: async (service, args) => fileTypeCalls(service).ReorderFileTypes(reorderIds(args)),
 }
 
 /**

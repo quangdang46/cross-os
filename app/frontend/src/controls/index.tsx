@@ -18,6 +18,7 @@ import { AuditListControl } from './AuditListControl'
 import { ButtonControl } from './ButtonControl'
 import { ChecklistControl } from './ChecklistControl'
 import { ConflictResolver } from './ConflictResolver'
+import { FileTypeListControl } from './FileTypeListControl'
 import { CreditsControl } from './CreditsControl'
 import { GateBadgeControl } from './GateBadgeControl'
 import { HomeSummaryControl } from './HomeSummaryControl'
@@ -75,6 +76,7 @@ const RENDERERS = new Map<string, ControlRenderer>([
   ['checklist', ChecklistControl],
   ['conflictResolver', ConflictResolver],
   ['credits', CreditsControl],
+  ['fileTypeList', FileTypeListControl],
   ['gateBadge', GateBadgeControl],
   ['homeSummary', HomeSummaryControl],
   ['keymapEditor', KeymapEditorControl],
