@@ -667,8 +667,8 @@ func (c *Core) methods() map[string]ipc.Handler {
 		"config.setRuleEnabled": c.handleSetRuleEnabled,
 		"config.getShortcuts":   c.handleGetShortcuts,
 		"config.setShortcuts":   c.handleSetShortcuts,
-		// The ten settings-page data sources (cross-os-jzj). One method per
-		// page control `source` string; see pagedata.go.
+		// The settings-page data sources (cross-os-jzj). One method per page
+		// control `source` string; see pagedata.go.
 		"config.getMatrix":      c.handleGetMatrix,
 		"config.getOverrides":   c.handleGetOverrides,
 		"config.setOverride":    c.handleSetOverride,
@@ -679,6 +679,15 @@ func (c *Core) methods() map[string]ipc.Handler {
 		"safety.ownershipAudit": c.handleOwnershipAudit,
 		"safety.trialState":     c.handleTrialState,
 		"core.readiness":        c.handleReadiness,
+		// The second wave: the profile layer (w2-pagedata), the conflict
+		// verdict, structured traces, plugin manifest facts, the first-run
+		// wizard's derived state.
+		"core.profiles":        c.handleCoreProfiles,
+		"core.profileApply":    c.handleProfileApply,
+		"core.conflicts":       c.handleConflicts,
+		"core.traces":          c.handleTraces,
+		"core.pluginMeta":      c.handlePluginMeta,
+		"core.onboardingState": c.handleOnboardingState,
 	}
 }
 

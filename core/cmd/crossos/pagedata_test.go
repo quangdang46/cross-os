@@ -18,7 +18,10 @@ import (
 	"time"
 
 	"crossos/core/pkg/event"
+	"crossos/core/pkg/intent"
 	"crossos/core/pkg/ipc"
+	"crossos/core/pkg/profiles"
+	"crossos/core/pkg/rule"
 	"crossos/core/pkg/safety"
 	builtin "crossos/core/rules"
 )
@@ -46,6 +49,87 @@ type wireTrialState struct {
 	State       string `json:"state"`
 	RemainingMS int64  `json:"remaining_ms"`
 	TimeoutMS   int64  `json:"timeout_ms"`
+}
+
+type wireCapabilityRow struct {
+	ID        string   `json:"id"`
+	Label     string   `json:"label"`
+	Plugin    string   `json:"plugin"`
+	Available bool     `json:"available"`
+	Reason    string   `json:"reason"`
+	RuleIDs   []string `json:"rule_ids"`
+	Enabled   int      `json:"enabled"`
+	Total     int      `json:"total"`
+	Live      bool     `json:"live"`
+}
+
+type wireProfileRow struct {
+	ID           string              `json:"id"`
+	Label        string              `json:"label"`
+	Description  string              `json:"description"`
+	Active       bool                `json:"active"`
+	Capabilities []wireCapabilityRow `json:"capabilities"`
+}
+
+type wireConflictRow struct {
+	Keys   string   `json:"keys"`
+	Winner string   `json:"winner"`
+	Losers []string `json:"losers"`
+	Rules  []struct {
+		RuleID string `json:"rule_id"`
+		Plugin string `json:"plugin"`
+		Action string `json:"action"`
+	} `json:"rules"`
+}
+
+type wireTraceStage struct {
+	Stage  string `json:"stage"`
+	Detail string `json:"detail"`
+}
+
+type wireTraceRow struct {
+	At       string           `json:"at"`
+	Decision string           `json:"decision"`
+	Winner   string           `json:"winner"`
+	Losers   []string         `json:"losers"`
+	Intent   string           `json:"intent"`
+	Action   string           `json:"action"`
+	Params   string           `json:"params"`
+	Stages   []wireTraceStage `json:"stages"`
+	Event    struct {
+		Keys    string `json:"keys"`
+		Source  string `json:"source"`
+		KeyCode uint32 `json:"key_code"`
+	} `json:"event"`
+	Context struct {
+		AppID   string `json:"app_id"`
+		AppMode string `json:"app_mode"`
+	} `json:"context"`
+}
+
+type wirePluginMetaRow struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Version     string   `json:"version"`
+	Permissions []string `json:"permissions"`
+	Loaded      bool     `json:"loaded"`
+	Reason      string   `json:"reason"`
+}
+
+type wireOnboardingStep struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Done   bool   `json:"done"`
+	Detail string `json:"detail"`
+}
+
+type wireOnboardingRow struct {
+	Completed   bool                 `json:"completed"`
+	CurrentStep string               `json:"current_step"`
+	Steps       []wireOnboardingStep `json:"steps"`
+	Ready       int                  `json:"ready"`
+	Total       int                  `json:"total"`
+	Readiness   []readinessRow       `json:"readiness"`
 }
 
 // decode runs a handler's result through JSON and decodes it into the wire
@@ -97,9 +181,9 @@ func testCore(t *testing.T) *Core {
 	return c
 }
 
-// TestEveryPageDataMethodIsRegistered pins the ten settings-page data
-// sources in the method table. A handler left out of methods() is dead code
-// the shell can never reach, and only a direct call would ever see it.
+// TestEveryPageDataMethodIsRegistered pins the settings-page data sources in
+// the method table. A handler left out of methods() is dead code the shell can
+// never reach, and only a direct call would ever see it.
 func TestEveryPageDataMethodIsRegistered(t *testing.T) {
 	c := testCore(t)
 	reg := c.methods()
@@ -108,6 +192,8 @@ func TestEveryPageDataMethodIsRegistered(t *testing.T) {
 		"config.getZones", "config.setZones", "core.commands",
 		"core.pluginSchemas", "safety.ownershipAudit", "safety.trialState",
 		"core.readiness",
+		"core.profiles", "core.profileApply", "core.conflicts",
+		"core.traces", "core.pluginMeta", "core.onboardingState",
 	} {
 		if _, ok := reg[name]; !ok {
 			t.Errorf("page data source %q is not in the method table", name)
@@ -131,6 +217,10 @@ func TestEmptyPageListsAreArrays(t *testing.T) {
 	schemas, schemasErr := c.handlePluginSchemas(nil)
 	audit, auditErr := c.handleOwnershipAudit(nil)
 	readiness, readinessErr := c.handleReadiness(nil)
+	profilesRes, profilesErr := c.handleCoreProfiles(nil)
+	conflicts, conflictsErr := c.handleConflicts(nil)
+	traces, tracesErr := c.handleTraces(nil)
+	meta, metaErr := c.handlePluginMeta(nil)
 	for _, tc := range []call{
 		{"config.getMatrix", matrix, matrixErr},
 		{"config.getOverrides", overrides, overridesErr},
@@ -139,6 +229,10 @@ func TestEmptyPageListsAreArrays(t *testing.T) {
 		{"core.pluginSchemas", schemas, schemasErr},
 		{"safety.ownershipAudit", audit, auditErr},
 		{"core.readiness", readiness, readinessErr},
+		{"core.profiles", profilesRes, profilesErr},
+		{"core.conflicts", conflicts, conflictsErr},
+		{"core.traces", traces, tracesErr},
+		{"core.pluginMeta", meta, metaErr},
 	} {
 		if tc.err != nil {
 			t.Errorf("%s: unexpected rpc error %d %s", tc.name, tc.err.Code, tc.err.Message)
@@ -536,6 +630,454 @@ func TestChordRenderingIsTotal(t *testing.T) {
 	for vk, want := range cases {
 		if got := keyName(vk); got != want {
 			t.Errorf("keyName(0x%X)=%q, want %q", vk, got, want)
+		}
+	}
+}
+
+// TestMatrixRowsNameTheirAppConditions: a rule scoped to specific bundle IDs
+// says so. The Context column used to render a developer rule's six app IDs as
+// a plain "native" — which is exactly what a rule with no app restriction looks
+// like — so the editor could not answer "where does this fire", and the rule ID
+// is a toggle handle rather than a scope report.
+func TestMatrixRowsNameTheirAppConditions(t *testing.T) {
+	c := testCore(t)
+	res, rerr := c.handleGetMatrix(nil)
+	rows := decodeRows[wireMatrixRow](t, res, rerr)
+	byID := map[string]wireMatrixRow{}
+	for _, r := range rows {
+		byID[r.RuleID] = r
+	}
+	// Every condition a rule declares appears in its row: the app modes, then
+	// the app IDs in the order the rule table lists them. Derived from the
+	// table, so a new rule is covered without a line here.
+	for _, r := range builtin.All() {
+		want := make([]string, 0, len(r.AppModes)+len(r.AppIDs))
+		for _, m := range r.AppModes {
+			want = append(want, string(m))
+		}
+		want = append(want, r.AppIDs...)
+		if got := byID[r.RuleID].Contexts; strings.Join(got, "|") != strings.Join(want, "|") {
+			t.Errorf("%s contexts=%v, want %v", r.RuleID, got, want)
+		}
+	}
+	// The spec's own example row, readable as itself: Ctrl+Shift+C names Finder
+	// among the apps it is scoped to.
+	if got := byID["developer.ctrl-shift-c-copypath"].Contexts; len(got) == 0 ||
+		!strings.Contains(strings.Join(got, "|"), "com.apple.Finder") {
+		t.Errorf("ctrl-shift-c contexts=%v, want com.apple.Finder among them", got)
+	}
+}
+
+// TestProfilesServeTheBundleAndItsRollup: the card is the profile's own data
+// plus a rollup of what is live, and an unavailable capability keeps its reason
+// instead of being dropped or ticked.
+func TestProfilesServeTheBundleAndItsRollup(t *testing.T) {
+	c := testCore(t)
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, true)
+	}
+	res, rerr := c.handleCoreProfiles(nil)
+	rows := decodeRows[wireProfileRow](t, res, rerr)
+	if len(rows) != len(profiles.All()) {
+		t.Fatalf("core.profiles has %d cards, the bundle declares %d", len(rows), len(profiles.All()))
+	}
+	declared := profiles.All()[0]
+	card := rows[0]
+	if card.ID != declared.ID || card.Label != declared.Label || card.Description != declared.Description {
+		t.Fatalf("card=%+v, want the bundle's %q verbatim", card, declared.ID)
+	}
+	if card.Active {
+		t.Error("a daemon that has applied nothing reports a profile active")
+	}
+	byID := map[string]wireCapabilityRow{}
+	for _, row := range card.Capabilities {
+		byID[row.ID] = row
+	}
+	if len(card.Capabilities) != len(declared.Capabilities) {
+		t.Fatalf("card has %d capabilities, the bundle declares %d",
+			len(card.Capabilities), len(declared.Capabilities))
+	}
+	for _, want := range declared.Capabilities {
+		row, ok := byID[want.ID]
+		if !ok {
+			t.Fatalf("capability %q is missing from the card", want.ID)
+		}
+		if row.Label != want.Label || row.Plugin != want.Plugin || row.Available != want.Available {
+			t.Errorf("%s row=%+v, want label=%q plugin=%q available=%v",
+				want.ID, row, want.Label, want.Plugin, want.Available)
+		}
+		if len(row.RuleIDs) != len(want.RuleIDs) || row.RuleIDs == nil {
+			t.Errorf("%s rule_ids=%v, want the declared %v as a list", want.ID, row.RuleIDs, want.RuleIDs)
+		}
+		// The rollup counts the matrix rules a capability can toggle and no
+		// more: a window zone is not a rule, and counting it would report
+		// "0 of 21" for a capability that ships no shortcuts at all.
+		toggleable := 0
+		for _, id := range want.RuleIDs {
+			if _, isRule := builtinRule(id); isRule {
+				toggleable++
+			}
+		}
+		if row.Total != toggleable {
+			t.Errorf("%s total=%d, want %d togglable rules", want.ID, row.Total, toggleable)
+		}
+		if row.Enabled != toggleable {
+			t.Errorf("%s enabled=%d, want %d on a daemon that disabled nothing", want.ID, row.Enabled, toggleable)
+		}
+		// A capability is live when its plugin is on and its rules are, and an
+		// unavailable one is never live — with the reason it is missing.
+		if want.Available && !row.Live {
+			t.Errorf("%s is not live although it is available and its plugin is on", want.ID)
+		}
+		if !want.Available {
+			if row.Live {
+				t.Errorf("unavailable capability %s reports live", want.ID)
+			}
+			if row.Reason == "" {
+				t.Errorf("unavailable capability %s dropped the reason it is not delivered", want.ID)
+			}
+		}
+	}
+}
+
+// TestProfileApplyIsValidatedAndWhole: an unknown profile is refused before
+// anything moves, and applying the declared one turns on exactly the rules and
+// plugins its capabilities name — in the store AND in the daemon's own plugin
+// map, which is the map decideLocked compiles the running router from.
+func TestProfileApplyIsValidatedAndWhole(t *testing.T) {
+	c, err := NewCoreWithSettings(builtin.All(), builtin.Grants(),
+		filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatalf("NewCoreWithSettings: %v", err)
+	}
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, true)
+	}
+	if _, perr := c.handleProfileApply(json.RawMessage(`{"profile":"nope"}`)); perr == nil ||
+		perr.Code != ipc.ErrInvalid {
+		t.Fatalf("an unknown profile must be refused as invalid, got %v", perr)
+	}
+	if got := c.set.ActiveProfile(); got != "" {
+		t.Fatalf("a refused apply recorded profile %q", got)
+	}
+	for _, bad := range []string{`{`, `{"profile":""}`, `{"profile":"   "}`} {
+		if _, perr := c.handleProfileApply(json.RawMessage(bad)); perr == nil ||
+			perr.Code != ipc.ErrBadParams {
+			t.Errorf("payload %s must be a bad-params error, got %v", bad, perr)
+		}
+	}
+
+	// The user switched the Windows plugin off and one of its shortcuts off
+	// before pressing the card.
+	if _, perr := c.handlePluginSetEnabled(
+		json.RawMessage(`{"id":"windows-keyboard","enabled":false}`)); perr != nil {
+		t.Fatalf("plugin.setEnabled: %v", perr)
+	}
+	const off = "windows-keyboard.win-left-snap"
+	if _, rerr := c.handleSetRuleEnabled(
+		json.RawMessage(`{"ruleId":"` + off + `","enabled":false}`)); rerr != nil {
+		t.Fatalf("setRuleEnabled: %v", rerr)
+	}
+
+	res, rerr := c.handleProfileApply(json.RawMessage(`{"profile":"windows-11-experience"}`))
+	reply := decode[map[string]any](t, res, rerr)
+	if reply["profile"] != "windows-11-experience" {
+		t.Fatalf("apply reply=%v, want the applied profile echoed", reply)
+	}
+	// The reply counts the bundle's distinct ids, so three capabilities sharing
+	// one plugin read as one edit.
+	wantRules := map[string]bool{}
+	for _, p := range profiles.All() {
+		for _, cap := range p.Capabilities {
+			if !cap.Available {
+				continue
+			}
+			for _, id := range cap.RuleIDs {
+				if _, isRule := builtinRule(id); isRule {
+					wantRules[id] = true
+				}
+			}
+		}
+	}
+	if got := int(reply["rules"].(float64)); got != len(wantRules) {
+		t.Errorf("apply turned on %d rules, the bundle names %d", got, len(wantRules))
+	}
+	if got := int(reply["plugins"].(float64)); got != 1 {
+		t.Errorf("apply toggled %d plugins, want 1 (windows-keyboard)", got)
+	}
+	if !c.set.IsRuleEnabled(off) {
+		t.Errorf("%s is still off after applying the profile that names it", off)
+	}
+	if got := c.set.ActiveProfile(); got != "windows-11-experience" {
+		t.Errorf("stored active profile=%q after apply", got)
+	}
+	// The running plugin map moved too — a profile that saved to disk and left
+	// the daemon alone is the half-activated outcome the batch exists to stop.
+	list, lerr := c.handlePluginList(nil)
+	for _, row := range decodeRows[map[string]any](t, list, lerr) {
+		if row["id"] == "windows-keyboard" && row["enabled"] != true {
+			t.Errorf("windows-keyboard is %v in the running set after apply", row["enabled"])
+		}
+	}
+	// And the card reports itself active with its capabilities live.
+	cardRes, cardErr := c.handleCoreProfiles(nil)
+	card := decodeRows[wireProfileRow](t, cardRes, cardErr)[0]
+	if !card.Active {
+		t.Error("the card does not report the profile it just applied as active")
+	}
+	for _, row := range card.Capabilities {
+		if row.Available && !row.Live {
+			t.Errorf("capability %s is still not live after applying its profile", row.ID)
+		}
+	}
+}
+
+// TestOnboardingStateResolvesEveryChecklistRow: the wizard derives its steps
+// from live state, and every id the first-run checklist declares resolves to a
+// real readiness row — an id the daemon never reports renders as "Not checked"
+// with no reason, which on the first-run page is the difference between fixing
+// a permission and believing you fixed one.
+func TestOnboardingStateResolvesEveryChecklistRow(t *testing.T) {
+	c := testCore(t)
+	res, rerr := c.handleOnboardingState(nil)
+	state := decode[wireOnboardingRow](t, res, rerr)
+	if state.Completed {
+		t.Error("a fresh daemon reports the first run as finished")
+	}
+	if state.CurrentStep != "welcome" {
+		t.Errorf("current step=%q on a fresh daemon, want welcome", state.CurrentStep)
+	}
+	if len(state.Steps) != len(onboardingSteps) {
+		t.Fatalf("wizard has %d steps, the flow declares %d", len(state.Steps), len(onboardingSteps))
+	}
+	byID := map[string]readinessRow{}
+	for _, row := range state.Readiness {
+		byID[row.ID] = row
+	}
+	for _, id := range []string{"keyboard", "windows", "finder"} {
+		if _, ok := byID[id]; !ok {
+			t.Errorf("checklist item %q has no readiness row to resolve to", id)
+		}
+	}
+	// The rollup counts the rows it reports, so the header and the list cannot
+	// describe different states.
+	ready := 0
+	for _, row := range state.Readiness {
+		if row.Ready {
+			ready++
+		}
+	}
+	if state.Ready != ready || state.Total != len(state.Readiness) {
+		t.Errorf("rollup=%d/%d over %d rows", state.Ready, state.Total, len(state.Readiness))
+	}
+	steps := map[string]wireOnboardingStep{}
+	for _, s := range state.Steps {
+		if s.Done {
+			t.Errorf("step %q is done on a daemon that has done nothing", s.ID)
+		}
+		steps[s.ID] = s
+	}
+	// A step that is waiting says what to do, not just that it is waiting.
+	for _, id := range []string{"enable", "settings", "verify"} {
+		if steps[id].Detail == "" {
+			t.Errorf("step %q is not done and does not say why", id)
+		}
+	}
+
+	// A plugin switched on moves the wizard past the enable step, and the
+	// System Settings step now names the permission it is waiting on.
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, true)
+	}
+	res, rerr = c.handleOnboardingState(nil)
+	state = decode[wireOnboardingRow](t, res, rerr)
+	steps = map[string]wireOnboardingStep{}
+	for _, s := range state.Steps {
+		steps[s.ID] = s
+	}
+	if state.CurrentStep != "settings" {
+		t.Errorf("current step=%q with every plugin on and no tap, want settings", state.CurrentStep)
+	}
+	if !steps["enable"].Done {
+		t.Error("the enable step is not done with plugins switched on")
+	}
+	if steps["settings"].Done || steps["settings"].Detail == "" {
+		t.Errorf("settings step=%+v, want waiting with the reason stated", steps["settings"])
+	}
+
+	// The persisted flag ends the wizard: the user saying "I am finished" is
+	// the one thing here the daemon cannot re-derive, so it wins.
+	if cerr := c.set.SetOnboardingComplete(true); cerr != nil {
+		t.Fatalf("SetOnboardingComplete: %v", cerr)
+	}
+	res, rerr = c.handleOnboardingState(nil)
+	state = decode[wireOnboardingRow](t, res, rerr)
+	if !state.Completed || state.CurrentStep != "done" {
+		t.Errorf("completed run reports %v at step %q, want done", state.Completed, state.CurrentStep)
+	}
+	for _, s := range state.Steps {
+		if !s.Done {
+			t.Errorf("step %q is not done on a completed first run", s.ID)
+		}
+	}
+}
+
+// TestTracesExposeTheRecordedDetail: core.traces serves the columns
+// observe.SanitizeForDisplay flattens away — the stages, the physical event,
+// the focused app and the rules that lost — from the same recorded trace
+// core.eventLogs serves as a sentence.
+func TestTracesExposeTheRecordedDetail(t *testing.T) {
+	c := testCore(t)
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, true)
+	}
+	res, rerr := c.handleTraces(nil)
+	if rows := decodeRows[wireTraceRow](t, res, rerr); len(rows) != 0 {
+		t.Fatalf("a daemon that has decided nothing reports %d traces: %+v", len(rows), rows)
+	}
+	if _, kerr := c.handleKeyEvent(json.RawMessage(
+		`{"keyCode":67,"modifiers":1,"appId":"com.apple.Finder","appMode":"native"}`)); kerr != nil {
+		t.Fatalf("keyEvent: %v", kerr)
+	}
+	res, rerr = c.handleTraces(nil)
+	rows := decodeRows[wireTraceRow](t, res, rerr)
+	if len(rows) != 1 {
+		t.Fatalf("traces=%+v, want the one decision just made", rows)
+	}
+	row := rows[0]
+	const winner = "windows-keyboard.ctrl-c-copy"
+	if row.Winner != winner || row.Intent != "clipboard.copy" {
+		t.Fatalf("trace=%+v, want winner %q / clipboard.copy", row, winner)
+	}
+	// The physical event renders the way the matrix renders a rule's binding, so
+	// a recorded chord and the rule that claims it read alike.
+	if row.Event.Keys != "Ctrl+C" || row.Event.Source != "keyboard" || row.Event.KeyCode != 0x43 {
+		t.Errorf("event=%+v, want Ctrl+C from the keyboard", row.Event)
+	}
+	if row.Context.AppID != "com.apple.Finder" || row.Context.AppMode != "native" {
+		t.Errorf("context=%+v, want the focused app the decision was made in", row.Context)
+	}
+	if row.Decision != "REPLACE" {
+		t.Errorf("decision=%q, want the PASS/CONSUME/REPLACE vocabulary core.keyEvent serves", row.Decision)
+	}
+	// Losers is a list even when the decision was uncontested: null would be a
+	// missing value the page has to special-case.
+	if row.Losers == nil {
+		t.Error("losers encoded as null")
+	}
+	if _, perr := time.Parse(time.RFC3339, row.At); perr != nil {
+		t.Errorf("at=%q is not RFC3339: %v", row.At, perr)
+	}
+	stages := map[string]string{}
+	for _, s := range row.Stages {
+		stages[s.Stage] = s.Detail
+	}
+	for _, want := range []string{"event", "context", "rule", "intent", "result"} {
+		if stages[want] == "" {
+			t.Errorf("trace has no %q stage: %+v", want, row.Stages)
+		}
+	}
+	// Both views describe the same recorded trace, so the sentence and the
+	// columns cannot tell the user different stories.
+	logs, lerr := c.handleEventLogs(nil)
+	if lerr != nil {
+		t.Fatalf("eventLogs: %v", lerr)
+	}
+	lines, ok := logs.([]string)
+	if !ok || len(lines) != 1 || !strings.Contains(lines[0], winner) {
+		t.Errorf("core.eventLogs=%v, want the flattened %q", logs, winner)
+	}
+}
+
+// TestPluginMetaIsHonestWithoutAManifest: no manifest is loaded at runtime, so
+// there is no display name or version to report — the row says so instead of
+// the daemon prettifying a plugin id and stamping a version. The permissions are
+// not a guess: they are the grants the router authorizes.
+func TestPluginMetaIsHonestWithoutAManifest(t *testing.T) {
+	c := testCore(t)
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, true)
+	}
+	res, rerr := c.handlePluginMeta(nil)
+	rows := decodeRows[wirePluginMetaRow](t, res, rerr)
+	if len(rows) != len(builtin.BuiltinIDs) {
+		t.Fatalf("plugin meta has %d rows, %d plugins are registered", len(rows), len(builtin.BuiltinIDs))
+	}
+	grants := builtin.Grants()
+	for i, row := range rows {
+		if row.ID != builtin.BuiltinIDs[i] {
+			t.Errorf("row %d is %q, want registration order (%q)", i, row.ID, builtin.BuiltinIDs[i])
+		}
+		if row.Name != "" || row.Version != "" || row.Loaded {
+			t.Errorf("%s reports name=%q version=%q loaded=%v with no manifest behind it",
+				row.ID, row.Name, row.Version, row.Loaded)
+		}
+		if row.Reason == "" {
+			t.Errorf("%s says nothing about the missing manifest", row.ID)
+		}
+		want := make([]string, 0, len(grants[row.ID]))
+		for _, p := range grants[row.ID] {
+			want = append(want, string(p))
+		}
+		if strings.Join(row.Permissions, ",") != strings.Join(want, ",") {
+			t.Errorf("%s permissions=%v, want the grants the router authorizes: %v", row.ID, row.Permissions, want)
+		}
+	}
+}
+
+// TestConflictsRankThroughRuleResolve: the builtin table binds one rule per
+// chord, so the honest answer today is an empty list; and a collision is ranked
+// by the decision path's own call, with the winner first and the shadowed rule
+// named.
+func TestConflictsRankThroughRuleResolve(t *testing.T) {
+	c := testCore(t)
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, true)
+	}
+	res, rerr := c.handleConflicts(nil)
+	if rows := decodeRows[wireConflictRow](t, res, rerr); len(rows) != 0 {
+		t.Fatalf("core.conflicts invented %d conflicts: %+v", len(rows), rows)
+	}
+
+	// Two rules on Ctrl+Shift+C, plus one on a chord of its own.
+	mk := func(key uint32, id, plugin string, spec int, scope rule.Scope, prio int) event.CompiledRule {
+		return event.CompiledRule{
+			KeyCode: key, Modifiers: 1<<0 | 1<<1, RuleID: id, PluginID: plugin,
+			Specificity: spec, Scope: scope, Priority: prio,
+			Intent: intent.Intent{ID: "clipboard.copy", Version: 1},
+		}
+	}
+	rows := decodeRows[wireConflictRow](t, chordConflicts([]event.CompiledRule{
+		mk(0x43, "global.copy", "windows-keyboard", 1, rule.ScopeGlobal, rule.PriorityGlobal),
+		mk(0x43, "app.copy", "developer", 2, rule.ScopeApp, rule.PriorityApp),
+		mk(0x50, "solo.copy", "developer", 9, rule.ScopeApp, rule.PriorityApp),
+	}), nil)
+	if len(rows) != 1 {
+		t.Fatalf("one chord has two claimants, got %d conflict rows: %+v", len(rows), rows)
+	}
+	row := rows[0]
+	if row.Keys != "Ctrl+Shift+C" {
+		t.Errorf("keys=%q, want the contested chord the page highlights", row.Keys)
+	}
+	// The more specific rule wins, and the global one is named as shadowed —
+	// rule.Resolve is the router's own ranking, so the dialog and the keystroke
+	// cannot disagree.
+	if row.Winner != "app.copy" {
+		t.Errorf("winner=%q, want app.copy (the more specific rule)", row.Winner)
+	}
+	if len(row.Losers) != 1 || row.Losers[0] != "global.copy" {
+		t.Errorf("losers=%v, want [global.copy]", row.Losers)
+	}
+	if len(row.Rules) != 2 || row.Rules[0].RuleID != "app.copy" || row.Rules[1].RuleID != "global.copy" {
+		t.Errorf("claims=%+v, want the winner listed first", row.Rules)
+	}
+	if row.Rules[0].Plugin != "developer" || row.Rules[0].Action != "clipboard.copy" {
+		t.Errorf("winning claim=%+v, want the plugin and action it resolves to", row.Rules[0])
+	}
+	// A rule alone on its chord is not in any row.
+	for _, r := range row.Rules {
+		if r.RuleID == "solo.copy" {
+			t.Error("a rule with no competitor is reported as a conflict")
 		}
 	}
 }
