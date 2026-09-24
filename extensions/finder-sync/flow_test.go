@@ -53,6 +53,9 @@ func TestMenuTableContract(t *testing.T) {
 }
 
 // TestReferenceMatrix: menu items × file/folder/empty, traces replayable.
+// One row per findermenu item, each in a context the item is actually
+// offered in — a row dispatched outside its contexts would pass a loop that
+// only checks the happy path elsewhere.
 func TestReferenceMatrix(t *testing.T) {
 	type row struct {
 		item  string
@@ -60,18 +63,13 @@ func TestReferenceMatrix(t *testing.T) {
 		paths []string
 	}
 	rows := []row{
-		{"newText", CtxEmpty, nil},
+		{"newFile", CtxEmpty, nil},
 		{"newFolder", CtxEmpty, nil},
 		{"copyPath", CtxFile, []string{"/tmp/a.txt"}},
+		{"copyRelativePath", CtxFile, []string{"/tmp/a.txt"}},
 		{"openTerminal", CtxFolder, []string{"/tmp/d"}},
 		{"openEditor", CtxFile, []string{"/tmp/a.txt"}},
-		{"cut", CtxFile, []string{"/tmp/a.txt"}},
-		{"copy", CtxFile, []string{"/tmp/a.txt"}},
-		{"paste", CtxEmpty, nil},
-		{"rename", CtxFile, []string{"/tmp/a.txt"}},
-		{"getInfo", CtxFolder, []string{"/tmp/d"}},
-		{"trash", CtxFile, []string{"/tmp/a.txt"}},
-		{"compress", CtxFolder, []string{"/tmp/d"}},
+		{"duplicateWithName", CtxFolder, []string{"/tmp/d"}},
 	}
 	if len(rows) != len(MenuTable) {
 		t.Fatalf("rows=%d, want full %d-item table", len(rows), len(MenuTable))

@@ -24,8 +24,8 @@ import (
 
 func TestBuildMenu(t *testing.T) {
 	m, err := BuildMenu([]MenuEntry{
-		{Title: "New Markdown", Action: "createFile", Ext: "md"},
-		{Title: "Customize…", Action: "openPrefs"},
+		{Title: "New Markdown", Action: Verb("newFile"), Ext: "md"},
+		{Title: "Copy Path", Action: Verb("copyPath")},
 	})
 	if err != nil {
 		t.Fatalf("BuildMenu: %v", err)
@@ -37,8 +37,8 @@ func TestBuildMenu(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Lookup(0): %v", err)
 	}
-	if e.Title != "New Markdown" || e.Action != "createFile" {
-		t.Fatalf("Lookup(0)=%+v, want New Markdown/createFile", e)
+	if e.Title != "New Markdown" || e.Action != Verb("newFile") {
+		t.Fatalf("Lookup(0)=%+v, want New Markdown/%s", e, Verb("newFile"))
 	}
 	if _, err := m.Lookup(99); err == nil {
 		t.Fatal("Lookup(99): want out-of-range error, got nil")
@@ -54,7 +54,7 @@ func TestBuildMenu(t *testing.T) {
 	if empty.Len() != 1 {
 		t.Fatalf("empty menu Len=%d, want 1 guide row", empty.Len())
 	}
-	if _, err := BuildMenu([]MenuEntry{{Title: "", Action: "createFile"}}); err == nil {
+	if _, err := BuildMenu([]MenuEntry{{Title: "", Action: Verb("newFile")}}); err == nil {
 		t.Fatal("empty title: want validation error, got nil")
 	}
 }
@@ -65,12 +65,19 @@ func TestClosedVerbSet(t *testing.T) {
 	if _, err := BuildMenu([]MenuEntry{{Title: "Evil", Action: "/bin/sh -c pwn"}}); err == nil {
 		t.Fatal("menu with code action: want rejection, got nil")
 	}
-	if _, err := Send(sockPath(t), Request{Action: "eval", TargetDir: "/tmp"}); err == nil || IsDaemonDown(err) {
+	if _, err := Send(sockPath(t), Request{Method: "eval", Params: Params{Dir: "/tmp"}}); err == nil || IsDaemonDown(err) {
 		t.Fatalf("Send(eval): want closed-set rejection, got %v", err)
+	}
+	// The row id is not the method. "newFile" is a row in the menu table;
+	// the call the daemon answers is finder.createFile, and sending the id
+	// would be a "no such method" the user sees as a dead menu item.
+	if _, err := Send(sockPath(t), Request{Method: "newFile", Params: Params{Dir: "/tmp"}}); err == nil || IsDaemonDown(err) {
+		t.Fatalf("Send(newFile): want closed-set rejection, got %v", err)
 	}
 }
 
-// stubDaemon serves one request→response on socketPath, then closes.
+// stubDaemon serves one request→response on socketPath, then closes. The
+// reply is a real JSON-RPC result, so the client has to decode one.
 func stubDaemon(t *testing.T, socketPath string, got chan<- Request, errCh chan<- string) {
 	t.Helper()
 	_ = os.Remove(socketPath)
@@ -92,7 +99,11 @@ func stubDaemon(t *testing.T, socketPath string, got chan<- Request, errCh chan<
 		return
 	}
 	got <- req
-	_ = json.NewEncoder(conn).Encode(Response{OK: true})
+	_ = json.NewEncoder(conn).Encode(Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  json.RawMessage(`{"items":[]}`),
+	})
 }
 
 func sockPath(t *testing.T) string {
@@ -108,7 +119,11 @@ func TestSendRoundTrip(t *testing.T) {
 	var resp Response
 	var err error
 	for i := 0; i < 50; i++ {
-		resp, err = Send(path, Request{Action: "createFile", TargetDir: "/tmp", Ext: "md", BaseName: "Untitled"})
+		resp, err = Send(path, Request{
+			Method: Verb("newFile"),
+			Params: Params{Dir: "/tmp", Ext: "md", BaseName: "Untitled"},
+			ID:     1,
+		})
 		if err == nil {
 			break
 		}
@@ -120,13 +135,29 @@ func TestSendRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Send after retries: %v", err)
 	}
-	if !resp.OK {
-		t.Fatalf("resp=%+v, want OK", resp)
+	if err := resp.Err(); err != nil {
+		t.Fatalf("resp=%+v, want no refusal", resp)
+	}
+	var payload struct {
+		Items []json.RawMessage `json:"items"`
+	}
+	if err := resp.Decode(&payload); err != nil {
+		t.Fatalf("Decode: %v", err)
 	}
 	select {
 	case req := <-got:
-		if req.Action != "createFile" || req.TargetDir != "/tmp" || req.Ext != "md" {
-			t.Fatalf("stub got %+v, want createFile /tmp md", req)
+		want := Verb("newFile")
+		if req.Method != want || req.JSONRPC != "2.0" {
+			t.Fatalf("stub got %+v, want jsonrpc 2.0 method %s", req, want)
+		}
+		// finder.createFile reads dir/ext/baseName — a create names the
+		// folder it lands in, not a path list.
+		if req.Params.Dir != "/tmp" || req.Params.Ext != "md" ||
+			req.Params.BaseName != "Untitled" {
+			t.Fatalf("stub got params %+v, want dir=/tmp ext=md baseName=Untitled", req.Params)
+		}
+		if req.ID != 1 {
+			t.Fatalf("stub got id %d, want 1 (JSON-RPC needs an id)", req.ID)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("stub daemon never received the request")
@@ -136,7 +167,8 @@ func TestSendRoundTrip(t *testing.T) {
 func TestSendDaemonDown(t *testing.T) {
 	// Nothing listening: Send must return the typed DaemonDown, fast.
 	start := time.Now()
-	_, err := Send(filepath.Join(t.TempDir(), "no-daemon.sock"), Request{Action: "createFile", TargetDir: "/tmp"})
+	_, err := Send(filepath.Join(t.TempDir(), "no-daemon.sock"),
+		Request{Method: Verb("newFile"), Params: Params{Dir: "/tmp"}, ID: 1})
 	if !IsDaemonDown(err) {
 		t.Fatalf("want *DaemonDown, got %v", err)
 	}

@@ -7,25 +7,40 @@
 // per menu-open, resolve by index on action.
 package findersync
 
-import "fmt"
+import (
+	"fmt"
+
+	"crossos/core/pkg/findermenu"
+)
 
 // MenuEntry is one row in the Finder context/toolbar menu.
 type MenuEntry struct {
 	// Title is the rendered label (e.g. "New Markdown").
 	Title string
-	// Action is the request name sent to the daemon (e.g. "createFile").
-	// It is a fixed verb from a closed set — never code, never a path to
-	// execute (§3.7: requests only).
+	// Action is the JSON-RPC method sent to the daemon on click — one of the
+	// closed set in DaemonMethods, never code, never a path to execute
+	// (§3.7: requests only).
 	Action string
 	// Ext is the file extension the daemon creates (e.g. "md").
 	Ext string
 }
 
-// allowedActions is the closed verb set the extension may request.
-var allowedActions = map[string]bool{
-	"createFile": true,
-	"openPrefs":  true,
-}
+// allowedActions is the closed set of action verbs the extension may send:
+// the seven menu rows under the names the daemon actually serves them. It is
+// derived rather than hand-listed, because a hand-kept second list is how an
+// appex ends up offering a verb the daemon dropped — and that failure looks
+// like a menu item that does nothing on click, with nothing in any log naming
+// the row that drifted. The menu query is NOT an action, so
+// MethodMenuEntries is absent here and present only in DaemonMethods.
+var allowedActions = func() map[string]bool {
+	out := make(map[string]bool, len(findermenu.Menu))
+	for _, item := range findermenu.Menu {
+		if verb := Verb(item.ID); verb != "" {
+			out[verb] = true
+		}
+	}
+	return out
+}()
 
 // Menu is an immutable snapshot built at menu-open time.
 type Menu struct {
@@ -37,7 +52,7 @@ type Menu struct {
 // enable a type instead of showing a dead empty menu).
 func BuildMenu(entries []MenuEntry) (Menu, error) {
 	if len(entries) == 0 {
-		return Menu{entries: []MenuEntry{{Title: "Enable a file type in CrossOS…", Action: "openPrefs"}}}, nil
+		return Menu{entries: []MenuEntry{{Title: "Enable a file type in CrossOS…", Action: MethodMenuEntries}}}, nil
 	}
 	for i, e := range entries {
 		if e.Title == "" {

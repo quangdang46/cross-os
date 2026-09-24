@@ -9,6 +9,8 @@
 package adapter
 
 import (
+	"errors"
+
 	"crossos/core/pkg/event"
 	"crossos/core/pkg/pluginapi"
 )
@@ -71,12 +73,85 @@ type KeyboardTap interface {
 	DecideOne(ev event.Event, ctx event.FastContext) KeyAction
 }
 
+// WindowRow is one window as the physical plane describes it. Every field
+// comes from a single batched WindowServer answer, so listing a screenful of
+// them costs the same as listing one and a busy application cannot delay the
+// answer. OnScreen and Minimized are separate because they answer different
+// questions: an ordered-out window may be minimized, off-Space, or closing.
+type WindowRow struct {
+	// ID is the CGWindowID. It identifies a window to the WindowServer and
+	// nothing else — there is no route from it to an AX element, so the
+	// bridge treats it as a name, never a handle.
+	ID  uint32
+	PID int
+	// BundleID is the owning application's. Empty for a process with no
+	// bundle, which is a process no rule can be scoped to.
+	BundleID string
+	// Title is never fabricated. A window the system will not name is not a
+	// row, because a row with a placeholder title is indistinguishable from
+	// a real one in the list the user is choosing from.
+	Title string
+	// X, Y, W, H are screen points.
+	X, Y, W, H float64
+	OnScreen   bool
+	Minimized  bool
+}
+
+// minimizedFrom decodes one batched row into a minimized flag. The ordered-in
+// flag alone cannot say it: a window on another Space is ordered out too, and
+// the two are told apart by geometry — minimize collapses the window's frame,
+// an off-Space window keeps it. Both inputs are fields of the same batched
+// answer the row already carries, which is the whole point: the alternative is
+// a kAXMinimized read, a call into the owning application that stalls for as
+// long as that application is busy and cannot be bounded from outside.
+func minimizedFrom(onScreen bool, w, h float64) bool {
+	return !onScreen && (w <= 0 || h <= 0)
+}
+
+// isSurface reports a window that is ordered in and occupies no area. The
+// WindowServer marks these ordered in — an authentication helper, a
+// notification anchor — and they carry a real window id, a real pid and
+// often a real title, so nothing about them is obviously wrong. What makes
+// them not windows is that there is no area to point at, aim a move at, or
+// raise, and a row the user cannot aim at is the fabricated row this list
+// exists to avoid.
+//
+// A minimized window has the same empty geometry and is deliberately not one
+// of these: it is ordered OUT, and the list keeps it so a rule has something
+// to name. The ordered-in flag is the whole difference, which is why both
+// predicates read it.
+func isSurface(onScreen bool, w, h float64) bool {
+	return onScreen && (w <= 0 || h <= 0)
+}
+
+// errWindowGone reports a window id the physical plane no longer lists. It is
+// not errZeroWindow: "no such window" and "no id was given" send the caller to
+// different places, and the stage log is how the difference gets noticed.
+var errWindowGone = errors.New("adapter: window id is not on this machine")
+
 // WindowQuery is the context seam (spike C product path): focused query +
 // move/resize. Permission-DENIED returns ErrPermissionDenied (typed, fast —
 // never a hang); callers serve stale/empty cache on it.
 type WindowQuery interface {
 	Focused() (FocusedWindow, error)
 	MoveResize(m MoveResize) error
+}
+
+// WindowLister is the enumeration + focus seam. It is a separate interface
+// from WindowQuery because the three WindowQuery implementations live in
+// files split by GOOS, and a method added to that interface has to be added
+// to all three by hand — a seam whose implementations can only be edited from
+// three places is a seam that rots in the one the author is not looking at.
+// One type per GOOS, each in the file that already owns that platform, is the
+// same split the package uses everywhere else.
+type WindowLister interface {
+	// ListWindows returns one row per on-screen normal-layer window with a
+	// non-empty title. It never returns a partially-filled row: a window that
+	// cannot be named or attributed is absent rather than a zero value.
+	ListWindows() ([]WindowRow, error)
+	// Focus brings the window named by id to the front. Focusing the window
+	// already at the front is nil and touches no other application.
+	Focus(id uint32) error
 }
 
 // UIPIStatus reports Windows injection reachability (spike B product path):

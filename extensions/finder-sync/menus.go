@@ -1,23 +1,23 @@
-// Finder context menus: §6.3 menu table as declarative menus whose actions
-// execute as NATIVE capabilities (bead cross-os-vbl.2).
+// Finder context menus: the seven verbs the daemon owns, and the validation
+// + trace this package adds before a click leaves the appex (bead
+// cross-os-vbl.2).
 //
-// Plan: COMPREHENSIVE_PLAN.md §6.3 (12 menu items × file/folder/empty
-// contexts), §3.6 RegisterMenu (normative path), §3.12 registry,
-// §9.10 files row (BEHAVIOR only — ideas, not files; MPL file-level
-// copyleft on their side, so nothing copied).
+// The table itself is NOT declared here any more. It lives in
+// crossos/core/pkg/findermenu, which the daemon serves from
+// finder.menuEntries, so the menu Finder renders and the menu the daemon
+// executes cannot be two lists that drift. What stays here is the part the
+// extension alone owns: rejecting a bad path, and recording the stage trace.
+//
+// findermenu's own header argues the extension must keep a private copy
+// because the dependency does not run the other way. That is backwards for
+// this edge: crossos/finder_sync already requires crossos/core, and core
+// requires nothing from the extension, so importing the table the daemon owns
+// is the one direction that works. The copy is what let the appex and the
+// daemon disagree about which rows exist.
 //
 // Authority: menus DECLARE; the ActionDispatcher validates requests
 // against local config (path checks, max path count, §6.3 Security).
-// Shell/process actions are opt-in Level B only, never the default.
 // Every execution appends Recorder-bound stage traces (feeds vbl.5).
-//
-// Registration (§3.6 normative path): RegisterMenus converts the static
-// MenuTable into pluginapi.MenuDef rows on a caller-supplied Registry.
-// The static table is the source of truth today; vbl.3 (pack loader)
-// replaces the SOURCE (packs → MenuDefs) without changing this path.
-// (review: cross-os-ed — the old TODO had vbl.2 and vbl.3 pointing at
-// each other; the criterion says "registered via RegisterMenu", not
-// "sourced from packs", so this closes the criterion standalone.)
 package findersync
 
 import (
@@ -25,81 +25,94 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"crossos/core/pkg/findermenu"
 )
 
-// SelectionCtx is the Finder selection context a menu item appears in.
-type SelectionCtx int
+// SelectionCtx is a findermenu context. Aliased rather than re-declared: an
+// int enum declared on both sides carried each package's own ordering, and
+// the appex then had to guess which ordering the wire strings came from. The
+// core type is string-valued, so the appex sends the same names it declares.
+type SelectionCtx = findermenu.Context
 
 const (
-	// CtxFile: files selected (copy/cut/paste/rename/info/trash/compress...).
-	CtxFile SelectionCtx = iota
+	// CtxFile: files selected (copy/duplicate/open…).
+	CtxFile = findermenu.ContextFile
 	// CtxFolder: folders selected.
-	CtxFolder
+	CtxFolder = findermenu.ContextFolder
 	// CtxEmpty: background / empty-space right-click (New > ...).
-	CtxEmpty
+	CtxEmpty = findermenu.ContextEmpty
 )
 
-// MaxPathCount caps multi-selection dispatch (§6.3 Security).
-const MaxPathCount = 100
+// MaxPathCount caps a multi-selection dispatch (§6.3 Security). The number
+// belongs to the daemon's table because a selection the keyboard rules
+// refuse must be one the menu refuses too.
+const MaxPathCount = findermenu.MaxPathCount
 
-// MenuItem is one §6.3 row: declarative, native capability only.
-type MenuItem struct {
-	ID         string // stable id, e.g. "newText"
-	Title      string // e.g. "New > Text Document"
-	Capability string // native capability, e.g. filesystem.createFile
-	Contexts   []SelectionCtx
-	// NeedsPaths: item requires ≥1 selected path (hidden on CtxEmpty).
-	NeedsPaths bool
+// MenuItem is one declarative row: native capability only.
+type MenuItem = findermenu.Item
+
+// MenuTable is the seven rows the daemon owns and serves. It is a reference,
+// not a copy — the daemon serialises these exact values.
+var MenuTable = findermenu.Menu
+
+// MethodMenuEntries is the menu query the appex sends at menu-open.
+const MethodMenuEntries = "finder.menuEntries"
+
+// daemonVerbs maps each row id to the method that fires it.
+//
+// This is a table, not "finder." + id, and the two differ for both New rows:
+// the row is newFile, the call is finder.createFile. The daemon spells its
+// method names out in finderMenuHandlers for the same reason — the table is
+// a menu, the method names are a protocol, and a row id is neither. Deriving
+// the name yields methods the daemon answers "no such method", which surfaces
+// as a menu item that does nothing on click.
+var daemonVerbs = map[string]string{
+	"newFile":           "finder.createFile",
+	"newFolder":         "finder.createFolder",
+	"copyPath":          "finder.copyPath",
+	"copyRelativePath":  "finder.copyRelativePath",
+	"openTerminal":      "finder.openTerminal",
+	"openEditor":        "finder.openEditor",
+	"duplicateWithName": "finder.duplicateWithName",
 }
 
-// MenuTable is the §6.3 context-menu table (12 items).
-var MenuTable = []MenuItem{
-	{ID: "newText", Title: "New > Text Document", Capability: "filesystem.createFile", Contexts: []SelectionCtx{CtxEmpty, CtxFolder}},
-	{ID: "newFolder", Title: "New > Folder", Capability: "filesystem.createFolder", Contexts: []SelectionCtx{CtxEmpty, CtxFolder}},
-	{ID: "copyPath", Title: "Copy as Path", Capability: "clipboard.copyPath", Contexts: []SelectionCtx{CtxFile, CtxFolder}, NeedsPaths: true},
-	{ID: "openTerminal", Title: "Open in Terminal", Capability: "terminal.openAt", Contexts: []SelectionCtx{CtxFile, CtxFolder, CtxEmpty}},
-	{ID: "openEditor", Title: "Open in Editor", Capability: "app.open", Contexts: []SelectionCtx{CtxFile, CtxFolder}},
-	{ID: "cut", Title: "Cut", Capability: "clipboard.copy", Contexts: []SelectionCtx{CtxFile, CtxFolder}, NeedsPaths: true},
-	{ID: "copy", Title: "Copy", Capability: "clipboard.copy", Contexts: []SelectionCtx{CtxFile, CtxFolder}, NeedsPaths: true},
-	{ID: "paste", Title: "Paste", Capability: "clipboard.write", Contexts: []SelectionCtx{CtxFile, CtxFolder, CtxEmpty}},
-	{ID: "rename", Title: "Rename (F2)", Capability: "app.open", Contexts: []SelectionCtx{CtxFile, CtxFolder}, NeedsPaths: true},
-	{ID: "getInfo", Title: "Get Info", Capability: "app.open", Contexts: []SelectionCtx{CtxFile, CtxFolder}, NeedsPaths: true},
-	{ID: "trash", Title: "Move to Trash", Capability: "file.moveToTrash", Contexts: []SelectionCtx{CtxFile, CtxFolder}, NeedsPaths: true},
-	{ID: "compress", Title: "Compress", Capability: "filesystem.createFile", Contexts: []SelectionCtx{CtxFile, CtxFolder}, NeedsPaths: true},
-}
+// Verb is the daemon method a row's action is sent as, or "" for a row the
+// daemon has no verb for. An empty Verb is a menu row with nothing behind it,
+// so TestActionVerbsAreDaemonMethods fails rather than letting it ship.
+func Verb(id string) string { return daemonVerbs[id] }
 
-// ForContext returns the items visible in ctx (empty-selection items never
-// require paths; path items hide on CtxEmpty).
-func ForContext(ctx SelectionCtx) []MenuItem {
-	var out []MenuItem
-	for _, m := range MenuTable {
-		for _, c := range m.Contexts {
-			if c == ctx {
-				out = append(out, m)
-				break
-			}
-		}
+// DaemonMethods is every method the appex may call — the menu query plus one
+// action verb per row. ipc.Send validates against this rather than a private
+// verb list, so the closed set the extension refuses to invent IS the daemon's
+// own method list: a method the daemon drops becomes uncallable here without
+// anyone editing a second list, and a name the daemon never had is refused
+// before the socket is dialled.
+var DaemonMethods = func() map[string]bool {
+	out := make(map[string]bool, len(daemonVerbs)+1)
+	out[MethodMenuEntries] = true
+	for _, verb := range daemonVerbs {
+		out[verb] = true
 	}
 	return out
-}
+}()
+
+// ForContext returns the items visible in ctx. A fresh slice — the caller
+// renders it and the table is shared by every request.
+func ForContext(ctx SelectionCtx) []MenuItem { return findermenu.ForContext(ctx) }
 
 // Dispatch validates a menu execution (§6.3 Security) and returns the
 // capability invocation + trace stages. Validation FIRST (paths, count,
 // context fit); the trace records event → action → result for vbl.5.
-// Native-only gate: the MenuTable carries capability IDs only (no shell
-// strings exist at dispatch time), so shell-by-default is impossible by
+// Native-only gate: the rows carry capability IDs only (no shell strings
+// exist at dispatch time), so shell-by-default is impossible by
 // construction; TestMenuTableCoverage pins the table side. Dispatch's job
 // is validation + tracing, not gate-keeping a parameter it never takes.
 // (review: cross-os-ed — the old comment overclaimed the gate lives here.)
 func Dispatch(itemID string, ctx SelectionCtx, paths []string) (capability string, params map[string]string, stages []string, err error) {
 	stages = append(stages, "event: menu="+itemID)
-	var item *MenuItem
-	for i := range MenuTable {
-		if MenuTable[i].ID == itemID {
-			item = &MenuTable[i]
-		}
-	}
-	if item == nil {
+	item, ok := findermenu.Lookup(itemID)
+	if !ok {
 		return "", nil, stages, fmt.Errorf("menu %q: unknown item", itemID)
 	}
 	allowed := false
