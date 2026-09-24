@@ -1,0 +1,20 @@
+CrossOS draws its window-switcher kernel from alt-tab-macos.
+
+alt-tab-macos — Copyright (c) lwouis and the alt-tab-macos contributors — GPL-3.0
+licence (LICENCE.md at the pinned commit; the project declares no per-file
+copyright header and its holder list is docs/contributors.md).
+Source: https://github.com/lwouis/alt-tab-macos
+Pinned at: 1cfb7e1df05f2cb87e0cc88f490de97d3e51b753 (v11.7.0)
+Per-file attribution: see ATTRIBUTION.md.
+
+No alt-tab-macos source code is vendored. This is a LEARN-ONLY reference: no
+file in this directory, and no file anywhere in CrossOS, is a copy, a
+transliteration or a partial extract of the GPL-3.0 project, and none is derived
+from its licence text. CrossOS holds no AltTab licence file either — the licence
+is named, not shipped. The reference informed the shape of the switcher kernel
+only: which plane owns a fact, when a window list is read, where the default
+highlight lands, and when a highlight becomes a commitment. Every line of it is a
+structural port recorded in ATTRIBUTION.md.
+
+alt-tab-macos is not a dependency. It is not built, not linked and not required to
+build, test or ship CrossOS.
