@@ -217,9 +217,22 @@ const (
 // UIContribution is the ONLY way plugin UI reaches the shell — declared at
 // Register() time, rendered by the shell from schema, never by plugin code.
 type UIContribution struct {
-	ID         string // "<pluginID>.<contribID>", namespaced
-	Location   UILocation
-	Title      string
+	ID       string // "<pluginID>.<contribID>", namespaced
+	Location UILocation
+	Title    string
+	// Group is the nav section a page belongs to ("home", "shortcuts",
+	// "activity", …). Pages are discovered, not listed, so the group is the
+	// only thing that tells the nav where a page belongs; an empty group is
+	// a page that sits on its own.
+	Group string
+	// Order is a page's position in the nav. It is explicit rather than
+	// derived because the order is a product decision — "Home first" is not
+	// something a title comparison can be asked for — and a contribution is
+	// the one place that decision can be written down. Pages sharing a Group
+	// take consecutive Orders, so a group is served as one run.
+	// Ties break on the first-run flag and then the id, so contributions
+	// that all left Order at zero still arrive in a stable order.
+	Order      int
 	Schema     json.RawMessage // declarative form: checkbox/select/slider/button/actions
 	Visibility string          // condition, e.g. "plugin.enabled && platform == macOS"
 	Actions    []string        // capabilities the UI may invoke (permission-checked)

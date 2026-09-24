@@ -41,12 +41,143 @@ func pageByID(t *testing.T, h *Host, id string) Page {
 func TestAllPagesDiscovered(t *testing.T) {
 	h := NewHost()
 	registerAll(t, h)
-	want := []string{"core.safety", "core.about", "core.plugins", "core.activity", "core.keyboard", "core.windows", "core.schemaHelp", "core.shortcuts", "core.onboarding", "core.finder"}
-	if len(h.Pages()) != len(want) {
-		t.Fatalf("pages=%d, want %d", len(h.Pages()), len(want))
+	// The served order, frozen. This is the product's navigation: Home and
+	// Profiles, the shortcut surfaces, Explorer, the two activity surfaces,
+	// then the advanced group. It is written out rather than derived so a
+	// page that quietly changes its Order — or a group that starts sorting
+	// somewhere surprising — fails here instead of shipping a new nav.
+	//
+	// Onboarding is not in this list. On a fresh profile it LEADS (see
+	// TestFirstRunLandingGate), which is the one thing that makes an
+	// otherwise-ordered list wrong to freeze on its own.
+	want := []struct {
+		id    string
+		group string
+		order int
+	}{
+		{"core.home", "home", 0},
+		{"core.profiles", "home", 10},
+		{"core.keyboard", "shortcuts", 20},
+		{"core.windows", "shortcuts", 30},
+		{"core.shortcuts", "shortcuts", 40},
+		{"core.finder", "shortcuts", 50},
+		{"core.activity", "activity", 60},
+		{"core.observe", "activity", 70},
+		{"core.extensions", "advanced", 80},
+		{"core.schemaHelp", "advanced", 90},
+		{"core.safety", "advanced", 100},
+		{"core.about", "advanced", 110},
 	}
-	for _, id := range want {
-		pageByID(t, h, id)
+	pages := h.Pages()
+	if len(pages) != len(want)+1 {
+		t.Fatalf("pages=%d, want %d (+ the first-run page)", len(pages), len(want)+1)
+	}
+	for _, w := range want {
+		p := pageByID(t, h, w.id)
+		if p.Group != w.group || p.Order != w.order {
+			t.Fatalf("page %s is group %q order %d, want group %q order %d", w.id, p.Group, p.Order, w.group, w.order)
+		}
+	}
+	// The group+order fields are what the nav sorts on, so they have to
+	// agree with the served position — a page that is third in the list but
+	// declares order 90 would render correctly today and reorder itself the
+	// first time a second registry registered.
+	for i, w := range want {
+		if pages[i+1].ID != w.id {
+			t.Fatalf("served[%d]=%s, want %s (the frozen nav order)", i+1, pages[i+1].ID, w.id)
+		}
+	}
+}
+
+// TestFirstRunLandingGate pins the one ordering rule that depends on state:
+// a fresh profile opens the wizard, and a profile that has finished
+// onboarding does not. Both halves are asserted because the failure mode is
+// asymmetric — a wizard that never leads strands someone at Home with no
+// setup, and a wizard that leads forever is a Welcome page in the way.
+func TestFirstRunLandingGate(t *testing.T) {
+	h := NewHost()
+	registerAll(t, h)
+
+	first := h.Pages()[0]
+	if first.ID != "core.onboarding" {
+		t.Fatalf("fresh profile opens %s, want core.onboarding", first.ID)
+	}
+	if !first.FirstRun {
+		t.Fatal("core.onboarding must be discovered as the first-run page")
+	}
+
+	h.OnboardingComplete(true)
+	after := h.Pages()[0]
+	if after.ID == "core.onboarding" {
+		t.Fatal("the first-run page must stop leading once onboarding is done")
+	}
+	if after.ID != "core.home" {
+		t.Fatalf("after onboarding the nav opens %s, want core.home", after.ID)
+	}
+	// The flag stops deciding, but the page is still there — a person who
+	// wants to re-run the checklist has to be able to find it.
+	if pageByID(t, h, "core.onboarding").ID != "core.onboarding" {
+		t.Fatal("onboarding page must survive onboarding")
+	}
+}
+
+// TestFirstRunAndVisibilityHaveReaders pins the two fields the Host used to
+// carry without reading. A contribution that declares firstRun and a
+// visibility condition must arrive on the Page, or the nav has nothing to
+// gate the landing page or the controls on.
+func TestFirstRunAndVisibilityHaveReaders(t *testing.T) {
+	h := NewHost()
+	registerAll(t, h)
+	for _, p := range h.Pages() {
+		if p.Visibility == "" {
+			t.Fatalf("page %s: empty Visibility — the contribution's condition never reached the shell", p.ID)
+		}
+		if p.ID == "core.onboarding" && !p.FirstRun {
+			t.Fatal("core.onboarding: firstRun marker in the schema was not read")
+		}
+		if p.ID != "core.onboarding" && p.FirstRun {
+			t.Fatalf("page %s claims firstRun; only the wizard may", p.ID)
+		}
+	}
+}
+
+// TestOrderBeatsAlphabet pins the sort the alphabetical one used to hide:
+// core.about sorted first because "about" < "safety", which is not a
+// navigation anybody chose. Group/Order is the declared answer, and it has to
+// win over the id.
+func TestOrderBeatsAlphabet(t *testing.T) {
+	h := NewHost()
+	registerAll(t, h)
+	h.OnboardingComplete(true)
+	first := h.Pages()[0]
+	if first.ID == "core.about" {
+		t.Fatal("the nav is back to alphabetical order — core.about cannot lead")
+	}
+	if first.Order > 10 {
+		t.Fatalf("nav leads with order %d (%s), want the lowest declared order", first.Order, first.ID)
+	}
+}
+
+// TestNavGroupsAreContiguous pins that pages sharing a group are served
+// together. A nav that renders one group heading per page is a page per
+// group, which is the thing the Group field exists to prevent.
+func TestNavGroupsAreContiguous(t *testing.T) {
+	h := NewHost()
+	registerAll(t, h)
+	h.OnboardingComplete(true)
+	seen := map[string]bool{}
+	previous := ""
+	for _, p := range h.Pages() {
+		if p.Group == "" {
+			t.Fatalf("page %s has no group", p.ID)
+		}
+		if p.Group != previous {
+			if seen[p.Group] {
+				t.Fatalf("group %q appears in two runs; pages sharing a group must be served together", p.Group)
+			}
+			seen[p.Group] = true
+			previous = p.Group
+		}
 	}
 }
 
@@ -74,9 +205,9 @@ func TestNoTrialLiteral(t *testing.T) {
 	}
 }
 
-func TestPluginsPageNoMarketplace(t *testing.T) {
+func TestExtensionsPageNoMarketplace(t *testing.T) {
 	for _, p := range CorePages() {
-		if p.ID != "core.plugins" {
+		if p.ID != "core.extensions" {
 			continue
 		}
 		s := strings.ToLower(string(p.Schema))
@@ -85,15 +216,87 @@ func TestPluginsPageNoMarketplace(t *testing.T) {
 		// contains the word "marketplace".
 		for _, banned := range []string{`"kind":"marketplace"`, `"kind":"remotebrowse"`, `"kind":"gitregistry"`, "remote registry", "browse remote plugins"} {
 			if strings.Contains(s, banned) {
-				t.Fatalf("plugins page contains marketplace surface %q (hard gate)", banned)
+				t.Fatalf("extensions page contains marketplace surface %q (hard gate)", banned)
 			}
 		}
 		if !strings.Contains(s, "nomarketplace") {
-			t.Fatal("plugins page must carry the noMarketplace marker")
+			t.Fatal("extensions page must carry the noMarketplace marker")
 		}
 		return
 	}
-	t.Fatal("core.plugins page missing")
+	t.Fatal("core.extensions page missing")
+}
+
+// TestExtensionsNaming pins the split the product asked for: "Extensions" is
+// what the person reads, "Plugin" stays the technical term underneath. Both
+// halves are asserted because the failure is quiet — a page called
+// "Extensions" whose body still says "Plugins" is a half-rename nobody
+// notices until a support question arrives.
+func TestExtensionsNaming(t *testing.T) {
+	p := ExtensionsPage()
+	if p.Title != "Extensions" {
+		t.Fatalf("title=%q, want Extensions", p.Title)
+	}
+	if p.ID != "core.extensions" {
+		t.Fatalf("id=%q, want core.extensions", p.ID)
+	}
+	s := string(p.Schema)
+	// The wire keeps the technical vocabulary: the source, the capability
+	// ids and the note all still say plugin.
+	for _, want := range []string{"core:plugins", "plugin.enable", "plugin.disable", "plugin.installDisk"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("extensions schema lost the technical term %q", want)
+		}
+	}
+	// The user-facing copy must not call an extension a plugin.
+	var body struct {
+		Description string `json:"description"`
+		Controls    []struct {
+			Kind string `json:"kind"`
+			Text string `json:"text"`
+		} `json:"controls"`
+	}
+	if err := json.Unmarshal(p.Schema, &body); err != nil {
+		t.Fatalf("schema not JSON: %v", err)
+	}
+	if strings.Contains(strings.ToLower(body.Description), "plugin") {
+		t.Fatalf("user-facing description still says plugin: %q", body.Description)
+	}
+	for _, c := range body.Controls {
+		if strings.Contains(strings.ToLower(c.Text), "plugin") {
+			t.Fatalf("user-facing note still says plugin: %q", c.Text)
+		}
+	}
+}
+
+// TestExtensionsRowActionsAreLive pins the dead rowActions removal. A row
+// action the daemon declares no method for, and no renderer reads, is a
+// promise the page cannot keep; plugin.update and plugin.uninstall were both,
+// and leaving them on the schema is how they stay that way.
+func TestExtensionsRowActionsAreLive(t *testing.T) {
+	s := string(ExtensionsPage().Schema)
+	for _, dead := range []string{"plugin.update", "plugin.uninstall"} {
+		if strings.Contains(s, dead) {
+			t.Fatalf("extensions schema still declares dead row action %q", dead)
+		}
+	}
+	for _, live := range []string{"plugin.enable", "plugin.disable"} {
+		if !strings.Contains(s, live) {
+			t.Fatalf("extensions schema dropped live row action %q", live)
+		}
+	}
+}
+
+// TestFinderTitledExplorer pins the rename. The page id and the Finder
+// vocabulary underneath stay — only what the person reads changes.
+func TestFinderTitledExplorer(t *testing.T) {
+	f := FinderPage()
+	if f.Title != "Explorer" {
+		t.Fatalf("title=%q, want Explorer", f.Title)
+	}
+	if f.ID != "core.finder" {
+		t.Fatalf("id=%q, want core.finder (the technical name does not change)", f.ID)
+	}
 }
 
 func TestShortcutsLinksDontDuplicate(t *testing.T) {
@@ -151,9 +354,30 @@ func TestPageControlKinds(t *testing.T) {
 	if s := schemas["core.about"]; !strings.Contains(s, `"kind":"version"`) || !strings.Contains(s, `"kind":"license"`) || !strings.Contains(s, `"kind":"credits"`) {
 		t.Fatalf("about missing version/license/credits: %s", s)
 	}
-	// nir.7 Plugins: pluginList with health + install-from-disk.
-	if s := schemas["core.plugins"]; !strings.Contains(s, `"kind":"pluginList"`) || !strings.Contains(s, `"kind":"button"`) {
-		t.Fatalf("plugins missing pluginList/install button: %s", s)
+	// nir.7 Extensions: pluginList with health + install-from-disk.
+	if s := schemas["core.extensions"]; !strings.Contains(s, `"kind":"pluginList"`) || !strings.Contains(s, `"kind":"button"`) {
+		t.Fatalf("extensions missing pluginList/install button: %s", s)
+	}
+	// Home: the landing card over sources the daemon already serves, plus the
+	// readiness checklist. No source of its own — a landing card that fetched
+	// something separate could disagree with the masthead above it.
+	if s := schemas["core.home"]; !strings.Contains(s, `"kind":"statusCard"`) || !strings.Contains(s, "core:profiles") || !strings.Contains(s, `"kind":"checklist"`) {
+		t.Fatalf("home missing statusCard/profiles/checklist: %s", s)
+	}
+	// Profiles: cards that apply in one step, and a note that keeps the
+	// per-capability switches on their owning pages.
+	if s := schemas["core.profiles"]; !strings.Contains(s, `"kind":"profileList"`) || !strings.Contains(s, "core:profileApply") {
+		t.Fatalf("profiles missing profileList/apply: %s", s)
+	}
+	// Observe: the event inspector on its own page, with the dry-run toggle
+	// and the live feed.
+	if s := schemas["core.observe"]; !strings.Contains(s, "core.setObserve") || !strings.Contains(s, `"kind":"traceList"`) {
+		t.Fatalf("observe missing setObserve/traceList: %s", s)
+	}
+	// Observe is a page of its own, not a second control on Activity: §5
+	// (conflicts) and §6 (observe) are separate questions.
+	if s := schemas["core.activity"]; strings.Contains(s, "core.setObserve") {
+		t.Fatalf("activity grows the observe surface; it has its own page: %s", s)
 	}
 	// jpr.6 Shortcuts: palette + shortcutList.
 	if s := schemas["core.shortcuts"]; !strings.Contains(s, `"kind":"palette"`) || !strings.Contains(s, `"kind":"shortcutList"`) {

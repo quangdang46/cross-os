@@ -16,14 +16,21 @@ import (
 
 // coreRegistry builds a Registry with the MVP Core pages (§7.2) registered
 // the same way plugins register theirs.
+//
+// The group/order pairs are declared here rather than defaulted, because this
+// fixture is the one that proves the nav sorts on what a contribution says
+// and not on what its id happens to be: "core.activity" and "core.keyboard"
+// both sort before "core.safety" and "core.settings" under the declared
+// orders, and the same four would have arrived in a different sequence if the
+// host still compared titles.
 func coreRegistry() *pluginapi.Registry {
 	r := pluginapi.NewRegistry(nil)
 	for _, u := range []pluginapi.UIContribution{
-		{ID: "core.dashboard", Location: pluginapi.UILocationSettingsPage, Title: "Dashboard"},
-		{ID: "core.keyboard", Location: pluginapi.UILocationSettingsPage, Title: "Keyboard"},
-		{ID: "core.activity", Location: pluginapi.UILocationSettingsPage, Title: "Activity"},
-		{ID: "core.safety", Location: pluginapi.UILocationSettingsPage, Title: "Safety"},
-		{ID: "core.settings", Location: pluginapi.UILocationSettingsPage, Title: "Settings"},
+		{ID: "core.dashboard", Location: pluginapi.UILocationSettingsPage, Title: "Dashboard", Group: "home", Order: 10},
+		{ID: "core.keyboard", Location: pluginapi.UILocationSettingsPage, Title: "Keyboard", Group: "shortcuts", Order: 20},
+		{ID: "core.activity", Location: pluginapi.UILocationSettingsPage, Title: "Activity", Group: "activity", Order: 30},
+		{ID: "core.safety", Location: pluginapi.UILocationSettingsPage, Title: "Safety", Group: "advanced", Order: 40},
+		{ID: "core.settings", Location: pluginapi.UILocationSettingsPage, Title: "Settings", Group: "advanced", Order: 50},
 	} {
 		if err := r.RegisterUI(u); err != nil {
 			panic(err)
@@ -47,6 +54,13 @@ func TestCorePagesViaRegistry(t *testing.T) {
 			t.Fatalf("unexpected page %q — shell must not hardcode pages", p.ID)
 		}
 	}
+	// The declared order is what the nav serves. Alphabetical would put
+	// core.activity first; the contributions asked for Dashboard first.
+	for i, id := range []string{"core.dashboard", "core.keyboard", "core.activity", "core.safety", "core.settings"} {
+		if pages[i].ID != id {
+			t.Fatalf("served[%d]=%s, want %s", i, pages[i].ID, id)
+		}
+	}
 	// Duplicate registration is a conflict, never a silent overwrite.
 	dup := pluginapi.NewRegistry(nil)
 	if err := dup.RegisterUI(pluginapi.UIContribution{ID: "core.dashboard", Location: pluginapi.UILocationSettingsPage, Title: "Clash"}); err != nil {
@@ -54,6 +68,36 @@ func TestCorePagesViaRegistry(t *testing.T) {
 	}
 	if err := h.Register(dup); err == nil {
 		t.Fatal("duplicate page ID: want conflict error, got nil")
+	}
+}
+
+// TestRegisterAcrossRegistriesSortsOnce covers a Host fed by more than one
+// registry. The sort has to run over everything discovered, not just the
+// batch that arrived last, or a plugin's page would land wherever it
+// happened to be appended.
+func TestRegisterAcrossRegistriesSortsOnce(t *testing.T) {
+	h := NewHost()
+	if err := h.Register(coreRegistry()); err != nil {
+		t.Fatalf("Register core: %v", err)
+	}
+	plugin := pluginapi.NewRegistry(nil)
+	if err := plugin.RegisterUI(pluginapi.UIContribution{ID: "acme.palette", Location: pluginapi.UILocationSettingsPage, Title: "Acme", Group: "home", Order: 0}); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := h.Register(plugin); err != nil {
+		t.Fatalf("Register plugin: %v", err)
+	}
+	pages := h.Pages()
+	if len(pages) != 6 {
+		t.Fatalf("pages=%d, want 6", len(pages))
+	}
+	// Order 0 beats the core dashboard's 10 even though it arrived second.
+	if pages[0].ID != "acme.palette" {
+		t.Fatalf("served[0]=%s, want acme.palette (order 0 from the second registry)", pages[0].ID)
+	}
+	// And the core pages are still in their declared sequence behind it.
+	if pages[1].ID != "core.dashboard" {
+		t.Fatalf("served[1]=%s, want core.dashboard", pages[1].ID)
 	}
 }
 

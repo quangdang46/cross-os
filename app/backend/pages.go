@@ -8,6 +8,17 @@
 // Registry path plugins use — the Host discovers them, the shell renders
 // from schema. No page reaches the shell any other way.
 //
+// NAV ORDER. The sidebar follows the product's information architecture —
+// Home, Profiles, Keyboard, Windows, Explorer, Activity, Advanced — so each
+// page declares the group it renders under and an explicit Order. Order is
+// global rather than per-group because the Host sorts one flat list and the
+// group is nav furniture, not a sort key; two pages that share a group take
+// consecutive Orders.
+//
+// The first-run page is the one Order that deliberately ties: it shares 0
+// with Home, and the firstRun flag breaks the tie until onboarding is done.
+// See Host.sort for why the flag stops counting.
+//
 // Cross-bead contracts honored:
 //   - Trial/countdown durations reference safety.TRIALTimeout (the Core
 //     constant from bead cross-os-2ha), never a local 30s literal — grep
@@ -27,13 +38,22 @@ import (
 	"crossos/core/pkg/pluginapi"
 )
 
+// nav is where a page sits in the sidebar: the group it renders under and
+// its position in the served order.
+type nav struct {
+	group string
+	order int
+}
+
 // contrib is a small builder for settings-page contributions.
-func contrib(id, title string, schema map[string]any, actions []string, visibility string) pluginapi.UIContribution {
+func contrib(id, title string, at nav, schema map[string]any, actions []string, visibility string) pluginapi.UIContribution {
 	raw, _ := json.Marshal(schema)
 	return pluginapi.UIContribution{
 		ID:         id,
 		Location:   pluginapi.UILocationSettingsPage,
 		Title:      title,
+		Group:      at.group,
+		Order:      at.order,
 		Schema:     raw,
 		Visibility: visibility,
 		Actions:    actions,
@@ -44,7 +64,7 @@ func contrib(id, title string, schema map[string]any, actions []string, visibili
 // TRIAL countdown + confirm, ownership audit. Wired to 2ha Core semantics;
 // actions flow through the Capability API like any caller.
 func SafetyPage() pluginapi.UIContribution {
-	return contrib("core.safety", "Safety", map[string]any{
+	return contrib("core.safety", "Safety", nav{group: "advanced", order: 100}, map[string]any{
 		"type":             "page",
 		"description":      "Stop everything instantly, reset CrossOS state, review what CrossOS changed.",
 		"trialTimeoutNote": "Countdown uses the Core TRIAL timeout (safety.TRIALTimeout); the page never hardcodes it.",
@@ -61,7 +81,7 @@ func SafetyPage() pluginapi.UIContribution {
 // AboutPage (ymh.4, §7.2 MVP 0): version, MIT license, repository credits
 // generated from third_party ATTRIBUTION.md entries (never hand-maintained).
 func AboutPage() pluginapi.UIContribution {
-	return contrib("core.about", "About", map[string]any{
+	return contrib("core.about", "About", nav{group: "advanced", order: 110}, map[string]any{
 		"type":        "page",
 		"description": "CrossOS version, license, and the repositories it builds on.",
 		"controls": []any{
@@ -72,28 +92,38 @@ func AboutPage() pluginapi.UIContribution {
 	}, nil, "true")
 }
 
-// PluginsPage (nir.7, §7.2 MVP 1+ local only): installed plugins with
-// health states, install-from-disk, enable/disable/update/uninstall. NO
-// marketplace/network UI (hard gate — marketplace is cross-os-jpr.1).
-func PluginsPage() pluginapi.UIContribution {
-	return contrib("core.plugins", "Plugins", map[string]any{
+// ExtensionsPage (nir.7, §7.2 MVP 1+ local only): the user-facing name for
+// what the architecture still calls a plugin. "Extensions" is what the person
+// installed; "Plugin" stays the technical term underneath — the source
+// (core:plugins), the capability ids (plugin.*) and the Registry type are all
+// unchanged, so renaming the surface costs the wire nothing.
+//
+// NO marketplace/network UI (hard gate — marketplace is cross-os-jpr.1).
+//
+// The row actions are the ones the shell can actually run. plugin.update and
+// plugin.uninstall are declared by no daemon method (the plugin table is
+// plugin.list + plugin.setEnabled) and were read by no renderer, so they are
+// gone rather than left on the schema as a promise. installDisk keeps its
+// button and its fail-closed command for the same reason it keeps its place.
+func ExtensionsPage() pluginapi.UIContribution {
+	return contrib("core.extensions", "Extensions", nav{group: "advanced", order: 80}, map[string]any{
 		"type":          "page",
-		"description":   "Plugins installed on this machine. New installs enter trial; confirm on the Safety page.",
+		"description":   "Extensions installed on this machine. New installs enter trial; confirm on the Safety page.",
 		"noMarketplace": true,
 		"controls": []any{
-			map[string]any{"kind": "pluginList", "id": "plugins", "source": "core:plugins", "rowHealth": true, "rowActions": []string{"plugin.enable", "plugin.disable", "plugin.update", "plugin.uninstall"}},
+			map[string]any{"kind": "pluginList", "id": "plugins", "source": "core:plugins", "rowHealth": true, "rowActions": []string{"plugin.enable", "plugin.disable"}},
 			map[string]any{"kind": "button", "id": "installDisk", "label": "Install from disk…", "action": "plugin.installDisk"},
 			map[string]any{"kind": "note", "id": "trialNote", "text": "New installs enter trial (Core TRIAL timeout). Confirm or roll back on the Safety page."},
-			map[string]any{"kind": "note", "id": "configNote", "text": "Per-plugin settings live on owning pages: keyboard matrix, config schema forms."},
+			map[string]any{"kind": "note", "id": "configNote", "text": "Per-extension settings live on owning pages: keyboard matrix, config schema forms."},
 		},
-	}, []string{"plugin.enable", "plugin.disable", "plugin.update", "plugin.uninstall", "plugin.installDisk"}, "true")
+	}, []string{"plugin.enable", "plugin.disable", "plugin.installDisk"}, "true")
 }
 
 // ActivityPage (nir.4, §7.2): permission-prompt flow (Welcome → Enable →
 // Open System Settings → Verify) + real-time intent trace. Confirm/rollback
 // links to the ymh.3 Safety surface; this page owns no TRIAL UI.
 func ActivityPage() pluginapi.UIContribution {
-	return contrib("core.activity", "Activity", map[string]any{
+	return contrib("core.activity", "Activity", nav{group: "activity", order: 60}, map[string]any{
 		"type":        "page",
 		"description": "What CrossOS did and why — every shortcut, rule, intent, and action.",
 		"controls": []any{
@@ -103,11 +133,31 @@ func ActivityPage() pluginapi.UIContribution {
 	}, []string{"plugin.enable", "permissions.openSettings", "permissions.verify"}, "true")
 }
 
+// ObservePage (spec §6): the event inspector, kept off Activity on purpose.
+// The spec treats the conflict surface (§5) and the observe surface (§6) as
+// two different questions — "which rule won" versus "what is the keyboard
+// doing right now" — and folding observe into Activity grew a page that
+// answered neither. This one is the second question alone.
+//
+// Observe is a dry run: the recorder writes a "would-execute" stage instead
+// of acting, which is what makes it safe to leave on while someone is
+// learning what their shortcuts do.
+func ObservePage() pluginapi.UIContribution {
+	return contrib("core.observe", "Observe", nav{group: "activity", order: 70}, map[string]any{
+		"type":        "page",
+		"description": "Watch what CrossOS sees. With Observe on, actions are shown instead of performed.",
+		"controls": []any{
+			map[string]any{"kind": "button", "id": "observeToggle", "label": "Turn Observe on", "action": "core.setObserve", "note": "Dry run — CrossOS reports what it would do and changes nothing."},
+			map[string]any{"kind": "traceList", "id": "events", "source": "core:traces", "format": "Key → App → Rule → Intent → Action", "note": "The live feed, one decision per entry."},
+		},
+	}, []string{"core.setObserve"}, "true")
+}
+
 // MatrixPage (10s, §7.2 Keyboard MVP 0): behavior-matrix content editing +
 // app overrides, owned by the s4i rules. Per-plugin config_schema forms are
 // jpr.2 scope; the global Shortcuts registry is jpr.6 scope (read-mostly).
 func MatrixPage() pluginapi.UIContribution {
-	return contrib("core.keyboard", "Keyboard", map[string]any{
+	return contrib("core.keyboard", "Keyboard", nav{group: "shortcuts", order: 20}, map[string]any{
 		"type":        "page",
 		"description": "Which shortcuts do what, per app. Edits take effect immediately.",
 		"controls": []any{
@@ -121,7 +171,7 @@ func MatrixPage() pluginapi.UIContribution {
 // persisted via Config Manager) + snap zone editor. Rectangle is
 // BEHAVIOR-only precedent: zone geometry + defaults inform UX, no code.
 func WindowsPage() pluginapi.UIContribution {
-	return contrib("core.windows", "Windows", map[string]any{
+	return contrib("core.windows", "Windows", nav{group: "shortcuts", order: 30}, map[string]any{
 		"type":        "page",
 		"description": "Window shortcuts and snap zones. Conflicts resolve like any rule — winner + losers shown.",
 		"controls": []any{
@@ -137,12 +187,12 @@ func WindowsPage() pluginapi.UIContribution {
 // config_schema, writes validate + propagate per §3.8 (never direct file
 // writes from UI), actions permission-checked like any caller.
 func SchemaFormHelp() pluginapi.UIContribution {
-	return contrib("core.schemaHelp", "Plugin Settings", map[string]any{
+	return contrib("core.schemaHelp", "Plugin Settings", nav{group: "advanced", order: 90}, map[string]any{
 		"type":        "page",
-		"description": "Settings declared by plugins render here automatically.",
-		"renderer":    map[string]any{"tier": "mvp", "widgets": []string{"checkbox", "select", "slider", "button"}, "acceptance": "New plugin with config_schema shows working UI with zero Core UI changes."},
+		"description": "Settings declared by extensions render here automatically.",
+		"renderer":    map[string]any{"tier": "mvp", "widgets": []string{"checkbox", "select", "slider", "button"}, "acceptance": "New extension with config_schema shows working UI with zero Core UI changes."},
 		"controls": []any{
-			map[string]any{"kind": "schemaForm", "id": "pluginSettings", "source": "core:pluginSchemas", "note": "Each plugin's config_schema renders here with MVP widgets (checkbox/select/slider/button)."},
+			map[string]any{"kind": "schemaForm", "id": "pluginSettings", "source": "core:pluginSchemas", "note": "Each extension's config_schema renders here with MVP widgets (checkbox/select/slider/button)."},
 		},
 	}, nil, "true")
 }
@@ -152,24 +202,31 @@ func SchemaFormHelp() pluginapi.UIContribution {
 // Per-rule content editing stays in owning pages (10s matrix) — linked,
 // never duplicated.
 func CommandsPage() pluginapi.UIContribution {
-	return contrib("core.shortcuts", "Shortcuts", map[string]any{
+	return contrib("core.shortcuts", "Shortcuts", nav{group: "shortcuts", order: 40}, map[string]any{
 		"type":        "page",
 		"description": "Every shortcut in one place. Edit content on owning pages.",
 		"controls": []any{
-			map[string]any{"kind": "palette", "id": "palette", "source": "core:commands", "note": "Plugin commands appear with zero Core UI changes."},
+			map[string]any{"kind": "palette", "id": "palette", "source": "core:commands", "note": "Extension commands appear with zero Core UI changes."},
 			map[string]any{"kind": "shortcutList", "id": "all", "source": "core:allShortcuts", "conflicts": "core:conflicts", "editLinks": "owner"},
 		},
 	}, []string{"command.execute", "shortcut.setEnabled"}, "true")
 }
 
-// CorePages returns all ten Core page contributions in stable order,
-// including the first-run onboarding page (qhp.2) and the Finder extpack
-// page (vbl.6): both register through the same Registry path, so the
-// shared gates (trial literal, custom-view, control kinds) cover them.
+// CorePages returns every Core page contribution in nav order, including the
+// first-run onboarding page (qhp.2) and the Explorer extpack page (vbl.6):
+// both register through the same Registry path, so the shared gates (trial
+// literal, custom-view, control kinds) cover them.
+//
+// The returned slice is the authored order for readability; the Host re-sorts
+// on Group/Order/firstRun, and a test pins the served order so the two can
+// never drift apart silently.
 func CorePages() []pluginapi.UIContribution {
 	return []pluginapi.UIContribution{
-		SafetyPage(), AboutPage(), PluginsPage(), ActivityPage(),
-		MatrixPage(), WindowsPage(), SchemaFormHelp(), CommandsPage(),
-		OnboardingFlow(), FinderPage(),
+		HomePage(), ProfilesPage(),
+		MatrixPage(), WindowsPage(), CommandsPage(),
+		FinderPage(),
+		ActivityPage(), ObservePage(),
+		ExtensionsPage(), SchemaFormHelp(), SafetyPage(), AboutPage(),
+		OnboardingFlow(),
 	}
 }
