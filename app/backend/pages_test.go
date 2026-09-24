@@ -388,10 +388,11 @@ func TestPageControlKinds(t *testing.T) {
 	if s := schemas["core.onboarding"]; !strings.Contains(s, `"kind":"enableFlow"`) || !strings.Contains(s, `"kind":"checklist"`) || !strings.Contains(s, "core.about") || !strings.Contains(s, "core.safety") {
 		t.Fatalf("onboarding missing enableFlow/checklist/about/safety links: %s", s)
 	}
-	// vbl.6 Finder: packList + actionSettings + gateBadge, boundary kept
-	// (no plugin-lifecycle duplication — nir.7 owns it).
-	if s := schemas["core.finder"]; !strings.Contains(s, `"kind":"packList"`) || !strings.Contains(s, `"kind":"actionSettings"`) || !strings.Contains(s, `"kind":"gateBadge"`) {
-		t.Fatalf("finder missing packList/actionSettings/gateBadge: %s", s)
+	// vbl.6 Finder: the two lists the daemon serves — the right-click menu and
+	// the file types it offers — boundary kept (no plugin-lifecycle
+	// duplication, nir.7 owns it).
+	if s := schemas["core.finder"]; !strings.Contains(s, `"kind":"menuList"`) || !strings.Contains(s, "core:finderMenu") || !strings.Contains(s, `"kind":"fileTypeList"`) || !strings.Contains(s, "core:fileTypes") {
+		t.Fatalf("finder missing menuList/fileTypeList over the served sources: %s", s)
 	}
 	if s := schemas["core.finder"]; strings.Contains(s, "plugin.installDisk") {
 		t.Fatalf("finder duplicates plugin lifecycle: %s", s)
