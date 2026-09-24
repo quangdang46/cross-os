@@ -9,6 +9,7 @@ package shell
 
 import (
 	"fmt"
+	"strconv"
 	"sync"
 )
 
@@ -166,6 +167,17 @@ type Core interface {
 	// DeleteUserRule removes one rule (config.deleteUserRule) and returns the
 	// table as it now stands, so the editor updates from one response.
 	DeleteUserRule(id string) ([]UserRuleRow, error)
+	// Windows returns the switcher's tiles (core.windows) in the order the
+	// daemon decided, each row carrying the index the highlight is on, so the
+	// shell draws from one response and never re-derives the order.
+	Windows() ([]WindowRow, error)
+	// SwitcherWait blocks for at most timeoutMs waiting for the next half of
+	// the chord (core.switcherWait). A wait that runs out of budget answers
+	// triggered=false: the shell polls again, and an expired poll is a value.
+	SwitcherWait(timeoutMs int) (SwitcherTrigger, error)
+	// SwitcherFocus brings one tile to the front (core.switcherFocus) — the
+	// click path, so pointing at a window does not mean synthesizing its chord.
+	SwitcherFocus(windowID string) error
 }
 
 // App is the Wails-bound service (§7.3 shape: GetStatus, TogglePlugin,
@@ -547,4 +559,39 @@ func (a *App) DeleteUserRule(id string) ([]UserRuleRow, error) {
 		return nil, err
 	}
 	return sourceList(a, "DeleteUserRule", rows), nil
+}
+
+// Windows serves the switcher's tiles. A list that is empty and a list the
+// daemon failed to send are different states, and the second one is the reason
+// the note lands in the UI log rather than being swallowed into [].
+func (a *App) Windows() ([]WindowRow, error) {
+	rows, err := a.core.Windows()
+	if err != nil {
+		a.log.Append("Windows: " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "Windows", rows), nil
+}
+
+// SwitcherWait is the long poll behind an idle switcher. A refused or broken
+// call is logged AND returned, and the note carries the budget that failed: a
+// switcher that opens on someone else's schedule is reported as a number.
+func (a *App) SwitcherWait(timeoutMs int) (SwitcherTrigger, error) {
+	trig, err := a.core.SwitcherWait(timeoutMs)
+	if err != nil {
+		a.log.Append("SwitcherWait " + strconv.Itoa(timeoutMs) + "ms: " + err.Error())
+		return SwitcherTrigger{}, err
+	}
+	return trig, nil
+}
+
+// SwitcherFocus acts on the tile the user pointed at. It fails closed like
+// every other write: a focus that did not happen must not leave the page
+// believing one did.
+func (a *App) SwitcherFocus(windowID string) error {
+	if err := a.core.SwitcherFocus(windowID); err != nil {
+		a.log.Append("SwitcherFocus " + windowID + ": " + err.Error())
+		return err
+	}
+	return nil
 }

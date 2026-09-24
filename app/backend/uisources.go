@@ -17,12 +17,12 @@
 // say "the daemon is unreachable". Collapsing those two is how a settings
 // window becomes a blank page (bridge.go: failures are logged AND returned).
 //
-// The rows are in two waves — the ten sources the ten settings pages already
-// ask for, then the profile cards, traces, plugin meta, the app list and the
-// person-authored rules — and the conventions above hold for both. One row
-// (AppRow) carries no tags at all, because the type it mirrors on the daemon
-// side does not; that is the wire, and it is pinned by a test rather than by
-// this comment.
+// The rows are in waves — the ten sources the ten settings pages already ask
+// for, then the profile cards, traces, plugin meta, the app list, the
+// person-authored rules, and the switcher's tiles — and the conventions above
+// hold for all of them. One row (AppRow) carries no tags at all, because the
+// type it mirrors on the daemon side does not; that is the wire, and it is
+// pinned by a test rather than by this comment.
 package shell
 
 // MatrixRow is one behavior-matrix rule (config.getMatrix). Contexts are the
@@ -249,4 +249,33 @@ type UserRuleRow struct {
 	Priority    int            `json:"priority"`
 	Specificity int            `json:"specificity"`
 	Scope       string         `json:"scope"`
+}
+
+// WindowRow is one tile of the window switcher (core.windows), a copy of the
+// daemon's switcherRow — that row is the wire.
+//
+// The field checklist a switcher row is measured against is the alt-tab
+// reference's TrackedWindowState (pid, title, bounds, minimized, fullscreen,
+// is-main), cited as a checklist only: this struct mirrors what the daemon
+// sends, and a field it does not send is a column the shell has nowhere to put.
+// Index, Selected and Skippable are CrossOS's own — the daemon owns the MRU, so
+// the shell draws the position it is handed instead of sorting a second order.
+type WindowRow struct {
+	WindowID  string `json:"window_id"`
+	AppID     string `json:"app_id"`
+	Title     string `json:"title"`
+	Index     int    `json:"index"`
+	Selected  bool   `json:"selected"`
+	Skippable bool   `json:"skippable"`
+}
+
+// SwitcherTrigger is one thing the switcher did that the shell has not seen
+// yet (core.switcherWait). Action is the switcher's own vocabulary — summon,
+// commit — not a rule id or an intent id: the shell draws a switcher, it does
+// not read the decision path. Triggered false is the daemon's "your budget ran
+// out", which is the answer a poll expects, not an incident.
+type SwitcherTrigger struct {
+	Triggered bool   `json:"triggered"`
+	Action    string `json:"action,omitempty"`
+	WindowID  string `json:"window_id,omitempty"`
 }

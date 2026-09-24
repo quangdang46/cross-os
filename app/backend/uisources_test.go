@@ -26,6 +26,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -212,6 +213,41 @@ func (s *stubCore) DeleteUserRule(id string) ([]UserRuleRow, error) {
 	return nil, nil
 }
 
+// The switcher stubs carry the daemon's own gates for the same reason the Wave
+// 3 ones do: a stub that answered "yes" to everything would let a bridge that
+// drops the wait budget or focuses a nameless window pass. They also carry no
+// rows, so the null-source rules below reach them through the zero value — and
+// the daemon's spelling is pinned over the IPC stub instead, where the payload
+// is JSON text rather than a struct agreeing with itself.
+func (s *stubCore) Windows() ([]WindowRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	return nil, nil
+}
+
+// SwitcherWait answers the way a spent budget does: a real object that says
+// nothing happened. A stub that errored would make an expired poll look like a
+// broken daemon.
+func (s *stubCore) SwitcherWait(timeoutMs int) (SwitcherTrigger, error) {
+	if s.failSources != nil {
+		return SwitcherTrigger{}, s.failSources
+	}
+	return SwitcherTrigger{Triggered: false}, nil
+}
+
+// SwitcherFocus refuses an empty id the way core.switcherFocus refuses a
+// missing window_id with bad-params.
+func (s *stubCore) SwitcherFocus(windowID string) error {
+	if s.failSources != nil {
+		return s.failSources
+	}
+	if windowID == "" {
+		return errors.New("shell: no window id to focus")
+	}
+	return nil
+}
+
 // sourceReader names one bridge call so the null and failure rules below can
 // be asserted once for every source instead of per method.
 type sourceReader struct {
@@ -236,6 +272,7 @@ func sourceReaders() []sourceReader {
 		{"Apps", func(a *App) error { _, err := a.Apps(); return err }},
 		{"UserRules", func(a *App) error { _, err := a.UserRules(); return err }},
 		{"DeleteUserRule", func(a *App) error { _, err := a.DeleteUserRule("user.ctrl+c@terminal"); return err }},
+		{"Windows", func(a *App) error { _, err := a.Windows(); return err }},
 	}
 }
 
@@ -266,6 +303,8 @@ func TestSourceFailuresLogged(t *testing.T) {
 			_, err := a.SetUserRule(UserRuleRow{Key: "C", Capability: "clipboard.copy"})
 			return err
 		}},
+		sourceReader{"SwitcherWait", func(a *App) error { _, err := a.SwitcherWait(2000); return err }},
+		sourceReader{"SwitcherFocus", func(a *App) error { return a.SwitcherFocus("412") }},
 	)
 	for _, c := range calls {
 		app := NewApp(&stubCore{failSources: boom})
@@ -401,6 +440,9 @@ func TestServiceExposesFrozenSources(t *testing.T) {
 		// the person-authored rule table.
 		"Profiles", "ApplyProfile", "Traces", "PluginMeta", "Apps",
 		"UserRules", "SetUserRule", "DeleteUserRule",
+		// The switcher: its tiles, the long poll that opens it, and the focus a
+		// click performs.
+		"Windows", "SwitcherWait", "SwitcherFocus",
 	}
 	declared := map[string]bool{}
 	for _, m := range serviceMethodNames(t) {
@@ -438,6 +480,19 @@ func TestServiceExposesFrozenSources(t *testing.T) {
 	}
 	if logs := svc.UILogs(); len(logs) != 2 {
 		t.Fatalf("both denials must reach the UI log, got %v", logs)
+	}
+	// The switcher bindings delegate too, and the wait's "nothing happened" is
+	// an answer that travels back rather than a failure. Windows reads the
+	// stub's nil list, which is the null case the list rule above covers, so
+	// this is the last assertion and the UI log is not counted again.
+	if rows, err := svc.Windows(); err != nil || len(rows) != 0 {
+		t.Fatalf("Service.Windows=%v,%v, want the empty list the daemon owes", rows, err)
+	}
+	if trig, err := svc.SwitcherWait(2000); err != nil || trig.Triggered {
+		t.Fatalf("Service.SwitcherWait=%+v,%v, want an untriggered answer", trig, err)
+	}
+	if err := svc.SwitcherFocus("412"); err != nil {
+		t.Fatalf("Service.SwitcherFocus: %v", err)
 	}
 }
 
@@ -560,6 +615,8 @@ var wireModels = []struct {
 	{"PluginMetaRow", PluginMetaRow{}},
 	{"AppRow", AppRow{}},
 	{"UserRuleRow", UserRuleRow{}},
+	{"WindowRow", WindowRow{}},
+	{"SwitcherTrigger", SwitcherTrigger{}},
 	{"Status", Status{}},
 	{"PluginState", PluginState{}},
 	{"Page", Page{}},
@@ -598,6 +655,111 @@ func TestAppRowMatchesTheDaemonsRow(t *testing.T) {
 			t.Errorf("AppRow.%s is a %s, ctx.ApplicationInfo.%s is a %s", f.Name, f.Type.Kind(), daemon.Field(i).Name, want)
 		}
 	}
+}
+
+// TestWindowRowMatchesTheDaemonsRow pins the switcher row the way the app row
+// is pinned, against the struct the daemon really serves. core.windows answers
+// with []switcherRow, and that type lives in package main — which this module
+// cannot import — so the declaration is read out of the daemon's source with
+// go/ast. Same guarantee, different door: a field renamed, added or dropped on
+// the daemon side fails here rather than arriving as a column the switcher has
+// nowhere to put.
+func TestWindowRowMatchesTheDaemonsRow(t *testing.T) {
+	path := filepath.Join("..", "..", "core", "cmd", "crossos", "switcher.go")
+	daemon := daemonStructFields(t, path, "switcherRow")
+	shell := reflect.TypeOf(WindowRow{})
+	got := wireFieldNames(WindowRow{})
+	if len(got) != len(daemon) {
+		t.Fatalf("WindowRow has %d fields %v, the daemon's switcherRow has %d — the tile the shell "+
+			"draws and the tile the daemon serves must be the same row", len(got), got, len(daemon))
+	}
+	for i := range daemon {
+		if got[i] != daemon[i].tag {
+			t.Errorf("WindowRow field %d marshals as %q, the daemon's switcherRow field %d sends %q — "+
+				"the switcher would render an empty column", i, got[i], i, daemon[i].tag)
+		}
+		// The kinds too: a field the shell declares as a string where the daemon
+		// sends a number decodes to the zero value instead of failing, which is
+		// the same silent-empty column a wrong name produces.
+		if kind := shell.Field(i).Type.Kind().String(); kind != daemon[i].kind {
+			t.Errorf("WindowRow field %d is a %s, the daemon's switcherRow field %d is a %s", i, kind, i, daemon[i].kind)
+		}
+	}
+}
+
+// daemonField is one field of a struct read out of a daemon source file: the
+// tag is the key the daemon sends, the kind is the JSON type it arrives as.
+type daemonField struct {
+	tag  string
+	kind string
+}
+
+// daemonStructFields reads one struct declaration out of a file this module
+// cannot compile against. It fails loudly for a struct it cannot find, an
+// untagged field or a type it cannot name: an empty result would let the pin
+// above pass for exactly the wrong reason.
+func daemonStructFields(t *testing.T, path, name string) []daemonField {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	for _, d := range f.Decls {
+		gen, ok := d.(*ast.GenDecl)
+		if !ok || gen.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			ts, ok := spec.(*ast.TypeSpec)
+			if !ok || ts.Name.Name != name {
+				continue
+			}
+			st, ok := ts.Type.(*ast.StructType)
+			if !ok {
+				t.Fatalf("%s: %s is not a struct", path, name)
+			}
+			out := make([]daemonField, 0, len(st.Fields.List))
+			for _, field := range st.Fields.List {
+				if field.Tag == nil {
+					t.Fatalf("%s: %s declares an untagged field, and the wire is the tag", path, name)
+				}
+				tag, err := strconv.Unquote(field.Tag.Value)
+				if err != nil {
+					t.Fatalf("%s: %s tag %s: %v", path, name, field.Tag.Value, err)
+				}
+				// The wire key is the name inside the json tag, so the tag key
+				// itself is read here rather than assumed: renaming it is as
+				// much a break as renaming the name.
+				wire, ok := strings.CutPrefix(tag, "json:")
+				if !ok {
+					t.Fatalf("%s: %s tags a field %q, which this reader does not parse — extend it "+
+						"before pinning the row", path, name, tag)
+				}
+				key, _, _ := strings.Cut(wire, ",")
+				kind := daemonFieldKind(t, path, name, field.Type)
+				for range field.Names {
+					out = append(out, daemonField{tag: strings.Trim(key, `"`), kind: kind})
+				}
+			}
+			return out
+		}
+	}
+	t.Fatalf("%s declares no type %s", path, name)
+	return nil
+}
+
+// daemonFieldKind names the JSON kind a daemon field's type marshals as. Only
+// the bare type names the pinned rows use are known, and anything else stops
+// the test rather than passing a comparison it did not make.
+func daemonFieldKind(t *testing.T, path, name string, expr ast.Expr) string {
+	t.Helper()
+	ident, ok := expr.(*ast.Ident)
+	if !ok {
+		t.Fatalf("%s: %s declares a field of type %T, which this reader does not name — extend it "+
+			"before pinning the row", path, name, expr)
+	}
+	return ident.Name
 }
 
 // TestGeneratedModelsMatchWireTags is the test that would have caught the

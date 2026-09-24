@@ -175,3 +175,20 @@ func (s *Service) SetUserRule(rule UserRuleRow) (string, error) {
 func (s *Service) DeleteUserRule(id string) ([]UserRuleRow, error) {
 	return s.app.DeleteUserRule(id)
 }
+
+// The switcher's three bindings. The list and the wait are the sources the
+// page reads; SwitcherFocus is the one write, and it is the same action the
+// commit half of the chord performs.
+
+// Windows serves the switcher's tiles in the daemon's order, with the
+// highlight on the row the daemon picked.
+func (s *Service) Windows() ([]WindowRow, error) { return s.app.Windows() }
+
+// SwitcherWait is the bounded long poll; an expired budget answers
+// triggered=false rather than an error.
+func (s *Service) SwitcherWait(timeoutMs int) (SwitcherTrigger, error) {
+	return s.app.SwitcherWait(timeoutMs)
+}
+
+// SwitcherFocus brings the tile the user pointed at to the front.
+func (s *Service) SwitcherFocus(windowID string) error { return s.app.SwitcherFocus(windowID) }

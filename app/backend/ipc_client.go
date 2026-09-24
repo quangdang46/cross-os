@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"time"
 )
 
 // IPCTransport dials the Core daemon. Production: unix socket
@@ -54,13 +55,29 @@ type IPCCore struct {
 // NewIPCCore binds the bridge to a live transport.
 func NewIPCCore(t IPCTransport) *IPCCore { return &IPCCore{transport: t} }
 
-// call performs one JSON-RPC round trip.
+// call performs one JSON-RPC round trip with no deadline of its own, which is
+// what every short call wants: the daemon answers or the transport fails.
 func (c *IPCCore) call(method string, params any) (json.RawMessage, error) {
+	return c.callWithin(method, params, 0)
+}
+
+// callWithin is call with a read deadline, for a call the daemon is allowed to
+// hold open. budget is the longest answer that can come back plus the slack the
+// transport and the decode need, and the deadline is set strictly above it — a
+// deadline equal to the budget is a coin toss against a reply the daemon was
+// still entitled to send. A zero budget sets no deadline, so every other call
+// keeps the behaviour it already had.
+func (c *IPCCore) callWithin(method string, params any, budget time.Duration) (json.RawMessage, error) {
 	conn, err := c.transport.Dial()
 	if err != nil {
 		return nil, fmt.Errorf("shell: ipc dial %s: %w", method, err)
 	}
 	defer conn.Close()
+	if budget > 0 {
+		if err := conn.SetReadDeadline(time.Now().Add(budget)); err != nil {
+			return nil, fmt.Errorf("shell: ipc deadline %s: %w", method, err)
+		}
+	}
 	c.seq++
 	var praw json.RawMessage
 	if params != nil {
@@ -643,4 +660,59 @@ func (c *IPCCore) DeleteUserRule(id string) ([]UserRuleRow, error) {
 		return nil, err
 	}
 	return decodeList[UserRuleRow]("config.deleteUserRule", raw)
+}
+
+// The switcher accessors below speak the three methods the daemon serves for
+// the window switcher. switcherWaitServerMax mirrors the daemon's own clamp on
+// one wait (core/cmd/crossos switcherWaitMaxMs): that cap — not the caller's
+// ask — is the longest answer that can come back, because the daemon caps what
+// it is asked for, so the read deadline is measured from it.
+const switcherWaitServerMax = 30 * time.Second
+
+// switcherWaitGrace is the slack above that cap: framing and decode on a
+// machine already busy serving the switcher. Strictly positive on purpose.
+const switcherWaitGrace = 5 * time.Second
+
+// Windows implements Core via core.windows. The list arrives in the order the
+// daemon decided, so nothing here sorts it: a second order would be a second
+// answer to a question the daemon has already answered.
+func (c *IPCCore) Windows() ([]WindowRow, error) {
+	raw, err := c.call("core.windows", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[WindowRow]("core.windows", raw)
+}
+
+// SwitcherWait implements Core via core.switcherWait. The caller's budget
+// travels under the daemon's own key, and the read deadline is set past the
+// daemon's cap rather than past that budget: a poll for a few hundred
+// milliseconds can still be served a long time after it started if the daemon
+// is busy, and cutting the read at the ask would turn a slow answer into a
+// broken switcher.
+//
+// The result is a pointer so a literal null is told apart from
+// {triggered:false}: the contract promises an object, and a null that decoded
+// into the zero value would read as a poll that simply expired.
+func (c *IPCCore) SwitcherWait(timeoutMs int) (SwitcherTrigger, error) {
+	raw, err := c.callWithin("core.switcherWait", map[string]any{"timeout_ms": timeoutMs}, switcherWaitServerMax+switcherWaitGrace)
+	if err != nil {
+		return SwitcherTrigger{}, err
+	}
+	var out *SwitcherTrigger
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return SwitcherTrigger{}, fmt.Errorf("shell: ipc decode core.switcherWait: %w", err)
+	}
+	if out == nil {
+		return SwitcherTrigger{}, fmt.Errorf("shell: ipc core.switcherWait: null result, want the wait's answer")
+	}
+	return *out, nil
+}
+
+// SwitcherFocus implements Core via core.switcherFocus. The reply echoes the
+// window it raised, which the caller does not need: the page re-reads the list
+// afterwards, and a focus the daemon refused is already an error.
+func (c *IPCCore) SwitcherFocus(windowID string) error {
+	_, err := c.call("core.switcherFocus", map[string]any{"window_id": windowID})
+	return err
 }

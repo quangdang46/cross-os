@@ -21,10 +21,16 @@ package shell
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // pipeTransport dials one end of an in-memory net.Pipe whose far end is
@@ -219,6 +225,35 @@ func routeStub(method string, id any, params json.RawMessage) string {
 		}
 		return encRaw(ipcEmptyCollections, id)
 
+	// The switcher (bead ws-4). The wait and the focus decode their own params
+	// into the daemon's keys rather than into the shell's rows, so a key the
+	// bridge spelled differently comes back as bad-params here instead of
+	// agreeing with itself.
+	case "core.windows":
+		return encRaw(ipcWindowsResult, id)
+	case "core.switcherWait":
+		var p struct {
+			TimeoutMs int `json:"timeout_ms"`
+		}
+		if jerr := json.Unmarshal(params, &p); jerr != nil {
+			return errResp(-32602, "switcherWait params: "+jerr.Error())
+		}
+		if p.TimeoutMs <= 0 {
+			return errResp(-32602, "switcherWait needs a positive timeout_ms")
+		}
+		return encRaw(`{"triggered":true,"action":"summon"}`, id)
+	case "core.switcherFocus":
+		var p struct {
+			WindowID string `json:"window_id"`
+		}
+		if jerr := json.Unmarshal(params, &p); jerr != nil {
+			return errResp(-32602, "switcherFocus params: "+jerr.Error())
+		}
+		if p.WindowID == "" {
+			return errResp(-32602, "switcherFocus needs a window_id")
+		}
+		return encRaw(`{"window_id":`+mustJSON(p.WindowID)+`,"focused":true}`, id)
+
 	default:
 		return errResp(-32601, "no such method: "+method)
 	}
@@ -297,6 +332,15 @@ const (
 		`"app_modes":[],"app_ids":["com.apple.Finder"],"device_id":"","capability":"window.move",` +
 		`"parameters":{"zone":"left"},"emit":false,"chord":"Win+Left","action":"Left Half",` +
 		`"priority":80,"specificity":3,"scope":"app"}]`
+
+	// The switcher tiles, in the daemon's MRU order with the highlight on the
+	// first one and a skippable row behind it — index, selected and skippable
+	// are the daemon's answers about its own session, which is why they travel
+	// beside the row instead of being derived by the shell.
+	ipcWindowsResult = `[{"window_id":"412","app_id":"com.apple.finder","title":"Downloads",` +
+		`"index":0,"selected":true,"skippable":false},` +
+		`{"window_id":"887","app_id":"com.microsoft.VSCode","title":"crossos — bridge.go",` +
+		`"index":1,"selected":false,"skippable":true}]`
 )
 
 // encRaw wraps a literal JSON result in the JSON-RPC envelope, so the payload
@@ -919,7 +963,7 @@ func TestIPCEmptyCollectionsAreEmptyNotNil(t *testing.T) {
 		"core.readiness": ipcEmptyCollections, "core.profiles": ipcEmptyCollections,
 		"core.traces": ipcEmptyCollections, "core.pluginMeta": ipcEmptyCollections,
 		"core.apps": ipcEmptyCollections, "config.getUserRules": ipcEmptyCollections,
-		"config.deleteUserRule": ipcEmptyCollections,
+		"config.deleteUserRule": ipcEmptyCollections, "core.windows": ipcEmptyCollections,
 	}
 	app := NewApp(NewIPCCore(pipeTransport{serve: empty.serve}))
 	for _, c := range sourceReaders() {
@@ -940,7 +984,7 @@ func TestIPCNullCollectionIsEmptyNotNil(t *testing.T) {
 		"core.commands": "null", "core.pluginSchemas": "null", "safety.ownershipAudit": "null",
 		"core.readiness": "null", "core.profiles": "null", "core.traces": "null",
 		"core.pluginMeta": "null", "core.apps": "null", "config.getUserRules": "null",
-		"config.deleteUserRule": "null",
+		"config.deleteUserRule": "null", "core.windows": "null",
 	}
 	app := NewApp(NewIPCCore(pipeTransport{serve: nulls.serve}))
 	for _, c := range sourceReaders() {
@@ -996,7 +1040,8 @@ func TestIPCSourceFailuresPropagate(t *testing.T) {
 		"config.setZones", "core.commands", "core.pluginSchemas", "safety.ownershipAudit",
 		"safety.trialState", "core.readiness", "core.profiles", "core.profileApply",
 		"core.traces", "core.pluginMeta", "core.apps", "config.getUserRules",
-		"config.setUserRule", "config.deleteUserRule",
+		"config.setUserRule", "config.deleteUserRule", "core.windows",
+		"core.switcherWait", "core.switcherFocus",
 	}
 	for _, m := range methods {
 		app := NewApp(NewIPCCore(pipeTransport{serve: erroring{method: m}.serve}))
@@ -1071,6 +1116,14 @@ func callSource(t *testing.T, a *App, method string) error {
 	case "config.deleteUserRule":
 		_, err := a.DeleteUserRule("user.win+left@com.apple.Finder")
 		return err
+	case "core.windows":
+		_, err := a.Windows()
+		return err
+	case "core.switcherWait":
+		_, err := a.SwitcherWait(2000)
+		return err
+	case "core.switcherFocus":
+		return a.SwitcherFocus("412")
 	}
 	t.Fatalf("no bridge method speaks %s", method)
 	return nil
@@ -1109,5 +1162,232 @@ func TestIPCSourceDecodeFailureIsNotEmptiness(t *testing.T) {
 	}
 	if _, err := app.TrialState(); err == nil {
 		t.Fatal("a mistyped trial state must not read as an idle trial")
+	}
+}
+
+// The switcher over IPC (bead ws-4): the tiles decode field for field, the two
+// calls carry the daemon's own keys, and the wait is the one call with a
+// deadline — set past the daemon's cap, because the cap is the longest answer
+// that can come back however briefly the shell asked.
+
+func TestIPCSwitcherRoundTrip(t *testing.T) {
+	app := NewApp(NewIPCCore(pipeTransport{stubServer}))
+
+	rows, err := app.Windows()
+	if err != nil {
+		t.Fatalf("Windows: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("Windows=%+v, want the daemon's two tiles", rows)
+	}
+	front := rows[0]
+	if front.WindowID != "412" || front.AppID != "com.apple.finder" || front.Title != "Downloads" ||
+		front.Index != 0 || !front.Selected || front.Skippable {
+		t.Fatalf("Windows[0]=%+v, want the highlighted front tile", front)
+	}
+	if rows[1].WindowID != "887" || rows[1].Index != 1 || rows[1].Selected || !rows[1].Skippable {
+		t.Fatalf("Windows[1]=%+v, want the skippable tile behind it", rows[1])
+	}
+
+	trig, err := app.SwitcherWait(2000)
+	if err != nil {
+		t.Fatalf("SwitcherWait: %v", err)
+	}
+	if !trig.Triggered || trig.Action != "summon" {
+		t.Fatalf("SwitcherWait=%+v, want the summon the daemon queued", trig)
+	}
+	if err := app.SwitcherFocus("412"); err != nil {
+		t.Fatalf("SwitcherFocus: %v", err)
+	}
+	if logs := app.UILogs(); len(logs) != 0 {
+		t.Fatalf("a healthy switcher call must not be logged as a failure: %v", logs)
+	}
+}
+
+func TestIPCSwitcherRPCNamesAndParams(t *testing.T) {
+	var seen []recordedCall
+	app := NewApp(NewIPCCore(pipeTransport{stubServerWith(&seen)}))
+	if _, err := app.Windows(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SwitcherWait(1500); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.SwitcherFocus("887"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"core.windows", "core.switcherWait", "core.switcherFocus"}
+	var got []string
+	for _, c := range seen {
+		got = append(got, c.Method)
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("switcher IPC methods=%v, want %v", got, want)
+	}
+	// The caller's budget travels whole. A payload that dropped or renamed the
+	// key would leave the daemon waiting on a timeout it never received, which
+	// reads as a switcher that opens on someone else's schedule.
+	if got := string(seen[1].Params); got != `{"timeout_ms":1500}` {
+		t.Fatalf("core.switcherWait params=%s, want the caller's budget under timeout_ms", got)
+	}
+	if got := string(seen[2].Params); got != `{"window_id":"887"}` {
+		t.Fatalf("core.switcherFocus params=%s, want the window it was pointed at", got)
+	}
+}
+
+func TestIPCSwitcherWaitNullIsAnError(t *testing.T) {
+	// The wait owes an object even when nothing happened: {triggered:false} is
+	// the expired answer, and a null would decode into the same zero value —
+	// indistinguishable from a poll that simply ran out of budget.
+	app := NewApp(NewIPCCore(pipeTransport{serve: fixed{"core.switcherWait": "null"}.serve}))
+	if _, err := app.SwitcherWait(1000); err == nil {
+		t.Fatal("a null wait answer must not read as an expired poll")
+	}
+	if logs := app.UILogs(); len(logs) != 1 || !strings.Contains(logs[0], "SwitcherWait") {
+		t.Fatalf("a null wait answer must reach the UI log, got %v", logs)
+	}
+	// The honest expired answer is a real object, and it passes clean.
+	idle := NewApp(NewIPCCore(pipeTransport{serve: fixed{
+		"core.switcherWait": `{"triggered":false}`,
+	}.serve}))
+	trig, err := idle.SwitcherWait(1000)
+	if err != nil {
+		t.Fatalf("an expired wait: %v", err)
+	}
+	if trig.Triggered || trig.Action != "" {
+		t.Fatalf("an expired wait=%+v, want nothing triggered", trig)
+	}
+	if logs := idle.UILogs(); len(logs) != 0 {
+		t.Fatalf("an expired poll is an answer, not an incident: %v", logs)
+	}
+}
+
+// deadlineConn records the read deadline the client sets, so the wait's budget
+// can be held to the number the daemon is allowed to take rather than to
+// whatever this test happens to assume.
+type deadlineConn struct {
+	net.Conn
+	readDeadlines []time.Time
+}
+
+func (d *deadlineConn) SetReadDeadline(t time.Time) error {
+	d.readDeadlines = append(d.readDeadlines, t)
+	return d.Conn.SetReadDeadline(t)
+}
+
+// recordingTransport is pipeTransport plus a handle on the connection the
+// client dialed, wrapped so the deadline it sets is visible here.
+type recordingTransport struct {
+	serve func(net.Conn)
+	dials []*deadlineConn
+}
+
+func (r *recordingTransport) Dial() (net.Conn, error) {
+	a, b := net.Pipe()
+	go r.serve(b)
+	d := &deadlineConn{Conn: a}
+	r.dials = append(r.dials, d)
+	return d, nil
+}
+
+// daemonConstInt reads one integer constant out of a daemon source file. The
+// wait's read deadline has to clear the daemon's OWN cap, and a literal copied
+// into this test is exactly the number that rots when the cap moves.
+func daemonConstInt(t *testing.T, path, name string) int {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	for _, d := range f.Decls {
+		gen, ok := d.(*ast.GenDecl)
+		if !ok || gen.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for i, n := range vs.Names {
+				if n.Name != name {
+					continue
+				}
+				lit, ok := vs.Values[i].(*ast.BasicLit)
+				if !ok {
+					t.Fatalf("%s: const %s is not a literal, which this reader does not name", path, name)
+				}
+				v, err := strconv.Atoi(lit.Value)
+				if err != nil {
+					t.Fatalf("%s: const %s=%s: %v", path, name, lit.Value, err)
+				}
+				return v
+			}
+		}
+	}
+	t.Fatalf("%s declares no const %s", path, name)
+	return 0
+}
+
+func TestIPCSwitcherWaitDeadlineClearsTheDaemonsCap(t *testing.T) {
+	// The daemon caps one wait, so that cap — not the caller's ask — is the
+	// longest answer that can come back. A deadline at or below it races a
+	// reply the daemon is still entitled to send, and the user sees a switcher
+	// that opens a beat too late to be worth pressing.
+	path := filepath.Join("..", "..", "core", "cmd", "crossos", "switcher.go")
+	serverMax := time.Duration(daemonConstInt(t, path, "switcherWaitMaxMs")) * time.Millisecond
+	rec := &recordingTransport{serve: stubServer}
+	c := NewIPCCore(rec)
+	start := time.Now()
+	// A deliberately short ask: the deadline is measured from the cap, so a
+	// poll for 200ms is not the thing that decides how long we will read.
+	if _, err := c.SwitcherWait(200); err != nil {
+		t.Fatalf("SwitcherWait: %v", err)
+	}
+	if len(rec.dials) != 1 {
+		t.Fatalf("the wait dialled %d connections, want 1", len(rec.dials))
+	}
+	got := rec.dials[0].readDeadlines
+	if len(got) != 1 {
+		t.Fatalf("the wait set %d read deadlines, want exactly one", len(got))
+	}
+	if margin := got[0].Sub(start); margin <= serverMax {
+		t.Fatalf("the wait's read deadline is %v from the start of the call, want strictly more than "+
+			"the daemon's %v cap", margin, serverMax)
+	}
+}
+
+func TestIPCCallSetsNoDeadline(t *testing.T) {
+	// Every other call keeps what it had: no deadline of its own, so the
+	// switcher's budget cannot quietly start cutting reads short everywhere
+	// else in the bridge.
+	rec := &recordingTransport{serve: stubServer}
+	c := NewIPCCore(rec)
+	if _, err := c.call("core.status", nil); err != nil {
+		t.Fatalf("core.status: %v", err)
+	}
+	if got := rec.dials[0].readDeadlines; len(got) != 0 {
+		t.Fatalf("a plain call set read deadlines %v, want none", got)
+	}
+}
+
+func TestIPCCallWithinStopsReadingAtItsBudget(t *testing.T) {
+	// The budget is a real one: a daemon that never answers ends as a typed
+	// error instead of a poll the UI thread is parked inside forever.
+	silent := func(conn net.Conn) {
+		serveJSONRPC(conn, func(*ipcRequest) string { return "" })
+	}
+	c := NewIPCCore(pipeTransport{serve: silent})
+	start := time.Now()
+	_, err := c.callWithin("core.switcherWait", map[string]any{"timeout_ms": 100}, 20*time.Millisecond)
+	if err == nil {
+		t.Fatal("a daemon that never answers must end the read, not hold it")
+	}
+	if !strings.Contains(err.Error(), "core.switcherWait") {
+		t.Fatalf("the expired read must name the call it cut off, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("the read ran for %v, want the budget to end it", elapsed)
 	}
 }
