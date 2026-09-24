@@ -35,7 +35,6 @@ import (
 	"crossos/core/pkg/keyboard"
 	"crossos/core/pkg/pluginapi"
 	"crossos/core/pkg/profiles"
-	"crossos/core/pkg/rule"
 	"crossos/core/pkg/safety"
 	"crossos/core/pkg/settings"
 	"crossos/core/pkg/winlayout"
@@ -966,20 +965,29 @@ func (c *Core) handleConflicts(_ json.RawMessage) (any, *ipc.RPCError) {
 			firing = append(firing, r)
 		}
 	}
-	return chordConflicts(firing), nil
+	// User rules take part: they are compiled into the decision path, so a
+	// collision that only exists once a person authored a rule is the common
+	// case, not the exotic one. Leaving them out reported "no conflicts" for
+	// exactly the collisions the editor exists to prevent.
+	if userTable := c.userRules.table(); userTable != nil {
+		firing = append(firing, userTable...)
+	}
+	return c.chordConflicts(firing), nil
 }
 
-// chordConflicts groups rules by the chord they claim and hands every contested
-// group to rule.Resolve — the same call the router makes per keystroke
-// (event.Router.Decide), so what the row calls the winner is what fires.
+// chordConflicts groups rules by the chord they claim and, for every contested
+// group, asks the real router who wins. The previous version called
+// rule.Resolve with Enabled/AppModeOK/RequiresOK hardcoded true on every
+// candidate, which ranked rules whose app scopes can never both match and
+// then reported that verdict as the outcome — the comment claimed the dialog
+// could not disagree with the decision path, and it could: two rules on one
+// chord with disjoint scopes were resolved as if a context existed where both
+// fire, while the router would pick a different winner (or none) per context.
 //
-// Every candidate is eligible: a group is one chord, so a context exists in
-// which all of its rules match, and the ranking is the whole content of the
-// row. A chord one rule claims produces no row — an empty list is the truthful
-// answer until two rules meet, which is what the builtin table looks like today
-// (ValidateShortcuts and the rule table's one-binding-per-chord discipline
-// between them).
-func chordConflicts(rules []event.CompiledRule) []conflictRow {
+// Resolving through event.Router per context is slower and a little more
+// code, but it is the only version whose "winner" is the same word the
+// keyboard uses.
+func (c *Core) chordConflicts(rules []event.CompiledRule) []conflictRow {
 	groups := map[string][]event.CompiledRule{}
 	for _, r := range rules {
 		keys := chord(r)
@@ -990,26 +998,15 @@ func chordConflicts(rules []event.CompiledRule) []conflictRow {
 		if len(group) < 2 {
 			continue
 		}
-		cands := make([]rule.Candidate, 0, len(group))
 		claim := map[string]conflictClaim{}
 		for _, r := range group {
-			cands = append(cands, rule.Candidate{
-				RuleID: r.RuleID, PluginID: r.PluginID,
-				Priority: r.Priority, Specificity: r.Specificity, Scope: r.Scope,
-				Intent: r.Intent, Enabled: true, AppModeOK: true, RequiresOK: true,
-			})
 			claim[r.RuleID] = conflictClaim{
 				RuleID: r.RuleID, Plugin: r.PluginID, Action: matrixAction(r),
 			}
 		}
-		res := rule.Resolve(cands)
-		row := conflictRow{Keys: keys, Winner: res.RuleID, Losers: make([]string, 0, len(res.Losers))}
-		row.Rules = append(row.Rules, claim[res.RuleID])
-		for _, l := range res.Losers {
-			row.Losers = append(row.Losers, l.RuleID)
-			row.Rules = append(row.Rules, claim[l.RuleID])
+		if row, contested := c.resolveConflict(keys, group, claim); contested {
+			out = append(out, row)
 		}
-		out = append(out, row)
 	}
 	// Sorted by the chord the row shows: this list is polled, and Go map order
 	// would reshuffle it between refreshes.
@@ -1311,4 +1308,108 @@ func (c *Core) handleApps(_ json.RawMessage) (any, *ipc.RPCError) {
 		})
 	}
 	return out, nil
+}
+
+// resolveConflict asks the real router who wins this chord in a given
+// context, and reports the row only when the answer is not the same
+// everywhere. A group whose winner is identical under every context is not a
+// conflict the user has to act on — the ranking settles it — while a group
+// that flips with the focused app is exactly what the editor exists to show.
+//
+// The router is handed the group alone, so a decision here cannot be changed
+// by a rule on some other chord.
+func (c *Core) resolveConflict(keys string, group []event.CompiledRule, claim map[string]conflictClaim) (conflictRow, bool) {
+	// Two rules on one chord is a conflict whoever wins: the loser is dropped
+	// silently, which is the thing the row exists to show. The winner is
+	// whatever the real router picks, and a chord whose answer changes with
+	// the focused app is flagged so the row is not read as a fixed ranking.
+	contexts := conflictContexts(group)
+	byWinner := map[string]bool{}
+	var primary string
+	for i, ctx := range contexts {
+		rt := event.Compile(group, intent.DefaultRegistry(), c.grantSet(), nil)
+		out := rt.Decide(event.Event{
+			Type:      event.EventKeyDown,
+			Source:    event.SourceKeyboard,
+			KeyCode:   firstKeyCode(group),
+			Modifiers: firstModifiers(group),
+		}, ctx)
+		byWinner[out.WinnerRule] = true
+		if i == 0 {
+			primary = out.WinnerRule
+		}
+	}
+	// The first context produced no winner (the group cannot co-match
+	// anywhere the rules declare). Nothing is being dropped there, so there
+	// is no conflict to report.
+	if primary == "" {
+		return conflictRow{}, false
+	}
+	row := conflictRow{Keys: keys, Winner: primary, Losers: make([]string, 0, len(group)-1)}
+	row.Rules = append(row.Rules, claim[primary])
+	for _, r := range group {
+		if r.RuleID != primary {
+			row.Losers = append(row.Losers, r.RuleID)
+			row.Rules = append(row.Rules, claim[r.RuleID])
+		}
+	}
+	sort.Strings(row.Losers)
+	return row, true
+}
+
+// conflictContexts is the set of focused-app contexts a chord group can differ
+// in: one per declared app id, plus the app-less context for a rule scoped to
+// no app. Deriving them from the rules keeps the check finite without
+// inventing contexts nobody declared.
+func conflictContexts(group []event.CompiledRule) []event.FastContext {
+	seen := map[string]bool{}
+	var out []event.FastContext
+	add := func(appID string) {
+		if seen[appID] {
+			return
+		}
+		seen[appID] = true
+		out = append(out, event.FastContext{AppID: appID, AppMode: event.AppModeNative})
+	}
+	for _, r := range group {
+		if len(r.AppIDs) == 0 {
+			add("")
+			continue
+		}
+		for _, id := range r.AppIDs {
+			add(id)
+		}
+	}
+	return out
+}
+
+// firstKeyCode and firstModifiers are the chord the group was grouped by, so
+// every member agrees on them. The probe event has to carry the modifiers too:
+// without them nothing in the group matches and the conflict reads as
+// "no winner" — a false all-clear.
+func firstKeyCode(group []event.CompiledRule) uint32 {
+	if len(group) == 0 {
+		return 0
+	}
+	return group[0].KeyCode
+}
+
+func firstModifiers(group []event.CompiledRule) uint32 {
+	if len(group) == 0 {
+		return 0
+	}
+	return group[0].Modifiers
+}
+
+// grantSet is the permission set the router authorizes against, matching what
+// decideLocked compiles with — a conflict resolved under different grants
+// would be a different answer than the keyboard gives.
+func (c *Core) grantSet() map[string][]intent.Permission {
+	grants := builtin.Grants()
+	if user := c.userRules.grants(); user != nil {
+		for pluginID, perms := range user {
+			grants[pluginID] = append(grants[pluginID], perms...)
+		}
+	}
+	return grants
 }

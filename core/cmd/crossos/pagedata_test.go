@@ -1047,7 +1047,11 @@ func TestConflictsRankThroughRuleResolve(t *testing.T) {
 			Intent: intent.Intent{ID: "clipboard.copy", Version: 1},
 		}
 	}
-	rows := decodeRows[wireConflictRow](t, chordConflicts([]event.CompiledRule{
+	c, cerr := NewCore(nil, nil)
+	if cerr != nil {
+		t.Fatalf("NewCore: %v", cerr)
+	}
+	rows := decodeRows[wireConflictRow](t, c.chordConflicts([]event.CompiledRule{
 		mk(0x43, "global.copy", "windows-keyboard", 1, rule.ScopeGlobal, rule.PriorityGlobal),
 		mk(0x43, "app.copy", "developer", 2, rule.ScopeApp, rule.PriorityApp),
 		mk(0x50, "solo.copy", "developer", 9, rule.ScopeApp, rule.PriorityApp),
