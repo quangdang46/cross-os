@@ -84,6 +84,18 @@ type stubCore struct {
 	plugins   []PluginState
 	logs      []string
 	failSet   error
+	// Page sources (bead cross-os-72g). The zero value leaves every list
+	// nil, which is what the null-decode test needs; failSources makes every
+	// source fail at once, which is what the logging test needs.
+	matrix      []MatrixRow
+	overrides   []OverrideRow
+	zones       []ZoneRow
+	commands    []CommandRow
+	schemas     []SchemaRow
+	audit       []AuditRow
+	trial       TrialState
+	readiness   []ReadinessRow
+	failSources error
 }
 
 func (s *stubCore) IsRunning() bool    { return s.running }
@@ -141,10 +153,125 @@ func (s *stubCore) Shortcuts() ([]map[string]any, error) {
 	return []map[string]any{{"action": "Left Half", "modifiers": []string{"Ctrl", "Win"}, "key": "Left"}}, nil
 }
 func (s *stubCore) SetShortcuts(shortcuts []map[string]any) (int, error) {
-	if len(shortcuts) == 0 {
-		return 0, errors.New("shell: empty table rejected")
-	}
 	return len(shortcuts), nil
+}
+
+// The source stubs below stand in for the DAEMON's side of the two config
+// writers, so they carry the validation the bridge deliberately does not
+// duplicate: an unknown app/rule/zone id is rejected here and the bridge only
+// has to surface that rejection. Tests that want a clean source leave the
+// table nil (empty) instead of pre-filling it.
+//
+// An EMPTY list is deliberately NOT rejected here. winlayout.ValidateZones and
+// ValidateShortcuts both return nil for a zero-length slice, and
+// config.setZones/setShortcuts are full-replace — so the daemon accepts
+// {"zones":[]} and {"shortcuts":[]} and clears the running set. A stub that
+// refused it would verify "writes fail closed" against a rule production does
+// not have, and the two test files would then pin opposite contracts for the
+// same call. The UI's guard against firing that write by accident lives in the
+// editors (Save is disabled until there is a draft), not here.
+
+func (s *stubCore) Matrix() ([]MatrixRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	return s.matrix, nil
+}
+
+func (s *stubCore) Overrides() ([]OverrideRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	return s.overrides, nil
+}
+
+func (s *stubCore) SetOverride(app, ruleID string, enabled bool) (OverrideRow, error) {
+	if s.failSources != nil {
+		return OverrideRow{}, s.failSources
+	}
+	if app == "" {
+		return OverrideRow{}, errors.New("shell: no app for override")
+	}
+	// A rule is real if the matrix declares it or an override already does.
+	known := false
+	for _, m := range s.matrix {
+		if m.RuleID == ruleID {
+			known = true
+		}
+	}
+	for _, o := range s.overrides {
+		if o.RuleID == ruleID {
+			known = true
+		}
+	}
+	if !known {
+		return OverrideRow{}, errors.New("shell: unknown rule " + ruleID)
+	}
+	for i := range s.overrides {
+		if s.overrides[i].App == app && s.overrides[i].RuleID == ruleID {
+			s.overrides[i].Enabled = enabled
+			return s.overrides[i], nil
+		}
+	}
+	return OverrideRow{}, errors.New("shell: no override for " + app + "/" + ruleID)
+}
+
+func (s *stubCore) Zones() ([]ZoneRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	return s.zones, nil
+}
+
+func (s *stubCore) SetZones(zones []ZoneRow) (int, error) {
+	if s.failSources != nil {
+		return 0, s.failSources
+	}
+	for _, z := range zones {
+		if z.ID == "" {
+			return 0, errors.New("shell: zone without id")
+		}
+		if z.W <= 0 || z.H <= 0 {
+			return 0, errors.New("shell: zone " + z.ID + " has no area")
+		}
+	}
+	s.zones = append([]ZoneRow(nil), zones...)
+	return len(s.zones), nil
+}
+
+func (s *stubCore) Commands() ([]CommandRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	return s.commands, nil
+}
+
+func (s *stubCore) PluginSchemas() ([]SchemaRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	return s.schemas, nil
+}
+
+func (s *stubCore) OwnershipAudit() ([]AuditRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	return s.audit, nil
+}
+
+func (s *stubCore) TrialState() (TrialState, error) {
+	if s.failSources != nil {
+		return TrialState{}, s.failSources
+	}
+	return s.trial, nil
+}
+
+func (s *stubCore) Readiness() ([]ReadinessRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	return s.readiness, nil
 }
 
 func TestBridge(t *testing.T) {
@@ -234,7 +361,11 @@ func TestConfigBridgeSurfaced(t *testing.T) {
 	if n, err := app.SetShortcuts(rows); err != nil || n != 1 {
 		t.Fatalf("SetShortcuts=%d,%v, want 1", n, err)
 	}
-	if _, err := app.SetShortcuts(nil); err == nil {
-		t.Fatal("empty table must fail closed")
+	// Clearing the table is a legal write: winlayout.ValidateShortcuts returns
+	// nil for an empty slice and config.setShortcuts is full-replace, so the
+	// daemon clears the running set. Asserting the stub REFUSED it would pin a
+	// rule production does not have.
+	if n, err := app.SetShortcuts(nil); err != nil || n != 0 {
+		t.Fatalf("SetShortcuts(nil)=%d,%v, want 0,nil (the daemon accepts a clear)", n, err)
 	}
 }

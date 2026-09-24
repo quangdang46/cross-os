@@ -84,3 +84,57 @@ func (s *Service) Shortcuts() ([]map[string]any, error) {
 func (s *Service) SetShortcuts(shortcuts []map[string]any) (int, error) {
 	return s.app.SetShortcuts(shortcuts)
 }
+
+// The ten source bindings below are the Wails-bound surface the pages read
+// (bead cross-os-72g). Their names ARE the frontend API — App.tsx calls them
+// and nothing else, so they change only with the shim, never per page.
+
+// GetMatrix serves the Keyboard page behavior matrix.
+func (s *Service) GetMatrix() ([]MatrixRow, error) {
+	return s.app.GetMatrix()
+}
+
+// GetOverrides serves the Keyboard page app-override table.
+func (s *Service) GetOverrides() ([]OverrideRow, error) {
+	return s.app.GetOverrides()
+}
+
+// SetOverride toggles one app override (returns the daemon's stored row).
+func (s *Service) SetOverride(app, ruleID string, enabled bool) (OverrideRow, error) {
+	return s.app.SetOverride(app, ruleID, enabled)
+}
+
+// GetZones serves the Windows page snap-zone editor.
+func (s *Service) GetZones() ([]ZoneRow, error) {
+	return s.app.GetZones()
+}
+
+// SetZones replaces the snap-zone set (returns the accepted count).
+func (s *Service) SetZones(zones []ZoneRow) (int, error) {
+	return s.app.SetZones(zones)
+}
+
+// Commands serves the command palette.
+func (s *Service) Commands() ([]CommandRow, error) {
+	return s.app.Commands()
+}
+
+// PluginSchemas serves the declarative plugin-settings forms.
+func (s *Service) PluginSchemas() ([]SchemaRow, error) {
+	return s.app.PluginSchemas()
+}
+
+// OwnershipAudit serves the Safety page "What CrossOS created" list.
+func (s *Service) OwnershipAudit() ([]AuditRow, error) {
+	return s.app.OwnershipAudit()
+}
+
+// TrialState serves the Safety page countdown ("none" when idle).
+func (s *Service) TrialState() (TrialState, error) {
+	return s.app.TrialState()
+}
+
+// Readiness serves the onboarding readiness checklist.
+func (s *Service) Readiness() ([]ReadinessRow, error) {
+	return s.app.Readiness()
+}

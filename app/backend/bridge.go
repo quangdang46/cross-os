@@ -103,6 +103,37 @@ type Core interface {
 	// SetShortcuts replaces the shortcut table after validation
 	// (config.setShortcuts): [{action, modifiers, key}].
 	SetShortcuts(shortcuts []map[string]any) (int, error)
+	// Matrix returns the behavior-matrix rules (config.getMatrix). The
+	// Keyboard page renders whatever arrives; the shell never derives a row.
+	Matrix() ([]MatrixRow, error)
+	// Overrides returns the per-app rule overrides (config.getOverrides).
+	Overrides() ([]OverrideRow, error)
+	// SetOverride toggles one per-app override (config.setOverride) and
+	// returns the daemon's echo of the stored row. Unknown app/rule ids are
+	// rejected by the daemon, which is the only validator: a second rule book
+	// in the shell would drift and would report "saved" for a denied edit.
+	SetOverride(app, ruleID string, enabled bool) (OverrideRow, error)
+	// Zones returns the snap-zone rectangles (config.getZones).
+	Zones() ([]ZoneRow, error)
+	// SetZones replaces the snap-zone set (config.setZones) and returns how
+	// many the daemon accepted. A rejected rectangle changes nothing.
+	SetZones(zones []ZoneRow) (int, error)
+	// Commands returns the command-palette entries (core.commands) so a
+	// plugin's commands appear with zero shell change.
+	Commands() ([]CommandRow, error)
+	// PluginSchemas returns each plugin's config_schema
+	// (core.pluginSchemas) for the declarative form renderer.
+	PluginSchemas() ([]SchemaRow, error)
+	// OwnershipAudit lists what CrossOS created on this machine
+	// (safety.ownershipAudit) — the Safety page ownership list and the input
+	// to Reset Everything's ownership scoping.
+	OwnershipAudit() ([]AuditRow, error)
+	// TrialState reports the trial in flight (safety.trialState). State
+	// "none" is an answer (no trial), not a failure.
+	TrialState() (TrialState, error)
+	// Readiness returns the per-area readiness rows (core.readiness) the
+	// onboarding checklist renders.
+	Readiness() ([]ReadinessRow, error)
 }
 
 // App is the Wails-bound service (§7.3 shape: GetStatus, TogglePlugin,
@@ -270,4 +301,127 @@ func (a *App) SetShortcuts(shortcuts []map[string]any) (int, error) {
 		return 0, err
 	}
 	return n, nil
+}
+
+// sourceList normalizes a Core slice before it crosses the Wails boundary.
+// The wire contract says collections are [], never null; a nil here means the
+// daemon broke that promise or the transport died mid-decode. The row is
+// still rendered (an empty list, never a null the frontend must defend
+// against) and the anomaly is noted in the UI log, so "nothing configured"
+// never masquerades as a real answer.
+func sourceList[T any](a *App, method string, rows []T) []T {
+	if rows == nil {
+		a.log.Append(method + ": backend returned null, rendering empty list")
+		return []T{}
+	}
+	return rows
+}
+
+// GetMatrix serves the Keyboard page behavior matrix. A failed call is logged
+// AND returned: a page that got [] because nothing is configured must not
+// look identical to a page whose daemon died.
+func (a *App) GetMatrix() ([]MatrixRow, error) {
+	rows, err := a.core.Matrix()
+	if err != nil {
+		a.log.Append("GetMatrix: " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "GetMatrix", rows), nil
+}
+
+// GetOverrides serves the Keyboard page app-override table.
+func (a *App) GetOverrides() ([]OverrideRow, error) {
+	rows, err := a.core.Overrides()
+	if err != nil {
+		a.log.Append("GetOverrides: " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "GetOverrides", rows), nil
+}
+
+// SetOverride toggles one app override. The returned row is the daemon's echo
+// so the page renders what was stored, not what it optimistically sent; a
+// rejected edit returns the zero row and the error, leaving the already-loaded
+// table untouched.
+func (a *App) SetOverride(app, ruleID string, enabled bool) (OverrideRow, error) {
+	row, err := a.core.SetOverride(app, ruleID, enabled)
+	if err != nil {
+		a.log.Append("SetOverride " + app + "/" + ruleID + ": " + err.Error())
+		return OverrideRow{}, err
+	}
+	return row, nil
+}
+
+// GetZones serves the Windows page snap-zone editor.
+func (a *App) GetZones() ([]ZoneRow, error) {
+	rows, err := a.core.Zones()
+	if err != nil {
+		a.log.Append("GetZones: " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "GetZones", rows), nil
+}
+
+// SetZones replaces the snap-zone set and returns the accepted count. An
+// invalid rectangle (unknown zone id, negative extent) fails closed in the
+// daemon: the error is returned AND logged, and no zone is applied.
+func (a *App) SetZones(zones []ZoneRow) (int, error) {
+	n, err := a.core.SetZones(zones)
+	if err != nil {
+		a.log.Append("SetZones: " + err.Error())
+		return 0, err
+	}
+	return n, nil
+}
+
+// Commands serves the command palette (plugin commands arrive as data).
+func (a *App) Commands() ([]CommandRow, error) {
+	rows, err := a.core.Commands()
+	if err != nil {
+		a.log.Append("Commands: " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "Commands", rows), nil
+}
+
+// PluginSchemas serves the declarative plugin-settings forms.
+func (a *App) PluginSchemas() ([]SchemaRow, error) {
+	rows, err := a.core.PluginSchemas()
+	if err != nil {
+		a.log.Append("PluginSchemas: " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "PluginSchemas", rows), nil
+}
+
+// OwnershipAudit serves the Safety page list of what CrossOS created.
+func (a *App) OwnershipAudit() ([]AuditRow, error) {
+	rows, err := a.core.OwnershipAudit()
+	if err != nil {
+		a.log.Append("OwnershipAudit: " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "OwnershipAudit", rows), nil
+}
+
+// TrialState serves the Safety page countdown. "none" travels as a value with
+// no log line — a real "no trial in flight" is not an incident. A null result
+// is: the daemon owes an object here, and the page is told so.
+func (a *App) TrialState() (TrialState, error) {
+	st, err := a.core.TrialState()
+	if err != nil {
+		a.log.Append("TrialState: " + err.Error())
+		return TrialState{}, err
+	}
+	return st, nil
+}
+
+// Readiness serves the onboarding checklist (keyboard / windows / finder).
+func (a *App) Readiness() ([]ReadinessRow, error) {
+	rows, err := a.core.Readiness()
+	if err != nil {
+		a.log.Append("Readiness: " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "Readiness", rows), nil
 }

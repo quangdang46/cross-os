@@ -373,3 +373,143 @@ func (c *IPCCore) SetShortcuts(shortcuts []map[string]any) (int, error) {
 	}
 	return out.Shortcuts, nil
 }
+
+// The accessors below bridge the ten page sources (bead cross-os-72g). They
+// decode the daemon's snake_case into the frozen Go types in uisources.go and
+// return decode failures as typed errors — a source that fails to decode is a
+// broken bridge, not an empty page, so it must never degrade into [].
+//
+// A literal `null` result for a list method decodes to a nil slice and is left
+// for App.sourceList to normalize: null is a contract violation worth a UI-log
+// line, but the page still gets a list it can render.
+
+// decodeList decodes one array-valued RPC result. method only decorates the
+// error: a decode failure names the source that broke so the UI log says which
+// page to distrust.
+func decodeList[T any](method string, raw json.RawMessage) ([]T, error) {
+	var out []T
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("shell: ipc decode %s: %w", method, err)
+	}
+	return out, nil
+}
+
+// Matrix implements Core via config.getMatrix.
+func (c *IPCCore) Matrix() ([]MatrixRow, error) {
+	raw, err := c.call("config.getMatrix", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[MatrixRow]("config.getMatrix", raw)
+}
+
+// Overrides implements Core via config.getOverrides.
+func (c *IPCCore) Overrides() ([]OverrideRow, error) {
+	raw, err := c.call("config.getOverrides", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[OverrideRow]("config.getOverrides", raw)
+}
+
+// SetOverride implements Core via config.setOverride. Params are snake_case
+// per the frozen contract — the older calls above use the daemon's camelCase
+// pluginId/ruleId spelling, and the two must not be "normalized" into each
+// other. The echo is decoded into the same OverrideRow the list serves, so the
+// page can replace the row it holds with the one the daemon stored.
+func (c *IPCCore) SetOverride(app, ruleID string, enabled bool) (OverrideRow, error) {
+	raw, err := c.call("config.setOverride", map[string]any{
+		"app":     app,
+		"rule_id": ruleID,
+		"enabled": enabled,
+	})
+	if err != nil {
+		return OverrideRow{}, err
+	}
+	var out OverrideRow
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return OverrideRow{}, fmt.Errorf("shell: ipc decode config.setOverride: %w", err)
+	}
+	return out, nil
+}
+
+// Zones implements Core via config.getZones.
+func (c *IPCCore) Zones() ([]ZoneRow, error) {
+	raw, err := c.call("config.getZones", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[ZoneRow]("config.getZones", raw)
+}
+
+// SetZones implements Core via config.setZones. The zones array is wrapped in
+// the {"zones": [...]} params object; marshaling []ZoneRow directly would send
+// a bare array and the daemon would reject the params as a type error.
+func (c *IPCCore) SetZones(zones []ZoneRow) (int, error) {
+	raw, err := c.call("config.setZones", map[string]any{"zones": zones})
+	if err != nil {
+		return 0, err
+	}
+	var out struct {
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return 0, fmt.Errorf("shell: ipc decode config.setZones: %w", err)
+	}
+	return out.Count, nil
+}
+
+// Commands implements Core via core.commands.
+func (c *IPCCore) Commands() ([]CommandRow, error) {
+	raw, err := c.call("core.commands", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[CommandRow]("core.commands", raw)
+}
+
+// PluginSchemas implements Core via core.pluginSchemas.
+func (c *IPCCore) PluginSchemas() ([]SchemaRow, error) {
+	raw, err := c.call("core.pluginSchemas", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[SchemaRow]("core.pluginSchemas", raw)
+}
+
+// OwnershipAudit implements Core via safety.ownershipAudit.
+func (c *IPCCore) OwnershipAudit() ([]AuditRow, error) {
+	raw, err := c.call("safety.ownershipAudit", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[AuditRow]("safety.ownershipAudit", raw)
+}
+
+// TrialState implements Core via safety.trialState. The result is a pointer
+// so a literal null can be told apart from {"state":"none"}: the contract
+// promises an object even when no trial is in flight, and a null here would
+// otherwise render as a countdown stuck at zero with no owner.
+func (c *IPCCore) TrialState() (TrialState, error) {
+	raw, err := c.call("safety.trialState", nil)
+	if err != nil {
+		return TrialState{}, err
+	}
+	var out *TrialState
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return TrialState{}, fmt.Errorf("shell: ipc decode safety.trialState: %w", err)
+	}
+	if out == nil {
+		return TrialState{}, fmt.Errorf("shell: ipc safety.trialState: null result, want the trial object")
+	}
+	return *out, nil
+}
+
+// Readiness implements Core via core.readiness.
+func (c *IPCCore) Readiness() ([]ReadinessRow, error) {
+	raw, err := c.call("core.readiness", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[ReadinessRow]("core.readiness", raw)
+}
