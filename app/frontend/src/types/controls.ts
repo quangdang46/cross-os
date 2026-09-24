@@ -43,7 +43,8 @@ export interface Control {
   note?: string
   action?: string
   source?: string
-  steps?: string[]
+  /** A setup flow's steps: a bare title, or a declared step (see WizardStep). */
+  steps?: (string | WizardStep)[]
   items?: string[]
   /** Action ids this control may invoke, permission-checked by the daemon. */
   actions?: string[]
@@ -127,6 +128,66 @@ export interface ReadinessRow {
   label: string
   ready: boolean
   detail: string
+}
+
+/**
+ * One wizard step with the DAEMON's verdict on it.
+ *
+ * Detail is why the step is not done — the reason to act, not merely the fact
+ * of waiting — and it is absent (not empty) on a done step, so a page leaves
+ * the slot out rather than print a blank line where an explanation would have
+ * been. The shell renders this and never writes to it.
+ */
+export interface OnboardingStep {
+  id: string
+  label: string
+  done: boolean
+  detail?: string
+}
+
+/**
+ * The whole first-run wizard in one answer (the daemon's onboardingState).
+ *
+ * Readiness RIDES ALONG rather than being looked up again: the step verdicts on
+ * this row were computed FROM those rows (core/cmd/crossos/pagedata.go,
+ * handleOnboardingState), so a wizard that re-read the readiness verb to explain a
+ * step would be showing a second opinion that can disagree with the verdict it
+ * is explaining. That is why a control reads the two from here and never joins
+ * them itself.
+ *
+ * current_step is the daemon's cursor — the first step it has not derived as
+ * done, or "done" when it has nothing left. A page must not keep a counter of
+ * its own beside this one: two cursors on one flow is the disagreement this
+ * row exists to make impossible.
+ */
+export interface OnboardingRow {
+  completed: boolean
+  current_step: string
+  steps: OnboardingStep[]
+  readiness: ReadinessRow[]
+  ready: number
+  total: number
+}
+
+/**
+ * One step as a PAGE declares it, in the object form.
+ *
+ * A bare string in `steps` is a title and nothing else, which is every wizard
+ * the daemon has served so far. The object form adds the two things a step
+ * needs beyond its title: the `id` the daemon's verdict is keyed by (so a step's
+ * done mark is a JOIN, never a position guess), and the control KIND whose body
+ * the step draws inline (so a flow that puts the profile cards in the middle of
+ * itself declares that, rather than the shell special-casing a page).
+ *
+ * Both fields are optional so declaring one costs a page nothing, and a step
+ * that uses neither behaves exactly like a bare string.
+ */
+export interface WizardStep {
+  /** The daemon's step id this title is the same step as. */
+  id?: string
+  label: string
+  /** A control kind drawn as this step's body (e.g. the profile cards). */
+  body?: string
 }
 
 /**
@@ -359,6 +420,15 @@ export interface ServiceApi {
   OwnershipAudit(): Promise<AuditRow[]>
   TrialState(): Promise<TrialState>
   Readiness(): Promise<ReadinessRow[]>
+
+  // The first-run wizard's own source and its one terminal write. Both are
+  // declared here rather than narrowed at the call site because the Wails
+  // Service DOES carry them (app/backend/service.go) — ServiceApi was simply
+  // behind, and lib/service.ts is what makes that a compile error rather than an
+  // undefined at runtime. The readiness rows ride along on the row, so a
+  // control never has to join two sources the daemon already joined.
+  OnboardingState(): Promise<OnboardingRow>
+  CompleteOnboarding(): Promise<void>
 
   // Wave 3: the profile cards, the decision trace, the manifest facts, the
   // app picker, and the person-authored rule table. Same rule as the ten

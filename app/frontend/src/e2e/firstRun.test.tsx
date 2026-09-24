@@ -14,11 +14,20 @@
 // page, dispatch an action through the registry, re-read a source on the
 // refresh token, report a failure in words and keep the page usable.
 //
-// The permission step is where this test is least forgiving. The
-// permissions.openSettings action has no bound call — the daemon serves it over
-// IPC and the WebView binding does not carry it — so the button has to refuse
-// in words rather than open nothing. A wizard that completed without the
-// person ever seeing that sentence is the exact failure this test catches.
+// The permission step is where this test is least forgiving, and it used to be
+// unforgiving in the worst way: permissions.openSettings had no bound call at
+// all, so the button could only apologise, and a wizard that ran to the end with
+// that button never once having opened the pane was a green test. It is a real
+// write now, and the assertion below is the button DISPATCHING it — the person
+// clicking Open Settings and the daemon recording that the pane was asked for
+// is the only version of this step worth passing.
+//
+// Two other things this test now pins that it could not before. The Windows
+// profile is picked from INSIDE the flow, on the step that declares the profile
+// cards as its body, rather than by walking to a second page — which is the
+// step the shell used to flatten into a label. And finishing records a write:
+// the flag that ends onboarding is latched by CompleteOnboarding and nothing
+// else, so a wizard that merely re-read readiness could never have ended.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -90,28 +99,44 @@ describe('a fresh machine, from the first launch to the last decision', () => {
     expect(within(checklist).getAllByText('Not ready')).toHaveLength(4)
     expect(within(checklist).getAllByText('grant Accessibility in System Settings')).toHaveLength(4)
 
-    // --- 2. apply the Windows 11 profile, in the one write it takes ---------
-    await goTo('Profiles')
-    fireEvent.click(await screen.findByRole('button', { name: 'Apply Windows 11' }))
+    // --- 2. pick the Windows 11 profile, from inside the flow --------------
+    // The step that declares the profile cards as its own body, so the product
+    // is chosen in the middle of setting it up rather than on a second page.
+    // No nav click between here and the write: that is the point of the step.
+    const firstRun = pane('Welcome to CrossOS')
+    fireEvent.click(within(firstRun).getByRole('button', { name: /Pick a Windows profile/ }))
+    fireEvent.click(await within(firstRun).findByRole('button', { name: 'Apply Windows 11' }))
     await waitFor(() => expect(machine.calls).toContain('ApplyProfile'))
 
     // The rollup on the card is the answer to "did the click land", and the
     // capability that ships no rules reads 0 of 0 rather than borrowing a count.
-    expect(await screen.findByText('All 3 shortcuts on')).toBeTruthy()
-    expect(screen.getByText(/no rule or profile capability covers it yet/)).toBeTruthy()
+    expect(await within(firstRun).findByText('All 3 shortcuts on')).toBeTruthy()
+    expect(within(firstRun).getByText(/no rule or profile capability covers it yet/)).toBeTruthy()
 
-    // --- 3. the System Settings step refuses, in words ----------------------
+    // --- 3. the System Settings step opens the pane, in one write ----------
     await goTo('Welcome')
     const wizard = pane('Welcome to CrossOS')
+    // A profile has been applied, so the daemon has derived the first THREE
+    // steps done — welcome, the pick itself, and the per-extension step the pick
+    // performed — and moved its own cursor on to the permission. The reader's
+    // cursor is still where they left it: two cursors, two facts, both on screen.
+    expect(within(wizard).getAllByText('Done')).toHaveLength(3)
+    const waiting = within(wizard)
+      .getAllByRole('listitem')
+      .find((li) => li.textContent?.includes('Next up'))
+    expect(waiting?.textContent).toContain('Open System Settings')
+    fireEvent.click(within(wizard).getByRole('button', { name: /Open System Settings/ }))
     fireEvent.click(within(wizard).getByRole('button', { name: 'Open Settings' }))
-    expect(
-      await within(wizard).findByText(/has no call for it: a Service\.OpenSystemSettings binding/),
-    ).toBeTruthy()
 
-    // The refusal is a sentence on the page, not a dead button: the rest of
-    // the wizard is still there and still working. The labels are the daemon's
-    // own tokens, so a page that declared a different one draws a different
-    // button — which is the point.
+    // The click ARRIVES. A button that only refused could not make this call,
+    // and a first run that finished without the pane ever being asked for is the
+    // failure this assertion was inverted to catch.
+    await waitFor(() => expect(machine.calls).toContain('OpenSystemSettings'))
+    expect(await within(wizard).findByText('Open Settings: done.')).toBeTruthy()
+
+    // The rest of the wizard is still there and still working. The labels are
+    // the daemon's own tokens, so a page that declared a different one draws a
+    // different button — which is the point.
     expect(within(wizard).getByRole('button', { name: 'verify' })).toBeTruthy()
     expect(within(wizard).getByRole('button', { name: 'Next' })).toBeTruthy()
 
@@ -240,9 +265,12 @@ describe('a fresh machine, from the first launch to the last decision', () => {
 
 describe('when a source fails', () => {
   it('names the failure, keeps the page usable, and drops the stale value', async () => {
-    // The wizard reads readiness, the checklist reads the same source, and the
-    // window's own status comes from a different one. Breaking readiness must
-    // cost the two controls that read it and nothing else.
+    // The wizard reads the onboarding row (which carries the readiness rows on
+    // it), the checklist reads readiness directly, and the window's own status
+    // comes from a third source. Each control depends on ONE of them, so
+    // breaking the two the first-run page draws must cost exactly those two and
+    // leave the rest of the window standing.
+    failOn('OnboardingState', 'readiness source unavailable')
     failOn('Readiness', 'readiness source unavailable')
     await open()
 

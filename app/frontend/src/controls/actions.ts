@@ -89,6 +89,32 @@ function switcherCalls(service: ServiceApi): SwitcherCalls {
 }
 
 /**
+ * The System Settings pane's call, narrowed for the same reason as the two
+ * above and read no more optimistically: the daemon serves permissions.openSettings
+ * over IPC, and app/backend/service.go carries no method for it, so the Wails
+ * Service does not model it yet. Narrowing here is what lets the id live in
+ * ACTION_COMMANDS — a registry that refuses by NAME in a second table describes a
+ * capability nobody has, and the first-run flow needs this one on every launch.
+ *
+ * The seam is a lookup, not a cast: a build whose Service does carry
+ * OpenSystemSettings runs it, and a build that does not refuses in words rather
+ * than throwing, so the button says which call is missing instead of the window
+ * going blank over a deep link.
+ */
+interface SettingsCalls {
+  OpenSystemSettings(): Promise<unknown>
+}
+
+function settingsCalls(service: ServiceApi): SettingsCalls {
+  const calls = service as Partial<SettingsCalls>
+  const refuse = (): Promise<unknown> =>
+    Promise.reject(new Error('a Service.OpenSystemSettings binding; the daemon serves permissions.openSettings over IPC'))
+  return {
+    OpenSystemSettings: typeof calls.OpenSystemSettings === 'function' ? calls.OpenSystemSettings.bind(service) : refuse,
+  }
+}
+
+/**
  * The catalog's bound calls. The Wails Service is the shell's single seam and
  * does not carry these yet — the catalog is served by the daemon's Explorer
  * data source — so they are narrowed here exactly as the control narrows its
@@ -147,6 +173,11 @@ export const ACTION_COMMANDS: Record<string, ActionCommand> = {
   // landed is the one thing a Verify button must not do.
   'permissions.verify': (service) => service.Readiness(),
 
+  // The pane the permission lives in. The Accessibility grant is made by hand in
+  // System Settings, so this opens the place the grant is made and nothing more:
+  // it decides nothing, which is why the step's verdict stays the daemon's.
+  'permissions.openSettings': (service) => settingsCalls(service).OpenSystemSettings(),
+
   // The writes a row names, each async so a write with no row refuses as a
   // rejected promise rather than a synchronous throw: a caller that forgot the
   // try/catch would otherwise take the whole window down over a missing id.
@@ -188,10 +219,6 @@ export const ACTION_COMMANDS: Record<string, ActionCommand> = {
  * renderers.test.tsx fails when a served page declares an id in neither table.
  */
 export const UNBOUND_ACTIONS: Record<string, UnboundAction> = {
-  'permissions.openSettings': {
-    what: 'open the Accessibility pane in System Settings',
-    waitsOn: 'a Service.OpenSystemSettings binding; the daemon serves permissions.openSettings over IPC',
-  },
   [OBSERVE]: {
     what: 'turn the dry-run recorder on or off',
     waitsOn: 'a Service.SetObserve binding; the daemon serves this one over IPC only',

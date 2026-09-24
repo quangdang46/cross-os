@@ -12,12 +12,15 @@
 // page is the HOST's answer arriving over the wire and never a fact the shell
 // re-decides for itself.
 //
-// ONBOARDING ENDS ON A VERIFY THAT SAW EVERY CHECK GREEN. That mirrors the Go
-// side, where the step machine is derived from the readiness rows
-// (core:onboardingState derives its steps from core:readiness) and
-// Host.OnboardingComplete re-sorts when that derivation says setup is done. A
-// fixture that flipped the flag on a click would be testing a button, not the
-// product's rule that readiness is what makes setup finished.
+// ONBOARDING ENDS ON A WRITE, AND ONLY THAT ONE WRITE. That mirrors the Go side,
+// where the step machine is derived from the readiness rows
+// (the onboardingState verb derives its steps from the readiness one) but the finished
+// flag is the one part it cannot re-derive — a user who skipped a step this
+// machine happens to satisfy would be sent back through it on every launch, so
+// the sentence "I am finished" is latched by the onboardingComplete verb and nothing
+// else writes it. A Readiness() that flipped the flag as a side effect of being
+// READ would make a poll a write, which is the one thing a read must never be:
+// the shell would then finish setup on a machine nobody finished.
 //
 // Ids here are invented, for the reason harness.tsx states: a page id is daemon
 // vocabulary (§3.6c), and pasting a real one into a fixture would put a page id
@@ -29,6 +32,8 @@ import type {
   CommandRow,
   Control,
   MatrixRow,
+  OnboardingRow,
+  OnboardingStep,
   OverrideRow,
   PluginMetaRow,
   PluginState,
@@ -43,6 +48,7 @@ import type {
   TraceRow,
   TrialState,
   UserRuleRow,
+  WizardStep,
   ZoneRow,
 } from '../types/controls'
 // The two action ids the Switcher page declares, imported from the registry
@@ -78,12 +84,36 @@ export function servedPage(fields: {
   }
 }
 
+/**
+ * The first-run flow, declared ONCE and read by two consumers that must never
+ * disagree: the page below, which ships the steps a reader sees, and the stub's
+ * onboardingState, which ships the verdicts. A wizard that listed its steps in
+ * one place and judged a different list in another is precisely the two
+ * cursors-on-one-flow bug the daemon row exists to prevent — and here it would
+ * be the FIXTURE that disagreed with itself, which is worse, because the test
+ * would be asserting against an answer nothing ever produced.
+ *
+ * Each step carries the daemon's id, so a done mark is a JOIN rather than a
+ * position guess, and chooseProfile declares the control KIND whose cards it
+ * draws: the Windows profile is picked from inside the flow rather than on a
+ * separate page. The step ids are the daemon's own tokens (welcome, enable,
+ * settings, verify) plus the one this flow adds; they are read as data and never
+ * branched on by the shell.
+ */
+const ONBOARDING_STEPS: WizardStep[] = [
+  { id: 'welcome', label: 'Welcome' },
+  { id: 'chooseProfile', label: 'Pick a Windows profile', body: 'profileList' },
+  { id: 'enable', label: 'Enable per extension' },
+  { id: 'settings', label: 'Open System Settings' },
+  { id: 'verify', label: 'Verify ready' },
+]
+
 /** The first-run page, in the two shapes the host serves it in. */
 export const FIRST_RUN_CONTROL: Control = {
   kind: 'wizard',
   id: 'onboard',
   label: 'Welcome to CrossOS',
-  steps: ['Welcome', 'Enable per extension', 'Open System Settings', 'Verify ready'],
+  steps: ONBOARDING_STEPS,
   actions: ['plugin.enable', 'permissions.openSettings', 'permissions.verify'],
 }
 
@@ -357,6 +387,62 @@ function readinessRows(): ReadinessRow[] {
   ]
 }
 
+/**
+ * The daemon's step machine, derived the way the onboardingState handler derives it
+ * (core/cmd/crossos/pagedata.go, handleOnboardingState): every verdict is a
+ * function of live state, the flag overrides all of them, and the cursor is the
+ * FIRST step not derived as done rather than a counter kept beside the list.
+ *
+ * Deriving it here rather than storing it is what makes this a fixture of the
+ * product's rule and not of a button. Nothing in this function is a verdict the
+ * test asserted into existence — change what the machine has actually done and
+ * the steps move on their own, which is the whole claim the wizard renders.
+ */
+function onboardingState(): OnboardingRow {
+  const rows = readinessRows()
+  const ready = rows.filter((row) => row.ready).length
+  const allReady = rows.length > 0 && ready === rows.length
+  const keyboard = rows.find((row) => row.id === 'keyboard')
+  const anyExtension = Object.values(machine.extensions).some(Boolean)
+  // A profile IS the product: applying one switches on what it bundles, so a
+  // picked profile is what makes the per-extension step true. Deriving it the
+  // other way round would leave the flow asking for a switch the pick already
+  // performed.
+  const chosen = machine.profile !== ''
+
+  const done: Record<string, boolean> = {
+    welcome: chosen || anyExtension || keyboard?.ready === true || allReady,
+    chooseProfile: chosen,
+    enable: chosen || anyExtension,
+    settings: keyboard?.ready === true,
+    verify: allReady,
+  }
+  // Detail is WHY a step is not done, so the wizard can say what to do instead
+  // of only that it is waiting. The daemon omits it on a done step, so a shell
+  // that printed a blank line there would be printing a sentence nobody wrote.
+  const detail: Record<string, string> = {
+    chooseProfile: 'no profile is applied yet',
+    enable: 'no extension is switched on yet',
+    settings: keyboard?.detail ?? '',
+    verify: `${rows.length - ready} of ${rows.length} checks are not ready`,
+  }
+
+  const steps: OnboardingStep[] = []
+  let current = 'done'
+  for (const step of ONBOARDING_STEPS) {
+    const id = step.id ?? ''
+    const isDone = machine.onboarded || done[id] === true
+    steps.push({ id, label: step.label, done: isDone, detail: isDone ? undefined : detail[id] })
+    if (!isDone && current === 'done') current = id
+  }
+  // The flag is the one part that cannot be re-derived, so it is the one that
+  // ends the cursor: a machine the person declared finished has no step left
+  // even though its readiness rows still say what they say.
+  if (machine.onboarded) current = 'done'
+
+  return { completed: machine.onboarded, current_step: current, steps, readiness: rows, ready, total: rows.length }
+}
+
 function capability(id: string, label: string, plugin: string, rule: string, total: number): ProfileCapabilityRow {
   const on = machine.extensions[plugin] ? total : 0
   return {
@@ -616,13 +702,18 @@ const controlSurface: ServiceApi = {
   PluginSchemas: () => answer('PluginSchemas', schemaRows),
   OwnershipAudit: () => answer('OwnershipAudit', auditRows),
   TrialState: () => answer('TrialState', trialPayload),
-  Readiness: () =>
-    answer('Readiness', () => {
-      const rows = readinessRows()
-      // The step machine is DERIVED from these rows, so a verify that saw them
-      // all green is what finishes setup. Nothing else flips this.
-      if (!machine.onboarded && rows.every((row) => row.ready)) machine.onboarded = true
-      return rows
+  // A READ, and only a read. The step machine is derived from these rows by
+  // OnboardingState below, and the finished flag is written by CompleteOnboarding
+  // and nothing else — so a verify that saw every row green reports what it
+  // found and leaves the flag for the person to set. A Readiness() that flipped
+  // it would make polling a write, and a wizard whose finish button appeared
+  // because a page happened to re-read a source would be a wizard nobody
+  // finished.
+  Readiness: () => answer('Readiness', () => readinessRows()),
+  OnboardingState: () => answer('OnboardingState', () => onboardingState()),
+  CompleteOnboarding: () =>
+    answer('CompleteOnboarding', () => {
+      machine.onboarded = true
     }),
 
   Profiles: () => answer('Profiles', profileRows),
@@ -716,8 +807,21 @@ const shellSurface = {
 }
 
 /**
+ * The System Settings opener. It is NOT in ServiceApi and is not expected to be:
+ * the daemon serves permissions.openSettings over IPC and app/backend/service.go
+ * carries no method for it, so the Wails Service does not model it yet. The
+ * action registry narrows for it and refuses in words when the binding is
+ * absent — which is why this call exists here at all. A build that grows the Go
+ * method runs the real one instead, and this entry is what the e2e first-run
+ * test clicks to prove the button is a write rather than a refusal.
+ */
+const onboardingSurface = {
+  OpenSystemSettings: () => answer('OpenSystemSettings', () => ({ opened: 'Accessibility' })),
+}
+
+/**
  * The whole bound surface, over one mutable machine. Stable identity: App.tsx
  * imports this object once, so every call in a test reads the state as it
  * stands at that moment rather than a snapshot taken when the module loaded.
  */
-export const stub = Object.assign(controlSurface, shellSurface, switcherSurface)
+export const stub = Object.assign(controlSurface, shellSurface, switcherSurface, onboardingSurface)
