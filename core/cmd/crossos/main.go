@@ -101,13 +101,13 @@ type Core struct {
 	// pagedata.go). Together with the files the daemon has written it is the
 	// §3.10 rollback scope — the audit names nothing else, because CrossOS
 	// never rolls back state it did not make.
-	owned []safety.IntegrationRecord
 	// switcher is the Alt+Tab switcher's daemon state: the open session, the
 	// unread triggers, and the platform window seam. Built here rather than
 	// on first use so core.windows answers before any chord has been
 	// pressed — a source that only appears once the gesture has fired cannot
 	// render the list the gesture is about to choose from.
 	switcher *switcherService
+	owned    []safety.IntegrationRecord
 }
 
 // NewCore builds a Core with the daemon running and builtin matrices loaded.

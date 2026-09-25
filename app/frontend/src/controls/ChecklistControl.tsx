@@ -18,10 +18,34 @@
 // quietly missing.
 
 import type { ReactElement } from 'react'
+import type { ReadinessRow } from '../types/controls'
 import { useResource } from '../lib/useResource'
 import { humanize } from '../lib/format'
 import { ControlFrame, EmptyState } from './common'
 import type { ControlProps } from './common'
+
+/**
+ * One readiness row as this file has always drawn it: the verdict chip, the
+ * daemon's label, and — the part a person can act on — the daemon's own
+ * sentence about what to do.
+ *
+ * It is exported because the wizard's closing hand-off (the last step of a
+ * first-run flow) lists the SAME rows, and a hand-off that worded a row
+ * differently from the checklist beside it would be the two-answers bug this
+ * control already exists to prevent: one number on one side of the window and
+ * a different one on the other, for one machine. One component, so the wording
+ * is one wording.
+ */
+export function ReadinessLine(props: { row: ReadinessRow }): ReactElement {
+  const { row } = props
+  return (
+    <li className="ctl-item">
+      <span className="ctl-chip">{row.ready ? 'Ready' : 'Not ready'}</span>
+      <span className="ctl-label">{row.label || humanize(row.id)}</span>
+      {row.detail ? <span className="ctl-value">{row.detail}</span> : null}
+    </li>
+  )
+}
 
 export function ChecklistControl(props: ControlProps): ReactElement {
   const { control, ctx } = props
@@ -34,14 +58,6 @@ export function ChecklistControl(props: ControlProps): ReactElement {
   // Everything the daemon added beyond what the page asked for: the core row
   // and one row per installed plugin.
   const extra = reported.filter((row) => !declared.includes(row.id))
-
-  const line = (row: (typeof reported)[number]) => (
-    <li className="ctl-item" key={row.id}>
-      <span className="ctl-chip">{row.ready ? 'Ready' : 'Not ready'}</span>
-      <span className="ctl-label">{row.label || humanize(row.id)}</span>
-      {row.detail ? <span className="ctl-value">{row.detail}</span> : null}
-    </li>
-  )
 
   if (reported.length === 0 && declared.length === 0) {
     return (
@@ -63,7 +79,9 @@ export function ChecklistControl(props: ControlProps): ReactElement {
       error={readiness.error}
     >
       <ul className="ctl-list">
-        {answered.map((id) => line(rowFor(id)!))}
+        {answered.map((id) => (
+          <ReadinessLine key={id} row={rowFor(id)!} />
+        ))}
         {unreported.map((id) => (
           <li className="ctl-item" key={`unreported-${id}`}>
             <span className="ctl-chip">Not checked</span>
@@ -71,7 +89,9 @@ export function ChecklistControl(props: ControlProps): ReactElement {
             <span className="ctl-value">The daemon did not report on this one yet.</span>
           </li>
         ))}
-        {extra.map((row) => line(row))}
+        {extra.map((row) => (
+          <ReadinessLine key={row.id} row={row} />
+        ))}
       </ul>
       {readiness.loading ? <p className="ctl-value">Checking…</p> : null}
     </ControlFrame>

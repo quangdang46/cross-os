@@ -174,6 +174,7 @@ func ruleContexts(r event.CompiledRule) []string {
 	return append(out, r.AppIDs...)
 }
 
+// chord renders a rule's physical binding.
 // chord renders a rule's physical binding. A rule that declares a phase
 // other than the key-down default carries it in the rendering ("Alt+Tab on
 // release"), because two rules on one chord that differ only by phase are not

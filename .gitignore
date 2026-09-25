@@ -40,3 +40,10 @@ app/build/windows/info.json
 app/build/windows/nsis/
 app/build/windows/wails.exe.manifest
 .crossos/
+
+# Locally built binaries: go build drops its output in the module root, and
+# a shell build does the same in app/.
+core/crossos
+app/app
+app/crossos-shell
+.crossos/
