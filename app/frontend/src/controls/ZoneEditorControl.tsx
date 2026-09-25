@@ -33,11 +33,45 @@ import type { ZoneRow } from '../types/controls'
 import { asText, failedTo } from '../lib/wire'
 import { humanize, plural } from '../lib/format'
 import { useResource } from '../lib/useResource'
-import { ControlFrame, EmptyState, TextField } from './common'
+import { ControlFrame, EmptyState, SelectField, TextField } from './common'
 import type { ControlProps } from './common'
 
 // The four geometry fields, named as the wire names them and labelled the way a
 // person reads a rectangle. The wire spelling is the key; the label is ours.
+/**
+ * The eight named places, ported from Rectangle's snap-area rows
+ * (SnapAreaViewController.swift:18-25: topLeft, top, topRight, left, right,
+ * bottomLeft, bottom, bottomRight).
+ *
+ * The reference asks WHICH PLACE and CrossOS asked for four numbers, and that
+ * is the whole difference between a person naming where a window should go and
+ * a person working out what 0.5 means before they can start. The numbers stay
+ * on the row for anyone placing an exact rectangle — this is an addition to the
+ * editor, not a replacement of it, and a rectangle that is none of the eight
+ * is a legitimate thing to want.
+ *
+ * Coordinates are the editor's own normalised [0,1] screen box, the same
+ * convention the served rows already use (x 0.5, w 0.5 is the right half).
+ */
+const PLACES: readonly (readonly [string, number, number, number, number])[] = [
+  ['Top left', 0, 0, 0.5, 0.5],
+  ['Top', 0, 0, 1, 0.5],
+  ['Top right', 0.5, 0, 0.5, 0.5],
+  ['Left', 0, 0, 0.5, 1],
+  ['Right', 0.5, 0, 0.5, 1],
+  ['Bottom left', 0, 0.5, 0.5, 0.5],
+  ['Bottom', 0, 0.5, 1, 0.5],
+  ['Bottom right', 0.5, 0.5, 0.5, 0.5],
+]
+
+/** The place a row already sits in, or '' when it is an exact rectangle. */
+function placeFor(row: ZoneRow): string {
+  for (const [name, x, y, w, h] of PLACES) {
+    if (row.x === x && row.y === y && row.w === w && row.h === h) return name
+  }
+  return ''
+}
+
 const FIELDS = [
   ['x', 'X'],
   ['y', 'Y'],
@@ -82,6 +116,27 @@ export function ZoneEditorControl(props: ControlProps): ReactElement {
 
   function update(index: number, row: ZoneRow): void {
     setDraft((draft ?? [...(zones.data ?? [])]).map((r, at) => (at === index ? row : r)))
+  }
+
+  /**
+   * Choosing a place writes the rectangle, and the id and name when they are
+   * still blank. It does NOT overwrite an id or a name a person already typed:
+   * naming a zone is theirs, and the place is geometry.
+   */
+  function choosePlace(index: number, name: string): void {
+    const place = PLACES.find(([label]) => label === name)
+    if (!place) return
+    const [, x, y, w, h] = place
+    const row = rows[index]
+    update(index, {
+      ...row,
+      id: row.id === '' ? name.toLowerCase().replace(/\s+/g, '-') : row.id,
+      name: row.name === '' ? name : row.name,
+      x,
+      y,
+      w,
+      h,
+    })
   }
 
   function editNumber(index: number, field: Field, text: string): void {
@@ -183,6 +238,16 @@ export function ZoneEditorControl(props: ControlProps): ReactElement {
                   disabled={busy}
                 />
               ))}
+              <SelectField
+                label={`Place, row ${index + 1}`}
+                value={placeFor(row)}
+                onChange={(value) => choosePlace(index, value)}
+                disabled={busy}
+                options={[
+                  { value: '', text: 'An exact rectangle' },
+                  ...PLACES.map(([label]) => ({ value: label, text: label })),
+                ]}
+              />
               {FIELDS.map(([field, label]) => (
                 <TextField
                   key={field}
