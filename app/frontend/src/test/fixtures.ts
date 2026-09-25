@@ -291,6 +291,18 @@ interface Machine {
   profile: string
   /** The keyboard tap: what the Accessibility permission buys. */
   interception: boolean
+  /**
+   * Readiness reads still to answer "the tap is not back" AFTER a grant landed.
+   *
+   * This is the gap the wizard's settle exists for, modelled rather than
+   * described: on a real machine the person flips the switch in System Settings
+   * and comes straight back, and the daemon has not reinstalled the tap yet, so
+   * the first reads are honestly red. A fixture where a grant turned the rows
+   * green in the same tick could not tell a wizard that WAITS from one that
+   * reads once and happens to be right, which is the only distinction the
+   * hand-off turn was about. Zero means the tap is already back.
+   */
+  tapReinstallsIn: number
   extensions: Record<string, boolean>
   rules: UserRuleRow[]
   decisions: TraceRow[]
@@ -330,6 +342,7 @@ function fresh(): Machine {
     onboarded: false,
     profile: '',
     interception: false,
+    tapReinstallsIn: 0,
     extensions: { 'window-keys': false, 'finder-actions': false },
     rules: [],
     decisions: [],
@@ -350,6 +363,22 @@ export function reset(): void {
 /** Makes one bound method reject, so a failing source can be exercised alone. */
 export function failOn(method: string, why: string): void {
   machine.faults[method] = new Error(why)
+}
+
+/**
+ * grantAccessibility is the person finishing the System Settings step, and it
+ * is where the reinstall lag lives.
+ *
+ * `reads` is how many readiness answers the daemon will still give as not-ready
+ * before the tap is back — 1 for the common case where the reader has just come
+ * back from System Settings, 0 for a machine that has been sitting long enough
+ * that the tap is already up. The default is 1 rather than 0 because a fixture
+ * that made the grant instant would let a control that reads ONCE pass a test
+ * whose whole claim is that reading once is not enough.
+ */
+export function grantAccessibility(reads = 1): void {
+  machine.interception = true
+  machine.tapReinstallsIn = reads
 }
 
 function answer<T>(name: string, value: () => T): Promise<T> {
@@ -373,7 +402,14 @@ function matrixRows(): MatrixRow[] {
 }
 
 function readinessRows(): ReadinessRow[] {
-  const tap = machine.interception
+  // The grant is in, the reinstall is not: each read spends one of the pending
+  // answers, so the rows turn green on a LATER read rather than the same one.
+  // Spent here, at the single place every readiness answer is derived, so the
+  // onboarding row and the readiness verb cannot disagree about how many reads
+  // are left — the same rule the daemon's two handlers share one function for.
+  const reinstalling = machine.tapReinstallsIn > 0
+  if (reinstalling) machine.tapReinstallsIn -= 1
+  const tap = machine.interception && !reinstalling
   const keys = machine.extensions['window-keys']
   const finder = machine.extensions['finder-actions']
   const tapError = 'grant Accessibility in System Settings'
@@ -664,7 +700,12 @@ const controlSurface: ServiceApi = {
   Resume: () =>
     answer('Resume', () => {
       // What the Accessibility permission buys: the tap back, and the rows
-      // derived from it green on the next readiness read.
+      // derived from it green on the next readiness read. NO reinstall lag here,
+      // and the difference is deliberate: Resume is the daemon reinstalling its
+      // own tap, which it can do in the call. grantAccessibility is a PERSON
+      // coming back from System Settings, which it cannot — that is the whole
+      // gap the wizard's settle is for, so modelling it on both would test the
+      // wait against a case that has nothing to wait for.
       machine.interception = true
       return { resumed: ['tap'] }
     }),

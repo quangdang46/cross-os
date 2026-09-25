@@ -49,6 +49,17 @@
 //                                help string PER question, never one shared blurb
 //   cmd/param/param.go:120-138   a question the file has already answered is
 //                                deleted from the list and never asked again
+//   cmd/common/await.go:30-56    Until(condition, WithPollInterval, WithTimeout)
+//                                — ask the machine again on a tick rather than
+//                                once, and give up at a NAMED deadline instead
+//   cmd/task/task.go:63-76       the two applied together: a command runs, then
+//                                the artefact it made is polled for on a 1000ms
+//                                interval up to a 60s timeout
+//   cmd/launcher.go:72-80        the closing "Almost ready!" hand-off — the
+//                                install is not done when the commands return,
+//                                it is done once a person has granted what the
+//                                list names, so the last thing printed is that
+//                                list rather than a success word
 //
 // The second reference is the rule this file exists to obey: a step the daemon
 // has already derived as done is not asked again, which is the daemon-derives-done
@@ -56,19 +67,34 @@
 // every step shared one body and the wizard asked all four regardless — and the
 // flattening is what the per-step detail below puts back.
 //
+// The third and fourth are why the LAST step is unlike the others, and why that
+// difference is POSITIONAL rather than keyed on any id. The reference polls
+// because the command it just ran has not finished taking effect — the app it
+// installed is not on disk yet — and it polls to a named budget because a wait
+// with no deadline is not a wait. The wizard has the same gap: a person grants
+// Accessibility in System Settings and comes straight back, and the tap has not
+// reinstalled yet, so a SINGLE read says "not ready" about a permission that is
+// already granted. Reading once is the very bug the reference's Until exists to
+// fix, so the last step polls the readiness verb the checklist already reads —
+// a wait, never a verdict — and when the budget runs out it names the timeout
+// and hands the reader the list of what is still to grant, which is what
+// launcher.go prints instead of "Installed successfully".
+//
 // No code was copied: the reference is a survey-driven zsh/Go installer and this
 // is a declared-schema renderer, so what transfers is the shape — an ordered
 // list of named steps, one open at a time, each with its own body, each with its
-// own verdict, and a finish. Tracked in third_party/pcfy-my-mac/ATTRIBUTION.md.
+// own verdict, a bounded wait, and a hand-off instead of a finish line. Tracked
+// in third_party/pcfy-my-mac/ATTRIBUTION.md.
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { OnboardingRow, OnboardingStep, ReadinessRow, WizardStep } from '../types/controls'
 import { humanize, plural } from '../lib/format'
-import { asBool, asList, asNumber, asRecord, asText, failedTo } from '../lib/wire'
+import { asBool, asList, asNumber, asRecord, asText, describeError, failedTo } from '../lib/wire'
 import { useResource } from '../lib/useResource'
 import { commandFor } from './actions'
 import { ProfileListControl } from './ProfileListControl'
+import { ReadinessLine } from './ChecklistControl'
 import { ControlFrame, EmptyState } from './common'
 import type { ControlProps } from './common'
 
@@ -79,6 +105,29 @@ import type { ControlProps } from './common'
  * whose title happened to read "Done" must not be mistaken for the flow ending.
  */
 const NO_STEP_LEFT = 'done'
+
+/**
+ * The wait the last step makes, in the reference's own numbers.
+ *
+ * pcfy-my-mac polls the artefact it just created every 1000ms and gives up at
+ * 60s (cmd/common/await.go:30-56, applied at cmd/task/task.go:63-76 with
+ * WithPollInterval(1000*time.Millisecond) and WithTimeout(60*time.Second)). The
+ * pair is not decoration: a poll cadence under a second would hammer a daemon
+ * that is installing an event tap, and a budget past a minute is longer than a
+ * person will sit watching a spinner, so the shell says the number rather than
+ * spinning forever.
+ *
+ * The same reasoning is why the wait is here and not in useResource. That hook's
+ * rule is "one read per refresh token, and the cadence belongs to App" — which
+ * is right for a page that is showing a snapshot. The last step is not showing
+ * a snapshot; it is waiting for the machine to catch up with a write the person
+ * just made OUTSIDE the app, and the shell's 5s poll is far too slow to be the
+ * thing that notices. So this is a second, deliberate, BUBBLE-SCOPED read that
+ * exists only while the last step is open, and the reason it is allowed to
+ * break the one-read rule is written down rather than assumed.
+ */
+const SETTLE_POLL_MS = 1000
+const SETTLE_TIMEOUT_MS = 60_000
 
 /** The empty row a first paint shows, and the answer to a source that has not
  *  landed yet. Every field is the daemon's own neutral value, so a step drawn
@@ -189,6 +238,125 @@ function verdict(
   return byPosition[index]
 }
 
+/**
+ * What the settle has to say, which is a WAIT and never a verdict.
+ *
+ * The daemon still owns every mark on this page; all this carries is whether the
+ * shell is still looking, what it saw, and whether the budget ran out. That
+ * distinction is the whole point: a control that turned "everything is ready" into
+ * a Done mark of its own would be inventing a verdict, and a control that turned
+ * "the budget ran out" into "not ready" would be inventing a failure. Neither is
+ * written, so the two cases stay tellable apart on screen.
+ */
+interface Settle {
+  /** The rows from the most recent poll, which is the daemon's own answer. */
+  rows: ReadinessRow[]
+  /** How many reads have landed, so "still checking" can show its own progress. */
+  polls: number
+  /** True while the wait is still going. */
+  waiting: boolean
+  /** True once every row the daemon sent is ready. */
+  settled: boolean
+  /** True when the budget elapsed with rows still unready. */
+  timedOut: boolean
+  /** The last failure, kept in place like every other source's. */
+  error: string
+}
+
+const NO_SETTLE: Settle = { rows: [], polls: 0, waiting: false, settled: false, timedOut: false, error: '' }
+
+/**
+ * useSettle is the reference's Until, in React.
+ *
+ * The condition is "every row the daemon sent is ready" and the bound is 60s, so
+ * a person who grants a permission and watches the row turn green needs no second
+ * click — which is the whole failure this fixes. Two properties of the port are
+ * load-bearing:
+ *
+ *   - The interval is CLEARED on unmount and whenever `active` goes false, so a
+ *     reader who walks off the last step is not polled for. The reference's
+ *     Until has no such case because its process exits; a window does.
+ *   - `armed` restarts the wait from zero. Without it, a reader who clicks
+ *     Verify a second time would join a wait that had already burned 59 of its
+ *     60 seconds and be told "timed out" for a permission they had just granted,
+ *     which is the same lie in a new place. This is the "without a second click"
+ *     half of the promise: one click is enough, and clicking again is not a way
+ *     to buy more time than the budget allows.
+ */
+function useSettle(
+  read: () => Promise<ReadinessRow[]>,
+  refresh: () => void,
+  active: boolean,
+  armed: number,
+): Settle {
+  const [settle, setSettle] = useState<Settle>(NO_SETTLE)
+  // The reader is re-created every render by its caller (it closes over ctx), so
+  // it is read through a ref for the same reason useResource reads its loader
+  // through one: a callback that changed identity each pass would restart the
+  // effect on every render and poll in a loop.
+  const reader = useRef(read)
+  reader.current = read
+  // Same for the refresh, and for the same reason: an inline arrow would be a
+  // new function every pass and would restart the wait on every render.
+  const ask = useRef(refresh)
+  ask.current = refresh
+
+  useEffect(() => {
+    if (!active) {
+      setSettle(NO_SETTLE)
+      return
+    }
+    let live = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const started = Date.now()
+    let polls = 0
+
+    const tick = (): void => {
+      reader.current().then(
+        (rows) => {
+          if (!live) return
+          polls += 1
+          const list = Array.isArray(rows) ? rows : []
+          // "Every row is ready" is the reference's condition(). A daemon that
+          // reports NO rows is not ready — the machine has not confirmed
+          // anything — so an empty answer keeps waiting rather than settling on
+          // a vacuous truth, and the wait is what the timeout is for.
+          const settled = list.length > 0 && list.every((row) => row.ready)
+          const expired = !settled && Date.now() - started >= SETTLE_TIMEOUT_MS
+          if (settled || expired) {
+            // A poll that succeeded is a NEW answer, so the daemon's own row is
+            // re-read: the wizard's step verdicts come from there and would
+            // otherwise still show the state from before the grant. This is a
+            // refresh, not a verdict — the daemon re-derives, the shell waits.
+            if (settled) ask.current()
+            setSettle({ rows: list, polls, waiting: false, settled, timedOut: expired, error: '' })
+            return
+          }
+          setSettle({ rows: list, polls, waiting: true, settled: false, timedOut: false, error: '' })
+          timer = setTimeout(tick, SETTLE_POLL_MS)
+        },
+        (reason: unknown) => {
+          if (!live) return
+          // A failed read is a failure the daemon already named; it is shown
+          // where every other source's failure is shown, and the wait stops,
+          // because polling a source that is answering "unavailable" sixty
+          // times a minute helps nobody.
+          const message = describeError(reason)
+          setSettle({ rows: [], polls, waiting: false, settled: false, timedOut: false, error: message })
+        },
+      )
+    }
+
+    tick()
+    return () => {
+      live = false
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [active, armed])
+
+  return settle
+}
+
 export function WizardControl(props: ControlProps): ReactElement {
   const { control, ctx } = props
   const actions = Array.isArray(control.actions) ? control.actions : []
@@ -212,6 +380,19 @@ export function WizardControl(props: ControlProps): ReactElement {
   const [error, setError] = useState('')
   const [outcome, setOutcome] = useState('')
 
+  // The last step is the one that waits, and it waits because it is LAST — not
+  // because its id reads "verify". A page that calls its last step something
+  // else gets the same wait, and a page that inserts a step after it gets the
+  // wait on the new last one, which is the only way this rule can stay true for
+  // a flow nobody has read yet. A step named by id here would be a page id in a
+  // conditional, which is the thing §3.6c exists to prevent.
+  const lastIndex = steps.length - 1
+  // Bumped by the verify click, which restarts the wait from a full budget.
+  const [armed, setArmed] = useState(0)
+  const readReadiness = useCallback(() => ctx.service.Readiness(), [ctx.service])
+  const askDaemon = useCallback(() => ctx.refresh(), [ctx.refresh])
+  const settle = useSettle(readReadiness, askDaemon, lastIndex > 0 && open === lastIndex, armed)
+
   const row = state.data
   const byId = new Map(row.steps.map((step) => [step.id, step]))
   const checks = row.readiness
@@ -226,6 +407,16 @@ export function WizardControl(props: ControlProps): ReactElement {
   // "done" once it has none, so a flow finished by the person saying so — the
   // one thing the daemon cannot re-derive from live state — ends here too.
   const nothingLeft = row.current_step === NO_STEP_LEFT
+
+  // What the HAND-OFF lists is the poll's own rows when there are any, because
+  // they are the freshest answer the daemon has given and the reader is about to
+  // go and act on them; the onboarding row's copy is from before the last poll
+  // and naming a permission the person has already granted is the exact
+  // mistake the wait exists to stop. The count above still comes from the
+  // daemon's row, because that is the row the STEP verdicts came from and the
+  // two must not be read as one number from two sources.
+  const handoff = settle.rows.length > 0 ? settle.rows : checks
+  const outstanding = handoff.filter((check) => !check.ready)
 
   async function run(action: string): Promise<void> {
     const command = commandFor(action)
@@ -245,6 +436,16 @@ export function WizardControl(props: ControlProps): ReactElement {
       await command(ctx.service)
       setOutcome(`${actionLabel(action)}: done.`)
       ctx.note(`${actionLabel(action)} (${action}): done.`)
+      // A write the reader just made is the thing the wait is FOR: the tap has
+      // to reinstall, and the daemon is not going to say so until it has. So
+      // any declared action run from the last step restarts the wait on a full
+      // budget. It is deliberately NOT keyed on an action id — naming
+      // "permissions.verify" here would put a second copy of the action
+      // vocabulary in this file, which is the one thing the header above this
+      // code forbids, and a page whose verify verb is spelled differently would
+      // silently lose the wait. A page declares what its last step can do; the
+      // shell waits after any of it.
+      if (lastIndex > 0 && open === lastIndex) setArmed((n) => n + 1)
       ctx.refresh()
     } catch (reason) {
       const message = failedTo(actionLabel(action), reason)
@@ -306,7 +507,7 @@ export function WizardControl(props: ControlProps): ReactElement {
     <ControlFrame
       label={control.label ?? control.id}
       note={control.note}
-      error={error || state.error}
+      error={error || settle.error || state.error}
     >
       <ol className="ctl-steps" aria-label="Setup steps">
         {steps.map((step, index) => {
@@ -368,6 +569,61 @@ export function WizardControl(props: ControlProps): ReactElement {
       )}
       {shownVerdict?.detail ? <p className="ctl-empty">{shownVerdict.detail}</p> : null}
       {row.completed ? <p className="ctl-value">Setup is recorded as finished.</p> : null}
+
+      {/* THE WAIT, and the hand-off it ends in. Both are drawn only on the last
+          step and both are the reference's shape (await.go's bounded Until, then
+          launcher.go's closing "Almost ready!" list), because that is the only
+          point in a setup flow where "are we there yet" is a question rather
+          than a step to walk.
+
+          Four states, kept apart on purpose:
+
+            waiting  - still looking. The poll count is the PROGRESS; the
+                       reference calls i.Progress() on every tick for the same
+                       reason, so a reader can tell a live wait from a dead one
+                       instead of watching an unchanging line.
+            settled  - the daemon's own rows all came back ready. The step marks
+                       above have already been re-derived from that same answer,
+                       so this says the wait is over and stops.
+            timedOut - the budget elapsed. The reference names the timeout
+                       (fmt.Errorf("%w after %v", ErrTimeout, cfg.Timeout)) and
+                       then hands over the list; so does this, and the list is
+                       the point. A reader told "not ready" with no path forward
+                       is exactly the reader launcher.go refuses to leave: it
+                       prints what is still to grant, and where.
+            error    - the read failed. Shown like every other source's failure,
+                       never as a verdict about the machine. */}
+      {settle.waiting ? (
+        <p className="ctl-value">
+          Waiting for the machine to catch up — checked {plural(settle.polls, 'time')}, giving it up
+          to {SETTLE_TIMEOUT_MS / 1000} seconds.
+        </p>
+      ) : null}
+      {settle.timedOut ? (
+        <>
+          <p className="ctl-value">
+            Still not ready after {SETTLE_TIMEOUT_MS / 1000} seconds. That is the wait running out,
+            not an answer about the machine.
+          </p>
+          {/* The hand-off. The reference's words are "Almost ready!" and its
+              reason is that the install's last task is a PERSON granting
+              permissions, not the commands returning. Each line is a daemon
+              readiness row drawn by the checklist's own renderer, so the
+              sentence that tells someone what to do is the same one the
+              checklist gives them a screen away — and the daemon's `detail`
+              carries the path, so the shell never composes a System Settings
+              location of its own. */}
+          <p className="ctl-value">Almost ready! Still to grant:</p>
+          <ul className="ctl-list">
+            {outstanding.map((check) => (
+              <ReadinessLine key={check.id} row={check} />
+            ))}
+          </ul>
+        </>
+      ) : null}
+      {settle.settled ? (
+        <p className="ctl-value">Every check is ready — no second click needed.</p>
+      ) : null}
 
       {/* The declared body, drawn by the renderer for the kind the step named.
           A kind this build cannot draw is NAMED rather than skipped, so the gap
