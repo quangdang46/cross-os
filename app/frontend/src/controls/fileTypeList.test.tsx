@@ -186,6 +186,45 @@ describe('the file-type library', () => {
     )
   })
 
+  it('refuses to write a new default filename, and names the rule that refuses it', async () => {
+    // The daemon's row identity is the PAIR (ext, baseName) and its row write
+    // saves only the label, the template and the on/off switch — so a baseName
+    // edit has no referent on the other side. This field was ENABLED and routed
+    // through the same saveField as the menu label: the person typed, the
+    // control reported the save, and nothing changed. That is a control that
+    // looks live and is dead, and the only proof is a daemon refusal arriving
+    // 300ms later, in a notice about a row they may already have left.
+    const { act } = await import('@testing-library/react')
+    vi.useFakeTimers()
+    try {
+      const svc = daemon({ rows: [row()] })
+      const noted: string[] = []
+      const { container } = render(
+        <>{renderControl(CONTROL, { ...context(svc), note: (m: string) => noted.push(m) })}</>,
+      )
+      await turn()
+
+      const field = screen.getByLabelText('Default filename for New Markdown') as HTMLInputElement
+      expect(field.readOnly, 'the field is not somewhere to type').toBe(true)
+      expect(
+        container.textContent ?? '',
+        'and the rule is on screen rather than left to be discovered by typing',
+      ).toMatch(/base name/i)
+
+      // Typing at it anyway dispatches nothing, now or after the debounce: the
+      // value stays the daemon's, and no write is ever scheduled.
+      fireEvent.change(field, { target: { value: 'Renamed' } })
+      await act(async () => {
+        vi.advanceTimersByTime(300)
+      })
+      await turn()
+      expect(svc.calls, 'no write is attempted, now or ever').not.toContain('SetFileType')
+      expect(field.value, 'and the value is still the one the daemon holds').toBe('Untitled')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('says so in words when the catalog is empty', async () => {
     const { container } = show(daemon({ rows: [] }))
     await turn()
@@ -373,6 +412,78 @@ describe('the file-type library', () => {
         (svc.writes[0] as { displayName: string }).displayName,
         'and the write carries the LAST keystroke, not the first',
       ).toBe('New Markdown 2')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('flushes a word typed inside the debounce window rather than dropping it on the way out', async () => {
+    // The reference does not leave its settings sheet with a write in flight:
+    // Done is `vm.persist(); dismiss()` (PreferencesView.swift:111-113), over
+    // a persist() that writes the list (PreferencesView.swift:35-37). This
+    // port's debounce opened the same window and ended it the other way — the
+    // timer was cleared and its word dropped — so a label typed and a page left
+    // inside 300ms was a label the daemon never heard of, with no refusal to
+    // point at. A menu label is what Finder shows; losing it silently is the
+    // failure the whole debounce rule exists to prevent, arriving by the door
+    // the rule opened.
+    const { act } = await import('@testing-library/react')
+    vi.useFakeTimers()
+    try {
+      const svc = daemon({ rows: [row()] })
+      const noted: string[] = []
+      render(
+        <>{renderControl(CONTROL, { ...context(svc), note: (m: string) => noted.push(m) })}</>,
+      )
+      await turn()
+
+      fireEvent.change(screen.getByLabelText('Menu label for New Markdown'), {
+        target: { value: 'Half typed' },
+      })
+      expect(svc.writes.length, 'the write is still inside the debounce window').toBe(0)
+
+      // Leaving before the timer fires is the case that has to flush.
+      await act(async () => {
+        cleanup()
+      })
+      await turn()
+
+      expect(svc.writes.length, 'the pending word is fired, not cancelled').toBe(1)
+      expect(
+        (svc.writes[0] as { displayName: string }).displayName,
+        'and it carries the last keystroke, because that is what was pending',
+      ).toBe('Half typed')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('says out loud when that last word never reached the daemon', async () => {
+    // The reference's persist() is a silent assignment that cannot report a
+    // failure, and a webview cannot copy that: a word that did not reach the
+    // daemon has to be announced, or the flush is just a slower way of losing
+    // it. The notice outlives the control, which is the point of raising it here.
+    const { act } = await import('@testing-library/react')
+    vi.useFakeTimers()
+    try {
+      const svc = daemon({ rows: [row()], failOn: 'SetFileType', why: 'no such file type' })
+      const noted: string[] = []
+      render(
+        <>{renderControl(CONTROL, { ...context(svc), note: (m: string) => noted.push(m) })}</>,
+      )
+      await turn()
+
+      fireEvent.change(screen.getByLabelText('Menu label for New Markdown'), {
+        target: { value: 'Half typed' },
+      })
+      await act(async () => {
+        cleanup()
+      })
+      await turn()
+
+      expect(noted.join(' '), 'the daemon\'s own refusal, not a silent drop').toMatch(
+        /before leaving.*no such file type/i,
+      )
     } finally {
       vi.useRealTimers()
     }

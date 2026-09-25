@@ -718,7 +718,7 @@ func TestIPCWave3RPCNames(t *testing.T) {
 	if _, err := app.Profiles(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := app.ApplyProfile("windows-11"); err != nil {
+	if _, err := app.ApplyProfile("windows-11", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := app.Traces(); err != nil {
@@ -764,7 +764,7 @@ func TestIPCWave3WriteParams(t *testing.T) {
 	var seen []recordedCall
 	app := NewApp(NewIPCCore(pipeTransport{stubServerWith(&seen)}))
 
-	res, err := app.ApplyProfile("windows-11")
+	res, err := app.ApplyProfile("windows-11", nil)
 	if err != nil {
 		t.Fatalf("ApplyProfile: %v", err)
 	}
@@ -772,6 +772,9 @@ func TestIPCWave3WriteParams(t *testing.T) {
 	if res["profile"] != "windows-11" || res["rules"] != float64(21) || res["plugins"] != float64(2) {
 		t.Fatalf("core.profileApply reply=%v, want the applied profile with its counts", res)
 	}
+	// A NIL selection omits the key entirely — see
+	// TestIPCProfileApplyCapabilityPayload for why the omission is the contract
+	// rather than a shorthand, and for the two shapes that must differ from it.
 	if got := strings.Join(jsonKeySet(t, seen[0].Params), ","); got != "profile" {
 		t.Fatalf("core.profileApply params keys=%s, want profile", got)
 	}
@@ -829,6 +832,78 @@ func TestIPCWave3WriteParams(t *testing.T) {
 	if logs := app.UILogs(); len(logs) != 0 {
 		t.Fatalf("a healthy Wave 3 write must not be logged as a failure: %v", logs)
 	}
+}
+
+// TestIPCProfileApplyCapabilityPayload is the per-capability selection at the
+// place it either crosses the wire or does not.
+//
+// The control computed a selection, previewed it, and handed it to the bound
+// call — and every layer below dropped it, so the sentence the card renders
+// ("switch on 2 shortcuts") described a change that did not happen. No Go test
+// could see that: the shell's own callers sent no selection, so the payload
+// looked right from the daemon's side, and no TS test could see it either,
+// because the generated binding took one argument and the second was discarded
+// before Go ran. This test pins the half Go owns, and the two halves are the
+// same contract read from opposite ends: the daemon decodes `capabilities` as a
+// *[]string, so THIS is the only place the absent/narrowed/empty distinction can
+// be made, and a client that collapsed any two of them would turn a card with
+// every switch off into a card that applied everything.
+func TestIPCProfileApplyCapabilityPayload(t *testing.T) {
+	payload := func(t *testing.T, capabilities []string) map[string]json.RawMessage {
+		t.Helper()
+		var seen []recordedCall
+		app := NewApp(NewIPCCore(pipeTransport{stubServerWith(&seen)}))
+		if _, err := app.ApplyProfile("windows-11", capabilities); err != nil {
+			t.Fatalf("ApplyProfile(%v): %v", capabilities, err)
+		}
+		if len(seen) != 1 {
+			t.Fatalf("core.profileApply was called %d times, want once", len(seen))
+		}
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(seen[0].Params, &obj); err != nil {
+			t.Fatalf("core.profileApply params: %v", err)
+		}
+		return obj
+	}
+
+	t.Run("absent omits the key entirely", func(t *testing.T) {
+		// Not `"capabilities": null`. The daemon's field is a *[]string, and
+		// JSON null decodes to a nil pointer just as absence does — so null
+		// would happen to work today. Omitting it is nonetheless the contract:
+		// it is the one spelling that cannot be misread as "present and
+		// empty" by a future decoder, and a payload assertion is the only
+		// thing that keeps the choice from drifting into `null` silently.
+		if got := payload(t, nil); len(got) != 1 {
+			t.Fatalf("an absent selection sent %v, want {profile} alone", got)
+		}
+	})
+
+	t.Run("a narrowed selection rides the payload", func(t *testing.T) {
+		got := payload(t, []string{"keyboard.shortcuts", "window.snap"})
+		raw, ok := got["capabilities"]
+		if !ok {
+			t.Fatalf("a narrowed selection sent %v, want the capabilities key", got)
+		}
+		if string(raw) != `["keyboard.shortcuts","window.snap"]` {
+			t.Fatalf("capabilities=%s, want the two ids in order", raw)
+		}
+	})
+
+	t.Run("an empty selection is [] and never absent", func(t *testing.T) {
+		// The case the daemon cannot express any other way. `[]` and an omitted
+		// key mean opposite things — apply nothing, apply everything — so a
+		// client that skipped the empty slice would apply the whole bundle to a
+		// card whose switches are all off, which is the one outcome the
+		// per-capability switch must never produce.
+		got := payload(t, []string{})
+		raw, ok := got["capabilities"]
+		if !ok {
+			t.Fatal("an empty selection was omitted, so the daemon read it as ABSENT and applied everything")
+		}
+		if string(raw) != `[]` {
+			t.Fatalf("capabilities=%s, want an empty JSON array", raw)
+		}
+	})
 }
 
 // TestIPCSourceWriteParams asserts the two write payloads byte-for-byte. The
@@ -1096,7 +1171,7 @@ func callSource(t *testing.T, a *App, method string) error {
 		_, err := a.Profiles()
 		return err
 	case "core.profileApply":
-		_, err := a.ApplyProfile("windows-11")
+		_, err := a.ApplyProfile("windows-11", nil)
 		return err
 	case "core.traces":
 		_, err := a.Traces()

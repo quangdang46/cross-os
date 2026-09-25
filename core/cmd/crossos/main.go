@@ -867,8 +867,14 @@ func (c *Core) methods() map[string]ipc.Handler {
 		// wizard's derived state.
 		"core.profiles":     c.handleCoreProfiles,
 		"core.profileApply": c.handleProfileApply,
-		"core.conflicts":    c.handleConflicts,
-		"core.traces":       c.handleTraces,
+		// The way BACK out of a profile, registered beside the apply because a
+		// page that can only turn a profile on is a half-feature: the store
+		// records what it overwrote and nothing can put it back, so the
+		// person who applied one has neither a door nor a way to find out
+		// that a door should exist.
+		"core.profileDeactivate": c.handleProfileDeactivate,
+		"core.conflicts":         c.handleConflicts,
+		"core.traces":            c.handleTraces,
 		// The erase behind the Observe page's clear button. Registered beside
 		// the read rather than on its own because a recorder that keeps every
 		// keystroke decision this session and cannot be emptied is a list
@@ -1031,6 +1037,11 @@ func main() {
 	// user last wrote, so a restart resumes the Extensions page as it was
 	// left rather than switching every plugin back on.
 	c.loadPluginEnablement()
+	// loadMenuOff is that same seeding for the Explorer's per-item menu
+	// toggle: the write that switches a row off goes through to the settings
+	// document, so without reading it back the daemon would serve every row
+	// on again after a restart while the document still said otherwise.
+	c.loadMenuOff()
 	// Live keyboard tap (bead cross-os-2io). Best-effort: a TCC denial is
 	// NOT fatal — the daemon still serves IPC and core.status reports
 	// interception=off with the reason, so the user can grant consent and

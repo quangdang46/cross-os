@@ -147,7 +147,15 @@ func (s *stubCore) Profiles() ([]ProfileRow, error) {
 // may be applied is the daemon's alone. A stub that accepted one would let the
 // delegation test pass against a bridge that reports "applied" for a bundle
 // that does not exist.
-func (s *stubCore) ApplyProfile(profileID string) (map[string]any, error) {
+//
+// It also RECORDS the selection rather than ignoring it, and that recording is
+// the stub's whole reason for taking the second parameter. A stub that accepted
+// `capabilities` and dropped it would satisfy the Core interface and let a
+// bridge that stopped forwarding the selection pass every test in this file —
+// which is precisely the bug, sitting in the test double where nothing can see
+// it. `lastApply` is what TestBridgeForwardsTheCapabilitySelection reads.
+func (s *stubCore) ApplyProfile(profileID string, capabilities []string) (map[string]any, error) {
+	s.lastApply = &appliedSelection{id: profileID, capabilities: capabilities}
 	if s.failSources != nil {
 		return nil, s.failSources
 	}
@@ -155,6 +163,14 @@ func (s *stubCore) ApplyProfile(profileID string) (map[string]any, error) {
 		return nil, errors.New("shell: unknown profile " + profileID)
 	}
 	return map[string]any{"profile": profileID, "rules": 21, "plugins": 2}, nil
+}
+
+// appliedSelection is one recorded apply: the id and the selection AS IT
+// ARRIVED, nil-ness included. A `len()` field would have thrown away the very
+// thing under test, because absent and empty are both length zero.
+type appliedSelection struct {
+	id           string
+	capabilities []string
 }
 
 func (s *stubCore) Traces() ([]TraceRow, error) {
@@ -383,7 +399,7 @@ func TestSourceFailuresLogged(t *testing.T) {
 		sourceReader{"SetOverride", func(a *App) error { _, err := a.SetOverride("Finder", "mac-finder.copy", true); return err }},
 		sourceReader{"SetZones", func(a *App) error { _, err := a.SetZones([]ZoneRow{{ID: "left", W: 1, H: 1}}); return err }},
 		sourceReader{"TrialState", func(a *App) error { _, err := a.TrialState(); return err }},
-		sourceReader{"ApplyProfile", func(a *App) error { _, err := a.ApplyProfile("windows-11"); return err }},
+		sourceReader{"ApplyProfile", func(a *App) error { _, err := a.ApplyProfile("windows-11", nil); return err }},
 		sourceReader{"SetUserRule", func(a *App) error {
 			_, err := a.SetUserRule(UserRuleRow{Key: "C", Capability: "clipboard.copy"})
 			return err
@@ -520,6 +536,12 @@ func TestServiceExposesFrozenSources(t *testing.T) {
 		"Shortcuts", "SetShortcuts",
 		// The Explorer's menu table and its per-row toggle.
 		"FinderMenu", "SetMenuItemEnabled",
+		// The Explorer's file-type catalog: the read, the row write and the
+		// reorder. All three, because a page that lists the catalog and a
+		// page that edits it are two different failures when only the read
+		// is bound — the list renders and every switch on it dispatches
+		// nothing.
+		"FileTypes", "SetFileType", "ReorderFileTypes",
 		// The ten page sources.
 		"GetMatrix", "GetOverrides", "SetOverride", "GetZones", "SetZones",
 		"Commands", "PluginSchemas", "OwnershipAudit", "TrialState", "Readiness",
@@ -527,6 +549,12 @@ func TestServiceExposesFrozenSources(t *testing.T) {
 		// the person-authored rule table.
 		"Profiles", "ApplyProfile", "Traces", "PluginMeta", "Apps",
 		"UserRules", "SetUserRule", "DeleteUserRule",
+		// The way BACK out of a profile. Listed beside ApplyProfile rather
+		// than on its own because a page that offers only "on" is the
+		// half-feature this list exists to make somebody notice: the frozen
+		// list is what a reader consults to see whether a capability has a
+		// whole story.
+		"ProfileDeactivate",
 		// The first-run wizard: its derived state, the one write that
 		// latches it, and the one door onto another application — the pane
 		// where the Accessibility grant is actually made.
@@ -573,7 +601,7 @@ func TestServiceExposesFrozenSources(t *testing.T) {
 		t.Fatalf("Service.Readiness=%v,%v, want 2 rows", ready, err)
 	}
 	// A Wave 3 name delegates the same way: a real error out of Core, logged.
-	if _, err := svc.ApplyProfile("ghost-profile"); err == nil {
+	if _, err := svc.ApplyProfile("ghost-profile", nil); err == nil {
 		t.Fatal("Service.ApplyProfile must surface the daemon rejection")
 	}
 	if _, err := svc.SetOverride("Finder", "nope", true); err == nil {

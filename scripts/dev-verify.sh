@@ -53,6 +53,16 @@ GAP_PATTERNS=()
 
 KNOWN_GAPS=()
 
+# Gates that could not run on this machine (e.g. the frontend typecheck on a
+# box with no node_modules or no generated Wails bindings). Tracked so the
+# closing summary can say "these did NOT run" instead of a bare OK. The
+# failure mode bead cross-os-64q names is exactly "cannot check" being reported
+# as a pass; this array is what stops that. The skip stays non-fatal on
+# purpose — this script's whole job is to run on whatever machine you have,
+# including one without the Wails toolchain — but it is never silent and never
+# counted as a pass.
+SKIPPED=()
+
 # An unrecognised compiler diagnostic. Matches go build / go vet / go test
 # error lines on both slash styles, so a path-separator difference between
 # Windows and Linux cannot disguise a real error as a gap.
@@ -95,6 +105,20 @@ run_gate() {
   fi
   printf '  \033[33mGAP\033[0m %s (known platform gap only)\n' "$label"
   return 0
+}
+
+# skip_gate <label> <reason> <fix>
+# A gate that could not run is NOT a pass. This prints a distinct SKIP line
+# (never the green PASS word), records the label so the closing summary can
+# list it under "skipped, NOT verified", and states the exact command that
+# makes the gate runnable. Scoped to interactive dev convenience: the same
+# gate is enforced for real in CI (the "frontend" job in
+# .github/workflows/ci.yml), so a local skip never hides a broken typecheck.
+skip_gate() {
+  local label="$1" reason="$2" fix="$3"
+  printf '  \033[33mSKIP\033[0m %s — gate NOT run: %s\n' "$label" "$reason"
+  printf '        to run it: %s\n' "$fix"
+  SKIPPED+=("$label — $reason")
 }
 
 check_core() {
@@ -156,7 +180,13 @@ check_app() {
   # backend/ carries no embed directive, so this is the app-side check that
   # works from a clean checkout with nothing built.
   run_gate "go test ./backend/..." go -C app test ./backend/... || failures=$((failures+1))
-  check_frontend
+  # check_frontend returns 0 when it SKIPS (inputs absent — reported in the
+  # summary) and >0 only when the typecheck actually ran and FAILED. Calling
+  # it as a bare statement used to discard that non-zero, so a genuinely
+  # broken typecheck printed FAIL but still exited 0 with a green OK. Fold its
+  # result into the gate count so the script is fail-closed as its header
+  # promises (bead cross-os-64q).
+  check_frontend || failures=$((failures+1))
   ensure_dist
   run_gate "go build ./..." go -C app build ./... || failures=$((failures+1))
   return $failures
@@ -166,18 +196,26 @@ check_app() {
 # generated JavaScript, and tsconfig sets allowJs precisely so the ServiceApi
 # annotation in src/lib/service.ts checks the generated Service instead of an
 # `any` — a renamed model property is otherwise a silent `undefined` in a
-# settings row with a green typecheck. Skipped only when the inputs it needs
-# (node_modules, generated bindings) are absent, because "cannot check" must
-# be said rather than reported as a pass.
+# settings row with a green typecheck.
+#
+# It is skipped only when an input it needs (node_modules, the generated
+# bindings) is absent, because this script also runs on boxes that have no
+# Wails toolchain. But the skip is EXPLICIT and is recorded in SKIPPED so the
+# closing summary prints "skipped, NOT verified" instead of a bare OK: an
+# unchecked typecheck must never read as a checked one (bead cross-os-64q).
+# When the inputs are present the typecheck is a real gate and a failure is a
+# FAILURE. The same typecheck is enforced in CI regardless.
 check_frontend() {
   say "app/frontend"
   local failures=0
   if [[ ! -d app/frontend/node_modules ]]; then
-    warn "app/frontend/node_modules is absent — run 'npm ci' there to typecheck"
+    skip_gate "npx tsc --noEmit" "app/frontend/node_modules is absent" \
+      "cd app/frontend && npm ci"
     return 0
   fi
   if [[ ! -f app/frontend/bindings/crossos/app/backend/service.js ]]; then
-    warn "Wails bindings are not generated — run 'wails3 generate bindings ./...' in app/"
+    skip_gate "npx tsc --noEmit" "Wails bindings are not generated" \
+      "cd app && wails3 generate bindings ./"
     return 0
   fi
   if (cd app/frontend && npx tsc --noEmit); then
@@ -208,4 +246,11 @@ if (( ${#KNOWN_GAPS[@]} )); then
   for g in "${KNOWN_GAPS[@]}"; do printf '  - %s\n' "$g"; done
   printf 'See docs/dev-verification.md for the exact symbols and the fix shape.\n'
 fi
-printf '\n\033[32mOK\033[0m\n'
+if (( ${#SKIPPED[@]} )); then
+  printf '\n\033[33mSkipped, NOT verified\033[0m (these gates did not run here):\n'
+  for s in "${SKIPPED[@]}"; do printf '  - %s\n' "$s"; done
+  printf 'CI runs this for real — see the "frontend" job in .github/workflows/ci.yml.\n'
+  printf '\n\033[33mOK\033[0m for every gate that ran; the items above were NOT checked.\n'
+else
+  printf '\n\033[32mOK\033[0m\n'
+fi

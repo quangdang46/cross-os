@@ -32,6 +32,7 @@ import type {
   CommandRow,
   ConflictRow,
   Control,
+  FileTypeRow,
   MatrixRow,
   OnboardingRow,
   OnboardingStep,
@@ -324,6 +325,15 @@ interface Machine {
   extensions: Record<string, boolean>
   rules: UserRuleRow[]
   decisions: TraceRow[]
+  /**
+   * The Explorer's file-type catalog, in the order the editor left it.
+   *
+   * Held as state for the reason every other list here is: both writes answer
+   * with the WHOLE catalog, and a stub that echoed its argument back would let
+   * a control that never redrew from the reply pass — which is the exact error
+   * a rejected edit sitting on screen looking saved would be.
+   */
+  fileTypes: FileTypeRow[]
   /** The open windows the switcher lists, most-recently-used first. */
   windows: WindowRow[]
   /** A bound method to reject, by name. Absent means the call resolves. */
@@ -355,6 +365,27 @@ function freshWindows(): WindowRow[] {
   ]
 }
 
+/**
+ * The Explorer catalog this machine starts with — a fresh slice per call, for
+ * the reason the daemon's own Seeds() is: a test that edits the list it was
+ * handed must not be editing the table every later reader sees.
+ *
+ * Two of the eight carry the shapes that make the row a real test: a dotfile
+ * (blank baseName, so the id is ".env") and a preset that SHARES its extension
+ * with another (config.yml and data.yml both end in yml), because an editor
+ * that keys a row on ext alone can only ever address one of them.
+ */
+function freshFileTypes(): FileTypeRow[] {
+  return [
+    { ext: 'txt', baseName: 'New Text File', displayName: 'New Text File', template: '', enabled: true, builtIn: true, menuTitle: 'New Text File' },
+    { ext: 'md', baseName: 'Untitled', displayName: 'New Markdown', template: '', enabled: true, builtIn: true, menuTitle: 'New Markdown' },
+    { ext: 'env', baseName: '', displayName: 'New .env', template: 'KEY=', enabled: true, builtIn: true, menuTitle: 'New .env' },
+    { ext: 'json', baseName: 'data', displayName: 'New JSON', template: '{}', enabled: true, builtIn: true, menuTitle: 'New JSON' },
+    { ext: 'yml', baseName: 'config', displayName: 'New YAML', template: '', enabled: true, builtIn: true, menuTitle: 'New YAML' },
+    { ext: 'yml', baseName: 'data', displayName: 'New Data YAML', template: '', enabled: true, builtIn: true, menuTitle: 'New Data YAML' },
+  ]
+}
+
 function fresh(): Machine {
   return {
     onboarded: false,
@@ -367,6 +398,7 @@ function fresh(): Machine {
     extensions: { 'window-keys': false, 'finder-actions': false },
     rules: [],
     decisions: [],
+    fileTypes: freshFileTypes(),
     windows: freshWindows(),
     faults: {},
     calls: [],
@@ -627,6 +659,20 @@ function chordOf(rule: UserRuleRow): string {
 }
 
 /**
+ * The handle a reorder names a catalog row by — the filename the preset
+ * creates, which is the daemon's own identity for a file-type row.
+ *
+ * The extension alone is not an identity (the catalog allows two presets to
+ * share one, and this fixture ships a pair that do), and a blank base name is a
+ * dotfile, so the id carries its dot. Mirrors the daemon's id function, so a
+ * list a control sends is a permutation of the ids the daemon holds — the only
+ * shape that write accepts.
+ */
+function fileTypeID(row: FileTypeRow): string {
+  return row.baseName === '' ? `.${row.ext}` : `${row.baseName}.${row.ext}`
+}
+
+/**
  * The router's verdict for one press, as rule.Resolve reports it. The shell
  * never ranks anything: it reads the winner and the losers this records, and
  * the control that offers to switch a losing rule off is offering to change
@@ -857,13 +903,42 @@ const controlSurface: ServiceApi = {
   Conflicts: () => answer('Conflicts', () => machine.conflicts),
 
   Profiles: () => answer('Profiles', profileRows),
-  ApplyProfile: (profileID) =>
+  // ApplyProfile takes the per-capability SELECTION, and honours it, which is
+  // the point of the second parameter. A fixture that ignored it and turned
+  // every extension on regardless would make a control that dropped the
+  // selection on the floor look identical to one that sent it: both would end
+  // with the same extensions on, and the write would be untestable from
+  // anything the fixture can observe.
+  //
+  // So the selection is the whole contract, and all three cases are distinct
+  // here, which is why the daemon decodes it as a pointer:
+  //   undefined  ABSENT — every available capability, the pre-switch card
+  //   []         PRESENT AND EMPTY — apply nothing at all
+  //   ['keys']   a narrowed apply — only the capabilities it names
+  ApplyProfile: (profileID, capabilities) =>
     answer('ApplyProfile', () => {
       if (profileID === 'windows11') {
         // A profile is the product: one write turns on everything it bundles,
-        // which is why the wizard never asks for eleven switches.
-        machine.extensions['window-keys'] = true
-        machine.extensions['finder-actions'] = true
+        // which is why the wizard never asks for eleven switches. The switches
+        // narrow that whole into a smaller thing, and the narrowing is
+        // resolved here against the DECLARED capabilities rather than against a
+        // hard-coded id list, so a capability the rows gain later is honoured
+        // without this fixture being taught about it.
+        const bundle = profileRows().find((row) => row.id === 'windows11')
+        const on =
+          capabilities === undefined
+            ? new Set((bundle?.capabilities ?? []).filter((c) => c.available).map((c) => c.plugin))
+            : new Set(
+                (bundle?.capabilities ?? [])
+                  .filter((c) => c.available && capabilities.includes(c.id))
+                  .map((c) => c.plugin),
+              )
+        // Assigned rather than OR-ed: a narrowed apply that excludes a plugin
+        // must leave it off, and `|=` would keep a previous full apply's
+        // verdicts on and hide exactly the difference under test.
+        for (const id of Object.keys(machine.extensions)) {
+          machine.extensions[id] = on.has(id)
+        }
       }
       machine.profile = profileID
       return { profile: profileID, enabled: Object.keys(machine.extensions).filter((id) => machine.extensions[id]) }
@@ -903,6 +978,60 @@ const controlSurface: ServiceApi = {
     answer('FinderMenu', () => [] as Record<string, unknown>[]),
   SetMenuItemEnabled: (id, enabled) =>
     answer('SetMenuItemEnabled', () => [] as Record<string, unknown>[]),
+  // The file-type catalog. Both writes answer with the WHOLE list out of
+  // machine.fileTypes, not with their argument — a stub that echoed the edit
+  // back would let a control that never redrew from the reply pass, which is
+  // the error a rejected edit sitting on screen looking saved would be.
+  FileTypes: () => answer('FileTypes', () => machine.fileTypes.map((row) => ({ ...row }))),
+  SetFileType: (row) =>
+    answer('SetFileType', () => {
+      // The daemon's own rule, restated: a row's identity is (ext, baseName)
+      // and it is the STORED row's, so an edit the catalog does not hold is
+      // refused rather than minting a preset nobody implemented.
+      const at = machine.fileTypes.findIndex(
+        (stored) => stored.ext === row.ext && stored.baseName === row.baseName,
+      )
+      if (at < 0) throw new Error('the daemon refuses an edit to a row the catalog does not hold')
+      machine.fileTypes[at] = {
+        ...machine.fileTypes[at],
+        displayName: row.displayName,
+        template: row.template,
+        enabled: row.enabled,
+        // menuTitle is DERIVED on every read, so a rename moves it with the
+        // row. A stored copy the fixture forgot to recompute is a Finder menu
+        // still offering the old label — the exact drift the field is derived
+        // to prevent.
+        menuTitle: row.displayName.trim() === '' ? `New .${row.ext}` : row.displayName,
+      }
+      return machine.fileTypes.map((stored) => ({ ...stored }))
+    }),
+  ReorderFileTypes: (ids) =>
+    answer('ReorderFileTypes', () => {
+      // A complete permutation or nothing, the daemon's contract: no id twice,
+      // none missing, none invented.
+      if (ids.length !== machine.fileTypes.length) {
+        throw new Error('a reorder must name every file type')
+      }
+      const byId = new Map(machine.fileTypes.map((row) => [fileTypeID(row), row]))
+      const next = ids.map((id) => {
+        const row = byId.get(id)
+        if (!row) throw new Error('the daemon refuses a reorder naming a row that does not exist')
+        return { ...row }
+      })
+      machine.fileTypes = next
+      return next.map((row) => ({ ...row }))
+    }),
+  // The way back out of a profile, answered from the SAME machine the apply
+  // wrote: the apply turns extensions on, the deactivate turns them off again
+  // and clears the profile. A stub that answered a fixed "done" would let a
+  // control that redrew from the reply without the store having moved pass.
+  ProfileDeactivate: () =>
+    answer('ProfileDeactivate', () => {
+      machine.extensions['window-keys'] = false
+      machine.extensions['finder-actions'] = false
+      machine.profile = ''
+      return { profile: '', enabled: [] }
+    }),
   DeleteUserRule: (id) =>
     answer('DeleteUserRule', () => {
       machine.rules = machine.rules.filter((entry) => entry.id !== id)

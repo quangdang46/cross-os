@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -833,5 +834,197 @@ func TestConcurrentWritersDoNotLoseEachOther(t *testing.T) {
 		if s2.IsRuleEnabled(rule) {
 			t.Errorf("%s came back enabled: a write was lost", rule)
 		}
+	}
+}
+
+// TestMenuOffSurvivesAReload: the Explorer's per-item toggle is BOUND on the
+// shell side, so a write that is not persisted is a write the daemon accepts
+// and the machine forgets. The test is the one the bind demands — write, close,
+// reopen the same document, and read the same verdict back — because a toggle
+// that only works until the next launch is a switch that lies on the way out.
+func TestMenuOffSurvivesAReload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	s, err := New(path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Absent is the answer, not a gap: a document that predates the key hands
+	// back "nothing is switched off", which is every declared item ON.
+	if got := s.MenuOff(); len(got) != 0 {
+		t.Fatalf("MenuOff() on a fresh store=%v, want none", got)
+	}
+	if err := s.SetMenuItemDisabled("clipboard.copyPath", true); err != nil {
+		t.Fatalf("SetMenuItemDisabled: %v", err)
+	}
+	if err := s.SetMenuItemDisabled("app.open", true); err != nil {
+		t.Fatalf("SetMenuItemDisabled: %v", err)
+	}
+	s2, err := New(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if got, want := s2.MenuOff(), []string{"app.open", "clipboard.copyPath"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("MenuOff() after reload=%v, want %v — the toggle did not survive", got, want)
+	}
+	// Turning a row back on DELETES it rather than storing a false: a document
+	// that grew a list of explicit "on" verdicts would pin the menu to
+	// whatever it looked like the day the key landed.
+	if err := s2.SetMenuItemDisabled("app.open", false); err != nil {
+		t.Fatalf("SetMenuItemDisabled(off): %v", err)
+	}
+	s3, err := New(path)
+	if err != nil {
+		t.Fatalf("reopen again: %v", err)
+	}
+	if got, want := s3.MenuOff(), []string{"clipboard.copyPath"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("MenuOff() after re-enabling=%v, want %v", got, want)
+	}
+	// A blank id is a verdict nothing can act on, so it is refused rather than
+	// persisted: that is the one thing this layer validates for itself, the
+	// catalog being the handler's job.
+	if err := s3.SetMenuItemDisabled("   ", true); err == nil {
+		t.Error("a blank menu item id must fail closed")
+	}
+}
+
+// TestProfileSnapshotRidesTheApply: the undo point is taken by ApplyBatch
+// itself, in the write that overwrites what it records. A separate call beside
+// this one is a crash between the two, and the state a crash leaves — a
+// profile applied with no record of what it replaced — is exactly the state a
+// revert cannot undo. So this asserts the snapshot is there the instant the
+// apply returns, not that a later call recorded it.
+func TestProfileSnapshotRidesTheApply(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	s, err := New(path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	known := func(string) bool { return true }
+	// A hand edit made BEFORE the profile: the revert has to return to this,
+	// not to a blank table.
+	if err := s.SetRuleEnabled("r1", false, known); err != nil {
+		t.Fatalf("SetRuleEnabled: %v", err)
+	}
+	if err := s.SetPluginEnabled("p1", true, known); err != nil {
+		t.Fatalf("SetPluginEnabled: %v", err)
+	}
+	cat := Catalog{Rules: known, Plugins: known}
+	if err := s.ApplyBatch(Plan{
+		Rules:         []Toggle{{ID: "r1", Enabled: true}, {ID: "r2", Enabled: true}},
+		Plugins:       []Toggle{{ID: "p1", Enabled: false}, {ID: "p2", Enabled: true}},
+		ActiveProfile: strPtr("windows11"),
+	}, cat); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	snap, ok := s.ProfileSnapshot()
+	if !ok {
+		t.Fatal("no snapshot after an apply that named a profile — the revert can never work")
+	}
+	if snap.Profile != "" {
+		t.Errorf("snapshot.Profile=%q, want the empty id the apply replaced", snap.Profile)
+	}
+	// Only the ids the plan NAMED are captured: a revert that rewrote every
+	// rule in the table would also undo hand edits made after the apply, which
+	// is not what "undo the profile" means.
+	if len(snap.Rules) != 2 || len(snap.Plugins) != 2 {
+		t.Fatalf("snapshot covers %d rules and %d plugins, want the 2 the plan named", len(snap.Rules), len(snap.Plugins))
+	}
+	byRule := map[string]bool{}
+	for _, r := range snap.Rules {
+		byRule[r.ID] = r.Enabled
+	}
+	if byRule["r1"] || !byRule["r2"] {
+		t.Errorf("snapshot rules=%v, want r1 off and r2 on as they were before", byRule)
+	}
+	// And it is on DISK, not only in the running set: an in-memory snapshot is
+	// lost on restart, which greys the revert out forever for anyone who quits
+	// between applying and undoing.
+	s2, err := New(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if _, ok := s2.ProfileSnapshot(); !ok {
+		t.Fatal("the snapshot did not survive a reload — a revert would refuse forever")
+	}
+}
+
+// TestProfileRevertIsAWholeWindow: apply, revert, apply, revert returns to
+// the same neutral state twice. The second revert is the interesting one — it
+// is the case where a snapshot is overwritten by each apply and NOT by a
+// revert, so the second undo point is the state the SECOND apply found rather
+// than the first apply's. A revert that kept its snapshot would let the
+// second click re-apply a spent undo point and report a success it did not
+// earn.
+func TestProfileRevertIsAWholeWindow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	s, err := New(path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	known := func(string) bool { return true }
+	cat := Catalog{Rules: known, Plugins: known}
+	plan := Plan{
+		Rules:         []Toggle{{ID: "r1", Enabled: true}},
+		Plugins:       []Toggle{{ID: "p1", Enabled: true}},
+		ActiveProfile: strPtr("windows11"),
+	}
+	neutral := func(when string) {
+		t.Helper()
+		if s.ActiveProfile() != "" {
+			t.Errorf("%s: ActiveProfile()=%q, want none", when, s.ActiveProfile())
+		}
+		if got := s.PluginsEnabled(); len(got) != 0 {
+			t.Errorf("%s: PluginsEnabled()=%v, want none", when, got)
+		}
+		if !s.IsRuleEnabled("r1") {
+			t.Errorf("%s: r1 is still enabled, want the state before the apply", when)
+		}
+	}
+	for round := 1; round <= 2; round++ {
+		if err := s.ApplyBatch(plan, cat); err != nil {
+			t.Fatalf("apply %d: %v", round, err)
+		}
+		if s.ActiveProfile() != "windows11" {
+			t.Fatalf("apply %d did not land", round)
+		}
+		if _, err := s.RevertProfile(); err != nil {
+			t.Fatalf("revert %d: %v", round, err)
+		}
+		neutral(fmt.Sprintf("after revert %d", round))
+	}
+	// The snapshot is spent, so the next click has nothing to return to and
+	// says so in words. A refusal is the contract; a success here would be the
+	// bug.
+	if _, err := s.RevertProfile(); err == nil {
+		t.Error("a third revert must refuse — there is no snapshot left to return to")
+	}
+	if _, ok := s.ProfileSnapshot(); ok {
+		t.Error("a revert must CLEAR the snapshot, or the next one reports a success it did not earn")
+	}
+}
+
+// TestProfileRevertRefusesWithNoSnapshot: a profile applied by a build that
+// predates the undo point leaves a document with no snapshot, and the honest
+// answer for that is a REFUSAL IN WORDS. The alternative — a button that greys
+// out silently, or one that reports it undid something — is the outcome the
+// field's absence is specifically for.
+func TestProfileRevertRefusesWithNoSnapshot(t *testing.T) {
+	s, err := New("")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, ok := s.ProfileSnapshot(); ok {
+		t.Fatal("a store that never applied a profile must report no snapshot")
+	}
+	_, err = s.RevertProfile()
+	if err == nil {
+		t.Fatal("RevertProfile with nothing to return to must refuse, not report success")
+	}
+	if !strings.Contains(err.Error(), "no profile snapshot") {
+		t.Errorf("the refusal names the gap: %v", err)
+	}
+	// And it changes nothing on the way out.
+	if got := s.ActiveProfile(); got != "" {
+		t.Errorf("a refused revert moved the profile to %q", got)
 	}
 }

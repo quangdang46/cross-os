@@ -263,8 +263,25 @@ func (s *Service) Conflicts() ([]ConflictRow, error) { return s.app.Conflicts() 
 func (s *Service) Profiles() ([]ProfileRow, error) { return s.app.Profiles() }
 
 // ApplyProfile activates one profile's capabilities in one plan.
-func (s *Service) ApplyProfile(profileID string) (map[string]any, error) {
-	return s.app.ApplyProfile(profileID)
+//
+// capabilities is the per-capability selection the card's switches built, and
+// it is forwarded verbatim including its nil-ness: nil is "no selection, apply
+// everything available" and an empty non-nil slice is "the person switched it
+// all off, apply nothing". A Service that defaulted an empty slice to nil would
+// be the last place the distinction could be lost, and the one place no test
+// below it would catch — the Go tests would still be exercising a payload the
+// card never sends.
+func (s *Service) ApplyProfile(profileID string, capabilities []string) (map[string]any, error) {
+	return s.app.ApplyProfile(profileID, capabilities)
+}
+
+// ProfileDeactivate undoes the last profile apply: the exact prior verdict of
+// every id the plan touched, the profile string, and the running router's
+// in-memory plugin map. The daemon's refusal is passed through rather than
+// softened, so "there was nothing to return to" reads as those words instead
+// of as a button that reported a success it did not earn.
+func (s *Service) ProfileDeactivate() (map[string]any, error) {
+	return s.app.ProfileDeactivate()
 }
 
 // Traces serves the recorded decisions as rows.
@@ -315,4 +332,20 @@ func (s *Service) FinderMenu() ([]map[string]any, error) { return s.app.FinderMe
 // SetMenuItemEnabled toggles one Explorer menu row.
 func (s *Service) SetMenuItemEnabled(id string, enabled bool) ([]map[string]any, error) {
 	return s.app.SetMenuItemEnabled(id, enabled)
+}
+
+// FileTypes serves the Explorer's file-type catalog.
+func (s *Service) FileTypes() ([]FileTypeRow, error) { return s.app.FileTypes() }
+
+// SetFileType writes one file-type row. The row travels whole: its identity
+// IS (ext, baseName), so a payload trimmed to the changed fields is a write
+// against a preset the daemon cannot find.
+func (s *Service) SetFileType(row FileTypeRow) ([]FileTypeRow, error) {
+	return s.app.SetFileType(row)
+}
+
+// ReorderFileTypes replaces the catalog's order with a COMPLETE permutation
+// of the ids it holds.
+func (s *Service) ReorderFileTypes(ids []string) ([]FileTypeRow, error) {
+	return s.app.ReorderFileTypes(ids)
 }

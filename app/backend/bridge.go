@@ -116,6 +116,20 @@ type Core interface {
 	// SetMenuItemEnabled toggles one menu row (core.setMenuItemEnabled) and
 	// answers with the whole table, so the page re-renders from the reply.
 	SetMenuItemEnabled(id string, enabled bool) ([]map[string]any, error)
+	// FileTypes returns the Explorer's file-type catalog (core.fileTypes) in
+	// the order the editor left it. The read the editor's "no binding for the
+	// file-type catalog" note was standing in for.
+	FileTypes() ([]FileTypeRow, error)
+	// SetFileType writes one catalog row (core.setFileType) and answers with
+	// the WHOLE catalog. The row is a read-modify-write of a preset that
+	// already exists — the daemon matches on (ext, baseName) — so the shell
+	// sends the row whole and never mints a new preset here.
+	SetFileType(row FileTypeRow) ([]FileTypeRow, error)
+	// ReorderFileTypes replaces the catalog's order (core.reorderFileTypes).
+	// The list is the COMPLETE permutation the daemon demands: a partial list
+	// is a drag the daemon could not see the end of, and the rows it did not
+	// mention would keep positions the user is no longer looking at.
+	ReorderFileTypes(ids []string) ([]FileTypeRow, error)
 	// Matrix returns the behavior-matrix rules (config.getMatrix). The
 	// Keyboard page renders whatever arrives; the shell never derives a row.
 	Matrix() ([]MatrixRow, error)
@@ -185,12 +199,29 @@ type Core interface {
 	// Profiles returns the profile cards (core.profiles): each bundle with the
 	// live rollup of its capabilities, so a card can say whether a click landed.
 	Profiles() ([]ProfileRow, error)
-	// ApplyProfile activates one profile's available capabilities as ONE
-	// settings plan (core.profileApply). The daemon applies it all-or-nothing
-	// and answers the counts; the shell never applies it rule by rule, because
-	// a profile that saved half its edits is the outcome the store's atomicity
-	// exists to prevent.
-	ApplyProfile(profileID string) (map[string]any, error)
+	// ApplyProfile activates one profile's capabilities as ONE settings plan
+	// (core.profileApply). The daemon applies it all-or-nothing and answers the
+	// counts; the shell never applies it rule by rule, because a profile that
+	// saved half its edits is the outcome the store's atomicity exists to
+	// prevent.
+	//
+	// capabilities is the per-capability selection, and it is a nil-able slice
+	// rather than a bare one because the wire has to carry a distinction the
+	// card's own control makes: nil means ABSENT — every available capability,
+	// which is what the pre-switch card meant and what any caller with no UI
+	// sends — while a non-nil EMPTY slice means the person switched everything
+	// off and the plan is empty on purpose. Collapsing the two (a `len() > 0`
+	// guard, a `value ?? undefined`, or simply not declaring the parameter at
+	// all) silently turns "apply nothing" into "apply everything", which is the
+	// one outcome the switch must never produce.
+	ApplyProfile(profileID string, capabilities []string) (map[string]any, error)
+	// ProfileDeactivate undoes the last profile apply (core.profileDeactivate):
+	// the exact prior verdict of every id the plan touched, the profile
+	// string, and the running router's in-memory plugin map. No parameter —
+	// there is one active profile and one snapshot to return to, and the
+	// daemon owns both, so naming either here would be a second copy of a
+	// fact it already has.
+	ProfileDeactivate() (map[string]any, error)
 	// Traces returns the recorded decisions (core.traces) as rows, oldest
 	// first and truncated to the tail the daemon keeps.
 	Traces() ([]TraceRow, error)
@@ -612,13 +643,34 @@ func (a *App) Profiles() ([]ProfileRow, error) {
 	return sourceList(a, "Profiles", rows), nil
 }
 
-// ApplyProfile turns a whole profile on. A denial returns the daemon's error
-// and no counts: a card that rendered "0 rules, 0 plugins" from a rejected
-// call would read as a profile that applied and did nothing.
-func (a *App) ApplyProfile(profileID string) (map[string]any, error) {
-	res, err := a.core.ApplyProfile(profileID)
+// ApplyProfile turns a profile on, narrowed to capabilities when the card's
+// switches narrowed it. A denial returns the daemon's error and no counts: a
+// card that rendered "0 rules, 0 plugins" from a rejected call would read as a
+// profile that applied and did nothing.
+//
+// capabilities is passed through UNCHANGED, and that is the load-bearing part:
+// nil is not the same as empty here, and a bridge that normalised one into the
+// other would turn a card with every switch off into a card that applied the
+// whole bundle. The card previews the narrowed plan above this button, so a
+// drop here is a preview the reader can check against the outcome and find
+// wrong.
+func (a *App) ApplyProfile(profileID string, capabilities []string) (map[string]any, error) {
+	res, err := a.core.ApplyProfile(profileID, capabilities)
 	if err != nil {
 		a.log.Append("ApplyProfile " + profileID + ": " + err.Error())
+		return nil, err
+	}
+	return res, nil
+}
+
+// ProfileDeactivate turns the last profile back off. The daemon's refusal —
+// which is a refusal IN WORDS when there is no snapshot to return to, and the
+// only honest answer for a profile applied before the snapshot existed — is
+// returned and logged rather than flattened into a success.
+func (a *App) ProfileDeactivate() (map[string]any, error) {
+	res, err := a.core.ProfileDeactivate()
+	if err != nil {
+		a.log.Append("ProfileDeactivate: " + err.Error())
 		return nil, err
 	}
 	return res, nil
@@ -765,4 +817,57 @@ func (a *App) SetMenuItemEnabled(id string, enabled bool) ([]map[string]any, err
 		return nil, err
 	}
 	return rows, nil
+}
+
+// FileTypes serves the Explorer's file-type catalog in the order the editor
+// left it. sourceList on the read, for the reason every other read has it: a
+// daemon that answered null must reach the page as an empty list AND a log
+// line, never as an editor that quietly says the catalog is empty.
+func (a *App) FileTypes() ([]FileTypeRow, error) {
+	rows, err := a.core.FileTypes()
+	if err != nil {
+		a.log.Append("FileTypes: " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "FileTypes", rows), nil
+}
+
+// SetFileType writes one catalog row. A refusal is the daemon's: an extension
+// no filename rule can act on, or a row the catalog does not hold, is not
+// something the shell should paper over by writing a second rule book. The
+// whole catalog comes back so the editor redraws from the daemon's account of
+// what is stored.
+func (a *App) SetFileType(row FileTypeRow) ([]FileTypeRow, error) {
+	rows, err := a.core.SetFileType(row)
+	if err != nil {
+		a.log.Append("SetFileType " + fileTypeRowID(row) + ": " + err.Error())
+		return nil, err
+	}
+	return rows, nil
+}
+
+// ReorderFileTypes replaces the catalog's order. The daemon refuses a list
+// that is not a complete permutation, and that refusal is surfaced verbatim:
+// a silently dropped id is a menu reordered in a way nobody asked for, which is
+// worse than a button that says the move was rejected.
+func (a *App) ReorderFileTypes(ids []string) ([]FileTypeRow, error) {
+	rows, err := a.core.ReorderFileTypes(ids)
+	if err != nil {
+		a.log.Append("ReorderFileTypes: " + err.Error())
+		return nil, err
+	}
+	return rows, nil
+}
+
+// fileTypeRowID is the handle a reorder and a log line name a catalog row by.
+// The extension alone is not an identity — the catalog allows two presets to
+// share one ("data.json" and "report.json" are two presets, not a duplicate) —
+// and a blank base name is a dotfile, so the id carries its dot. It mirrors
+// the daemon's own id function, so a list the shell sends is a permutation of
+// the ids the daemon holds: the only shape that write accepts.
+func fileTypeRowID(row FileTypeRow) string {
+	if row.BaseName == "" {
+		return "." + row.Ext
+	}
+	return row.BaseName + "." + row.Ext
 }

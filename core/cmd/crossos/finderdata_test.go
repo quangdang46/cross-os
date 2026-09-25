@@ -20,7 +20,9 @@ import (
 
 	"crossos/core/pkg/filetype"
 	"crossos/core/pkg/findermenu"
+	"crossos/core/pkg/intent"
 	"crossos/core/pkg/ipc"
+	builtin "crossos/core/rules"
 )
 
 // --- core:finderMenu ---
@@ -239,6 +241,74 @@ func TestSetFileTypeRefuses(t *testing.T) {
 	}
 	if got := mustFileTypeRows(t, c, "core.fileTypes", nil); !reflect.DeepEqual(got, want) {
 		t.Error("a refused edit changed the catalog")
+	}
+}
+
+// TestSetFileTypeRefusesAChangedBaseName: the identity refusal, pinned with the
+// two facts that make it a contract rather than a coincidence — a changed base
+// name is refused, and the catalog is left exactly as it was, INCLUDING the
+// other fields carried in the same payload.
+//
+// This is the shape the shell sends when a person edits a default filename:
+// every field but the base name is the stored row's, so it is the payload most
+// likely to slip through by accident if the lookup ever widens to match on ext
+// alone. And it is the load-bearing half of the pair — the extension has no
+// field to edit in the UI at all, the base name had one, and the shell that
+// shipped it reported a save that no referent existed for. The control now
+// refuses in words, and that refusal is only honest while this holds.
+func TestSetFileTypeRefusesAChangedBaseName(t *testing.T) {
+	c := testCore(t)
+	before := mustFileTypeRows(t, c, "core.fileTypes", nil)
+
+	// json's stored base name is "data" (filetype.Seeds). Everything else here
+	// is that row as the daemon holds it, so the base name is the only change.
+	const renamed = `{"ext":"json","baseName":"report","displayName":"Renamed JSON",` +
+		`"template":"{}","enabled":false,"builtIn":true}`
+	res, rerr := c.handleSetFileType(json.RawMessage(renamed))
+	if rerr == nil {
+		t.Fatalf("a changed base name was accepted and answered %v; the row moved instead of being refused", res)
+	}
+	if rerr.Code != ipc.ErrInvalid {
+		t.Errorf("code=%d, want %d (%s)", rerr.Code, ipc.ErrInvalid, rerr.Message)
+	}
+	if !strings.Contains(rerr.Message, "no file type") {
+		t.Errorf("message=%q, want the refusal that names the row it could not find", rerr.Message)
+	}
+	// The whole catalog, not just the row: the other fields in this payload —
+	// a new label, a new template, a new on/off state — must not have landed
+	// either. A write refused on identity that still applied half of itself is a
+	// worse outcome than one that did not land at all.
+	if got := mustFileTypeRows(t, c, "core.fileTypes", nil); !reflect.DeepEqual(got, before) {
+		t.Errorf("a refused edit changed the catalog\n got: %+v\nwant: %+v", got, before)
+	}
+
+	// The control case, and the reason this is pinned as IDENTITY rather than as
+	// a general refusal: the same payload with the stored base name is accepted.
+	// Without this line, a handler that refused every json row would pass.
+	const accepted = `{"ext":"json","baseName":"data","displayName":"Renamed JSON",` +
+		`"template":"{}","enabled":false,"builtIn":true}`
+	if _, rerr := c.handleSetFileType(json.RawMessage(accepted)); rerr != nil {
+		t.Fatalf("the same edit with the stored base name was refused (%s); the test above is not about identity", rerr.Message)
+	}
+	got := mustFileTypeRows(t, c, "core.fileTypes", nil)
+	if len(got) != len(before) {
+		t.Fatalf("the accepted edit has %d rows, want %d — nothing was added", len(got), len(before))
+	}
+	var js *fileTypeRow
+	for i := range got {
+		if got[i].Ext == "json" {
+			js = &got[i]
+		}
+	}
+	if js == nil {
+		t.Fatal("the json row is missing after the accepted edit")
+	}
+	if js.DisplayName != "Renamed JSON" || js.Template != "{}" || js.Enabled {
+		t.Errorf("json row=%+v, want the accepted edit applied to the STORED row", js.FileType)
+	}
+	if fileTypeID(js.FileType) != "data.json" {
+		t.Errorf("json id is %q, want data.json — the accepted edit kept the stored identity",
+			fileTypeID(js.FileType))
 	}
 }
 
@@ -483,4 +553,270 @@ func encodeIDs(t *testing.T, ids []string) json.RawMessage {
 		t.Fatalf("marshal ids: %v", err)
 	}
 	return raw
+}
+
+// --- the three things this page got wrong ---
+
+// TestMenuToggleSurvivesARestart: the toggle is the one write on this page
+// whose promise is a lie unless it reaches the disk. The verb is bound, the
+// Service method exists, and the control re-renders from the reply the daemon
+// hands back — so a write that only moved the running map answered "done" and
+// then lost the answer to the next launch, with nothing said. The person who
+// switched a row off is the only one who can see it come back.
+//
+// Both directions are checked, because a document that can record an "off" and
+// not an "on" is its own kind of lie: SetMenuItemDisabled DELETES the id when
+// the row comes back on, precisely so a menu item shipped after the document
+// was written arrives on rather than being pinned off by a stale entry.
+func TestMenuToggleSurvivesARestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	c, err := NewCoreWithSettings(builtin.All(), builtin.Grants(), path)
+	if err != nil {
+		t.Fatalf("run 1: %v", err)
+	}
+	c.loadMenuOff()
+	// A fresh daemon ships every row on: the table is what the product
+	// declares and a person narrows it, so this is the state a restart is
+	// expected to come back to when nothing has been touched.
+	if !menuRowByID(t, c, "openTerminal").Enabled {
+		t.Fatal("openTerminal ships off; a fresh daemon serves the whole table")
+	}
+
+	off := mustMenuRows(t, c, "core.setMenuItemEnabled",
+		json.RawMessage(`{"id":"openTerminal","enabled":false}`))
+	if menuRowByIDIn(off, "openTerminal").Enabled {
+		t.Fatal("the write's own reply says the row is still on")
+	}
+
+	restarted, err := NewCoreWithSettings(builtin.All(), builtin.Grants(), path)
+	if err != nil {
+		t.Fatalf("run 2: %v", err)
+	}
+	restarted.loadMenuOff()
+	after := mustMenuRows(t, restarted, "core.finderMenu", nil)
+	if menuRowByIDIn(after, "openTerminal").Enabled {
+		t.Error("a row the user switched off came back on after a restart — " +
+			"the write never reached the document")
+	}
+	// And the rows nobody touched are still on: a seed that turned the whole
+	// map off would make this test pass for the wrong reason.
+	for _, row := range after {
+		if row.ID != "openTerminal" && !row.Enabled {
+			t.Errorf("row %s came back off; only the toggled row should persist", row.ID)
+		}
+	}
+
+	// Back on, and off it stays across the next restart too.
+	mustMenuRows(t, restarted, "core.setMenuItemEnabled",
+		json.RawMessage(`{"id":"openTerminal","enabled":true}`))
+	again, err := NewCoreWithSettings(builtin.All(), builtin.Grants(), path)
+	if err != nil {
+		t.Fatalf("run 3: %v", err)
+	}
+	again.loadMenuOff()
+	if !menuRowByIDIn(mustMenuRows(t, again, "core.finderMenu", nil), "openTerminal").Enabled {
+		t.Error("the row did not come back on; a document that can record an " +
+			"off but not an on pins the menu to the day the key landed")
+	}
+}
+
+// TestTheTwoReadersAgreeOnOneCatalog: core.fileTypes is what the Explorer page
+// shows and writes; finder.menuEntries is what the appex actually renders the
+// New submenu from. They are two readers of ONE catalog, and when they were two
+// readers of two lists the page could switch a type on and the right-click menu
+// would not carry it — the submenu row and the setting, disagreeing, which is
+// the single bug FinderRight's own header says the shared catalog exists to
+// prevent (MenuFeature.swift:3-6).
+//
+// Driven through the real writes rather than by poking the store, because the
+// reader is only half the claim: a store that held the edit and a menu that
+// ignored it would pass any test that only set the store up.
+func TestTheTwoReadersAgreeOnOneCatalog(t *testing.T) {
+	c := testCore(t)
+	page := mustFileTypeRows(t, c, "core.fileTypes", nil)
+	if len(page) < 2 {
+		t.Fatalf("the catalog has %d rows; this needs two to tell disable from rename", len(page))
+	}
+
+	// Take the FIRST type off and RENAME the second, so the two changes are
+	// checked separately: a reader that ignored `enabled` and one that ignored
+	// `displayName` are different bugs with the same symptom.
+	first := page[0]
+	second := page[1]
+	raw, err := json.Marshal(map[string]any{
+		"ext": first.Ext, "baseName": first.BaseName,
+		"displayName": first.DisplayName, "template": first.Template,
+		"enabled": false, "builtIn": first.BuiltIn,
+	})
+	if err != nil {
+		t.Fatalf("marshal the disabled row: %v", err)
+	}
+	if got := mustFileTypeRows(t, c, "core.setFileType", raw); len(got) != len(page) {
+		t.Fatalf("the write's reply has %d rows for a %d-row catalog", len(got), len(page))
+	}
+	renamed := "Renamed by the Explorer page"
+	raw, err = json.Marshal(map[string]any{
+		"ext": second.Ext, "baseName": second.BaseName,
+		"displayName": renamed, "template": second.Template,
+		"enabled": second.Enabled, "builtIn": second.BuiltIn,
+	})
+	if err != nil {
+		t.Fatalf("marshal the renamed row: %v", err)
+	}
+	if got := mustFileTypeRows(t, c, "core.setFileType", raw); len(got) != len(page) {
+		t.Fatalf("the rename's reply has %d rows for a %d-row catalog", len(got), len(page))
+	}
+
+	menu := mustFinderMenuEntries(t, c)
+	// Every row the page is still offering is offered in the menu, in the
+	// page's order — the submenu IS the catalog, filtered to what is on.
+	var want []filetype.FileType
+	for _, row := range mustFileTypeRows(t, c, "core.fileTypes", nil) {
+		if row.Enabled {
+			want = append(want, row.FileType)
+		}
+	}
+	if len(menu.FileTypes) != len(want) {
+		t.Fatalf("the menu offers %d types, the page lists %d enabled: %v vs %v",
+			len(menu.FileTypes), len(want), menu.FileTypes, want)
+	}
+	for i := range want {
+		if menu.FileTypes[i] != want[i] {
+			t.Fatalf("row %d: menu has %+v, page has %+v — the two readers disagree", i, menu.FileTypes[i], want[i])
+		}
+	}
+	// Named directly, so the failure says which of the two edits did not land.
+	for _, ft := range menu.FileTypes {
+		if ft.Ext == first.Ext && ft.BaseName == first.BaseName {
+			t.Errorf("a type the Explorer page switched off is still in the New submenu: %+v", ft)
+		}
+		if ft.Ext == second.Ext && ft.DisplayName != renamed {
+			t.Errorf("the menu still shows the old label for .%s: %q, want %q",
+				second.Ext, ft.DisplayName, renamed)
+		}
+	}
+	// A menu row is a promise the click keeps: every type it offers must be
+	// one finder.createFile accepts, or the submenu carries a row that fails.
+	for _, ft := range menu.FileTypes {
+		_, rerr := callFinder(t, finderMenuHandlers(c)["finder.createFile"],
+			map[string]any{"dir": t.TempDir(), "ext": ft.Ext})
+		if rerr != nil {
+			t.Errorf("the menu offers .%s but createFile refuses it: %+v", ft.Ext, rerr)
+		}
+	}
+}
+
+// TestEveryUnsupportedRowSaysWhy: supported is a verdict and it is not a
+// sentence. Two of the seven rows are off on EVERY host — clipboard.
+// copyRelativePath and filesystem.duplicate are named by findermenu's table but
+// intent.DefaultRegistry does not carry them, so nothing dispatches them even
+// though both Finder verbs have working handlers over IPC. A row that is merely
+// greyed tells a person nothing they can act on, and the failure it hides is
+// the one a user cannot see from the keyboard they are still holding.
+//
+// So: every unsupported row names its own capability, and the two refusals stay
+// DISTINGUISHABLE. "Not in the registry" means one canonical-registry change
+// would light the row up everywhere; "the adapter refuses this platform" means
+// nothing anyone can do on that host. Collapsing them into one grey box loses
+// exactly the distinction that tells a person whether to file anything at all.
+func TestEveryUnsupportedRowSaysWhy(t *testing.T) {
+	restore := finderHost
+	t.Cleanup(func() { finderHost = restore })
+
+	for _, host := range []string{"darwin", "windows"} {
+		finderHost = host
+		rows := mustMenuRows(t, testCore(t), "core.finderMenu", nil)
+
+		for _, row := range rows {
+			_, inRegistry := intent.DefaultRegistry().Get(row.Capability)
+			switch {
+			case row.Supported && row.Reason != "":
+				t.Errorf("%s: row %s is supported but carries a reason: %q", host, row.ID, row.Reason)
+			case !row.Supported && strings.TrimSpace(row.Reason) == "":
+				t.Errorf("%s: row %s (%s) is unsupported with no words attached — "+
+					"a greyed row a person cannot act on", host, row.ID, row.Capability)
+			case row.Reason != "" && !strings.Contains(row.Reason, row.Capability):
+				t.Errorf("%s: row %s names the wrong capability: %q", host, row.ID, row.Reason)
+			}
+			if inRegistry {
+				continue
+			}
+			// The registry gap is the one both hosts must agree on, and it
+			// must be the one reason given: a Windows build must not blame its
+			// platform for a capability the dispatcher never carried.
+			if !strings.Contains(row.Reason, "registry") {
+				t.Errorf("%s: row %s is not in the registry, so that is what the "+
+					"reason has to say; it says %q", host, row.ID, row.Reason)
+			}
+		}
+	}
+
+	// The two rows the bead names, on the host a user is actually on.
+	rows := mustMenuRows(t, testCore(t), "core.finderMenu", nil)
+	for _, id := range []string{"copyRelativePath", "duplicateWithName"} {
+		row := menuRowByIDIn(rows, id)
+		if row.Supported {
+			t.Errorf("row %s reports supported, but %s is not in the intent registry",
+				id, row.Capability)
+		}
+	}
+	// The platform refusal, which is a different sentence about a different
+	// cause — and which a Windows user must be able to tell from the registry
+	// gap without running anything.
+	finderHost = "windows"
+	row := menuRowByIDIn(mustMenuRows(t, testCore(t), "core.finderMenu", nil), "openTerminal")
+	if row.Supported {
+		t.Fatal("openTerminal reports supported on windows")
+	}
+	if strings.Contains(row.Reason, "registry") {
+		t.Errorf("openTerminal is a live capability the platform refuses, so the "+
+			"registry is not why: %q", row.Reason)
+	}
+	if !strings.Contains(row.Reason, "windows") {
+		t.Errorf("the platform refusal does not name the host: %q", row.Reason)
+	}
+	// Copy Path is in the same hostAdapterNames bucket, so it moves together.
+	if menuRowByIDIn(mustMenuRows(t, testCore(t), "core.finderMenu", nil), "copyPath").Supported {
+		t.Error("copyPath is guarded by the same darwinOnly seam and must not be supported")
+	}
+	// New File is a plain os call, so it survives on every host.
+	for _, id := range []string{"newFile", "newFolder"} {
+		if !menuRowByIDIn(mustMenuRows(t, testCore(t), "core.finderMenu", nil), id).Supported {
+			t.Errorf("row %s is a plain os call and must be supported off darwin too", id)
+		}
+	}
+}
+
+// menuRowByIDIn finds one row of a served table, and fails the test rather than
+// returning a zero value: a lookup that misses silently is a zero row, whose
+// Enabled=false would read as "the row is off" in a test about persistence.
+func menuRowByIDIn(rows []menuRow, id string) menuRow {
+	for _, row := range rows {
+		if row.ID == id {
+			return row
+		}
+	}
+	panic("no menu row " + id)
+}
+
+// menuRowByID is the same lookup against a fresh read of the running daemon.
+func menuRowByID(t *testing.T, c *Core, id string) menuRow {
+	t.Helper()
+	return menuRowByIDIn(mustMenuRows(t, c, "core.finderMenu", nil), id)
+}
+
+// mustFinderMenuEntries reads the menu the appex renders. It is not in
+// methods() — it is the appex-facing handler set (finderMenuHandlers) — so
+// going through c.methods() here would test a method nobody registers.
+func mustFinderMenuEntries(t *testing.T, c *Core) finderMenu {
+	t.Helper()
+	res, rerr := callFinder(t, finderMenuHandlers(c)["finder.menuEntries"], nil)
+	if rerr != nil {
+		t.Fatalf("finder.menuEntries: %d %s", rerr.Code, rerr.Message)
+	}
+	menu, ok := res.(finderMenu)
+	if !ok {
+		t.Fatalf("finder.menuEntries returned %T", res)
+	}
+	return menu
 }

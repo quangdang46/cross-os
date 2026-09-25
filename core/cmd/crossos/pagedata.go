@@ -822,19 +822,66 @@ func tapDegraded() string {
 	return ""
 }
 
-// --- core.profiles / core.profileApply ---
+// --- core.profiles / core.profileApply / core.profileDeactivate ---
 
 // profileRow is one profile card (page control source "core:profiles"). The
 // bundle is the profile's own data; what the handler adds is the rollup — which
 // of its capabilities are live right now — so the card answers the product
 // question ("turn Windows on") without the page joining a second source to find
 // out whether the click landed.
+//
+// WillEnable/AlreadyOn/WillDisable are the PREVIEW: the plan's arithmetic, run
+// against the store as it stands, so the card can say what applying will change
+// BEFORE the click. They were two integers buried in the apply REPLY, which is
+// the one moment a person can no longer use them — a count reported after the
+// fact tells you what happened, and the question was what is about to.
+//
+// Revertible is the door back, and RevertReason is what to say when there is
+// no door. The two are one field each on purpose: a control that is handed only
+// a bool greys the button out silently, and a silent grey-out is
+// indistinguishable from a button that is broken.
 type profileRow struct {
 	ID           string            `json:"id"`
 	Label        string            `json:"label"`
 	Description  string            `json:"description"`
 	Active       bool              `json:"active"`
 	Capabilities []capabilityState `json:"capabilities"`
+	// WillEnable counts the rules the plan would switch ON that are off now;
+	// AlreadyOn the ones it would find already on, which it leaves alone.
+	// WillDisable is zero today and is SERVED rather than omitted so a card
+	// that draws a preview can render the same shape either way — the day a
+	// plan narrows rather than widens, the field is already there to be
+	// non-zero instead of being a second wire change at that moment.
+	WillEnable  int `json:"will_enable"`
+	AlreadyOn   int `json:"already_on"`
+	WillDisable int `json:"will_disable"`
+	// WillEnablePlugins counts the EXTENSIONS the plan would switch on that
+	// are off, and it is the field that moves on a fresh install.
+	//
+	// It is here because of what the store actually does, which is not what
+	// the profile's name suggests: a rule is ON unless it was explicitly
+	// disabled (IsRuleEnabled reads the absence from disabledRules), so on a
+	// daemon nobody has touched, applying a profile switches on NO rules at
+	// all — WillEnable is legitimately 0 — and the whole of the change is
+	// the plugin. Without this field the card would preview "0 shortcuts to
+	// turn on, 6 already on" beside a keyboard that does not work, which is
+	// technically true and actively misleading: it says the profile has
+	// nothing to do at the exact moment the profile is the only thing that
+	// would make those six shortcuts live.
+	WillEnablePlugins int `json:"will_enable_plugins"`
+	// Revertible reports whether a recorded snapshot exists to return to, and
+	// RevertReason says why not when it does not. The store's answer is the
+	// truth here; this row only carries it, because a page that re-derived
+	// it would be a second rule book.
+	Revertible   bool   `json:"revertible"`
+	RevertReason string `json:"revert_reason,omitempty"`
+
+	// extensionsPreviewed is the per-row scratch for the extension count, and
+	// it is NOT part of the wire. A struct field is the wrong home for it —
+	// the row is built and thrown away inside this handler, so a map
+	// allocated per card would be garbage per card; a local in the loop is
+	// not, and json:"-" keeps it off the wire either way.
+	extensionsPreviewed map[string]bool `json:"-"`
 }
 
 // capabilityState is one capability row plus its rollup.
@@ -844,6 +891,12 @@ type profileRow struct {
 // zone name (something winlayout resolves). Enabled/Total count only the former,
 // because "1 of 21 shortcuts on" for a capability that ships no rules is a
 // number that reads as a bug.
+//
+// WillEnable is the per-capability half of the card's preview, and it is
+// per-capability rather than only summed so that a card whose switches exclude
+// some capabilities can still tell the truth: the page adds up the capabilities
+// it is about to apply, and a preview that ignored its own switches would be
+// the same class of lie the unavailable rows are.
 type capabilityState struct {
 	ID        string   `json:"id"`
 	Label     string   `json:"label"`
@@ -854,6 +907,15 @@ type capabilityState struct {
 	Enabled   int      `json:"enabled"`
 	Total     int      `json:"total"`
 	Live      bool     `json:"live"`
+	// WillEnable is how many of this capability's rules the plan would switch
+	// on that are off right now. Already-on rules are counted by Enabled and
+	// not repeated here, so the card's arithmetic is addition and not
+	// double-counting.
+	WillEnable int `json:"will_enable"`
+	// WillEnablePlugin reports that the plan will switch this capability's
+	// extension on and it is currently off. The field that actually moves on
+	// a fresh install, for the reason profileRow.WillEnablePlugins gives.
+	WillEnablePlugin bool `json:"will_enable_plugin"`
 }
 
 // handleCoreProfiles serves core.profiles. The rows are profiles.All() in
@@ -863,20 +925,72 @@ type capabilityState struct {
 func (c *Core) handleCoreProfiles(_ json.RawMessage) (any, *ipc.RPCError) {
 	enabled := c.pluginEnableMap()
 	active := c.set.ActiveProfile()
+	// The recorded undo point, read ONCE per call rather than per card: it is
+	// one store fact, and a card that asked for itself would be four reads of
+	// the same answer.
+	_, snapshotted := c.set.ProfileSnapshot()
 	all := profiles.All()
 	out := make([]profileRow, 0, len(all))
 	for _, p := range all {
 		row := profileRow{
 			ID: p.ID, Label: p.Label, Description: p.Description,
-			Active:       p.ID == active,
-			Capabilities: make([]capabilityState, 0, len(p.Capabilities)),
+			Active:              p.ID == active,
+			Capabilities:        make([]capabilityState, 0, len(p.Capabilities)),
+			extensionsPreviewed: map[string]bool{},
 		}
 		for _, cap := range p.Capabilities {
-			row.Capabilities = append(row.Capabilities, c.capabilityRollup(cap, enabled))
+			st := c.capabilityRollup(cap, enabled)
+			row.WillEnable += st.WillEnable
+			row.AlreadyOn += st.Enabled
+			// Extensions are counted ONCE, not once per capability: three
+			// capabilities sharing windows-keyboard is one extension to turn
+			// on, and a preview saying "3 extensions" would send someone
+			// looking for three.
+			if st.WillEnablePlugin {
+				if !row.extensionsPreviewed[st.Plugin] {
+					row.extensionsPreviewed[st.Plugin] = true
+					row.WillEnablePlugins++
+				}
+			}
+			row.Capabilities = append(row.Capabilities, st)
 		}
+		// The revert is a property of the MACHINE, not of a card, so it is
+		// served the same on every row: one profile is active at a time and
+		// one snapshot exists to undo it. A card that reported it only on the
+		// active profile would leave the other cards offering a Revert that
+		// acts on somebody else's state.
+		row.Revertible, row.RevertReason = snapshotted, revertRefusal(active, snapshotted)
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// revertRefusal is the sentence a card shows when there is no recorded snapshot
+// to return to. Two cases, two sentences, because they are different problems
+// and one sentence would misdescribe one of them:
+//
+//   - Nothing is applied. The button has nothing to undo; that is all.
+//   - A profile IS applied but no snapshot exists. That is the pre-snapshot
+//     build, and the honest answer includes the way out: applying the profile
+//     again now records an undo point, so the NEXT Revert works. Silently
+//     refusing leaves the person believing they can never go back.
+//
+// The store cannot tell these apart — a nil snapshot is a nil snapshot — but
+// this handler can, and the active-profile string is the fact that separates
+// them. The words are the deliverable: the criterion is a refusal IN WORDS, not
+// a control that greys out and says nothing.
+func revertRefusal(activeProfile string, snapshotted bool) string {
+	if snapshotted {
+		return ""
+	}
+	if activeProfile == "" {
+		return "No profile is applied, so there is nothing to return to. " +
+			"Apply one and this button will undo it."
+	}
+	return "This profile was applied before CrossOS recorded what to return to, " +
+		"so there is no undo point for it. Apply the profile again to record one — " +
+		"the capabilities it is already running are left alone, and the next Revert " +
+		"will return you to this state."
 }
 
 // capabilityRollup adds the live verdict to one declared capability. Live means
@@ -884,6 +998,12 @@ func (c *Core) handleCoreProfiles(_ json.RawMessage) (any, *ipc.RPCError) {
 // nothing else: the tap and the kill switch belong to core.readiness, and a
 // profile card that reported those would go red for a reason none of its own
 // controls can fix.
+//
+// WillEnable is computed HERE, from the same store read that fills Enabled,
+// rather than by re-deriving the plan: Total is what the plan would switch on,
+// Enabled is what already is, and the difference is the preview. A card that
+// added the plan's two integers after the click was reporting this number one
+// moment too late to be a decision.
 func (c *Core) capabilityRollup(cap profiles.Capability, enabled map[string]bool) capabilityState {
 	st := capabilityState{
 		ID: cap.ID, Label: cap.Label, Plugin: cap.Plugin,
@@ -893,6 +1013,12 @@ func (c *Core) capabilityRollup(cap profiles.Capability, enabled map[string]bool
 		RuleIDs: append(make([]string, 0, len(cap.RuleIDs)), cap.RuleIDs...),
 	}
 	st.Live = cap.Available && enabled[cap.Plugin]
+	// The extension half of the preview, and the half that is non-zero on a
+	// fresh install. Counted from the enable map the READ already took, so
+	// the preview costs no second pass over the plugins.
+	if cap.Available && cap.Plugin != "" && !enabled[cap.Plugin] {
+		st.WillEnablePlugin = true
+	}
 	for _, id := range cap.RuleIDs {
 		if _, isRule := builtinRule(id); !isRule {
 			continue // a window zone, not a matrix rule
@@ -900,25 +1026,53 @@ func (c *Core) capabilityRollup(cap profiles.Capability, enabled map[string]bool
 		st.Total++
 		if c.set.IsRuleEnabled(id) {
 			st.Enabled++
+		} else {
+			// Only an AVAILABLE capability can be switched on by a plan, so
+			// only an available one has a "would switch on" to report. An
+			// unavailable row carrying a preview number would be a promise
+			// the apply cannot keep.
+			if cap.Available {
+				st.WillEnable++
+			}
 		}
 	}
 	st.Live = st.Live && st.Enabled == st.Total
 	return st
 }
 
-// handleProfileApply serves core.profileApply: {"profile":"<id>"} — the
-// one-click profile card. The bundle's available capabilities are projected
-// into ONE settings.Plan and handed to Store.ApplyBatch, so a profile activates
-// atomically: the same all-or-nothing contract the store keeps for a hand-built
-// plan, and no path on which the card leaves half a dozen edits behind.
+// handleProfileApply serves core.profileApply: {"profile":"<id>",
+// "capabilities":["<id>",…]} — the one-click profile card. The bundle's
+// available capabilities are projected into ONE settings.Plan and handed to
+// Store.ApplyBatch, so a profile activates atomically: the same all-or-nothing
+// contract the store keeps for a hand-built plan, and no path on which the card
+// leaves half a dozen edits behind.
 //
 // The store's active-profile field is free text, so the catalog of what may be
 // applied is this handler's job: an id the bundle does not declare is refused
 // before the store sees it. Malformed input is a bad-params error, the same
 // shape config.setOverride returns.
+//
+// `capabilities` is the per-capability switch, arriving with the write rather
+// than as a second verb: a switch that wrote its own call and the apply wrote
+// another would be two writes for one gesture, and a person who flipped a
+// switch and then hit Apply could land the second without the first. An id the
+// bundle does not declare is REFUSED rather than ignored — a typo in a switch
+// that silently applies everything is the opposite of what the person asked for.
+//
+// The field is a POINTER, and that is the whole reason the switch can work. A
+// bare []string cannot tell ABSENT from PRESENT-AND-EMPTY: encoding/json maps
+// both `{}` and `{"capabilities":[]}` onto the same nil-or-empty slice, so the
+// card with every switch off would be indistinguishable from a caller with no
+// switches and would apply the WHOLE bundle — the exact opposite of the gesture.
+// A *[]string separates the two: nil means absent and answers every available
+// capability, which is what the pre-switch card did and what a caller with no
+// UI sends; non-nil and empty means the person turned everything off and the
+// plan is honestly empty. Without the pointer the daemon cannot express "apply
+// nothing" at all.
 func (c *Core) handleProfileApply(raw json.RawMessage) (any, *ipc.RPCError) {
 	var p struct {
-		Profile string `json:"profile"`
+		Profile      string    `json:"profile"`
+		Capabilities *[]string `json:"capabilities"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil || strings.TrimSpace(p.Profile) == "" {
 		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: `need {"profile":"<profile id>"}`}
@@ -928,7 +1082,10 @@ func (c *Core) handleProfileApply(raw json.RawMessage) (any, *ipc.RPCError) {
 		return nil, &ipc.RPCError{Code: ipc.ErrInvalid,
 			Message: "unknown profile " + strconv.Quote(p.Profile)}
 	}
-	plan := planForProfile(bundle)
+	if err := checkCapabilitySelection(bundle, selectedIDs(p.Capabilities)); err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInvalid, Message: err.Error()}
+	}
+	plan := planForProfile(bundle, p.Capabilities)
 	if err := c.set.ApplyBatch(plan, settings.Catalog{
 		Rules:   c.knownRuleIDs,
 		Plugins: c.pluginKnown,
@@ -951,6 +1108,84 @@ func (c *Core) handleProfileApply(raw json.RawMessage) (any, *ipc.RPCError) {
 	}, nil
 }
 
+// selectedIDs dereferences the wire's absent-or-present pointer for the callers
+// that only need to know WHICH ids were named. It is deliberately lossy about
+// the distinction: an absent selection and an empty one name no ids either, and
+// only planForProfile cares which was sent.
+func selectedIDs(selected *[]string) []string {
+	if selected == nil {
+		return nil
+	}
+	return *selected
+}
+
+// checkCapabilitySelection refuses a capability id the bundle does not declare.
+// Absent or empty is not an error — an empty selection is a real request (apply
+// nothing), not a malformed one — and anything else must name a real capability.
+//
+// The reason it is a refusal and not a filter: a switch that silently drops an
+// id the person could not see produces a plan nobody asked for, and the
+// difference between "I asked for two capabilities" and "I got the other three"
+// is invisible at the moment it happens.
+func checkCapabilitySelection(bundle profiles.Profile, selected []string) error {
+	if len(selected) == 0 {
+		return nil
+	}
+	declared := make(map[string]bool, len(bundle.Capabilities))
+	for _, cap := range bundle.Capabilities {
+		declared[cap.ID] = true
+	}
+	for _, id := range selected {
+		if !declared[id] {
+			return fmt.Errorf("profile %s declares no capability %s", bundle.ID, strconv.Quote(id))
+		}
+	}
+	return nil
+}
+
+// handleProfileDeactivate serves core.profileDeactivate: the way back out of
+// the last profile. No parameter — there is one active profile and one recorded
+// snapshot, and the daemon holds both, so naming either in the payload would be
+// a second copy of a fact it already has.
+//
+// It does BOTH halves, and the second half is the one that is easy to miss.
+// RevertProfile restores the store: the rule verdicts, the plugin verdicts, the
+// active-profile string, and it clears the snapshot. But decideLocked compiles
+// the RUNNING router from c.plugins, not from the document — so a revert that
+// wrote only the store would leave the person looking at a card that says
+// nothing is applied while their keyboard still runs the Windows profile until
+// they restart. That is the same half-activated outcome handleProfileApply
+// guards against, in the undoing direction, and it is why the plugin verdicts
+// are pushed into c.plugins under c.mu here.
+//
+// The refusal is the store's, in the store's words, and it is returned as an
+// RPC error rather than as a successful empty result. There is no shape of
+// reply that means "nothing was done" — a caller that got {"rules":0} with no
+// error would have to guess, and the guess it would make is that it undid
+// something.
+func (c *Core) handleProfileDeactivate(_ json.RawMessage) (any, *ipc.RPCError) {
+	snap, err := c.set.RevertProfile()
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInvalid, Message: err.Error()}
+	}
+	// Same lock, same reason, opposite direction: decideLocked reads c.plugins
+	// under c.mu, so the restore has to land inside it or a press that arrives
+	// between the store write and this one compiles the profile's rules back in.
+	c.mu.Lock()
+	for _, t := range snap.Plugins {
+		c.plugins[t.ID] = t.Enabled
+	}
+	c.mu.Unlock()
+	return map[string]any{
+		// The profile the store is back to — "" for the usual case of a first
+		// apply, which had nothing active before it. Sent so a card can redraw
+		// from the daemon's account rather than assuming "no profile".
+		"profile": snap.Profile,
+		"rules":   len(snap.Rules),
+		"plugins": len(snap.Plugins),
+	}, nil
+}
+
 // profileByID resolves a profile the bundle declares.
 func profileByID(id string) (profiles.Profile, bool) {
 	for _, p := range profiles.All() {
@@ -968,12 +1203,48 @@ func profileByID(id string) (profiles.Profile, bool) {
 // daemon's table, so sending one would reject the whole profile over a zone the
 // user cannot toggle. Ids are deduplicated because three capabilities sharing
 // one plugin is one edit, not three.
-func planForProfile(p profiles.Profile) settings.Plan {
+//
+// selected is the per-capability switch, and it filters CAPABILITIES rather
+// than rules: a capability is the unit a person reasons about ("the Windows
+// keys, not the snap zones"), so a switch that let half a capability through
+// would be a control that cannot be described in a sentence.
+//
+// It is a POINTER because the guard it used to carry could not say what it had
+// to say. `len(want) > 0 && !want[cap.ID]` reads "no selection means no filter",
+// which is right for absent and CATASTROPHICALLY wrong for empty: a card with
+// every switch off built an empty `want`, fell through the guard, and applied
+// the whole bundle. So the branch is on nil-ness instead, and each case gets
+// its own answer: nil is absent and every available capability applies; non-nil
+// is a selection the person actually made, and a capability applies only if that
+// selection names it — which for the empty selection means none of them do, and
+// the plan is honestly empty. The control renders "Applying will change nothing"
+// above a button that commits exactly that.
+//
+// ActiveProfile is set even for a partial apply, and that is deliberate: a
+// profile with one of its five capabilities on IS the active profile, and a
+// store that recorded the string only for the whole-bundle case would report
+// no profile while the Windows keys were running. The snapshot rides along
+// regardless (ApplyBatch records it for any plan that names a profile), so a
+// partial apply is as undoable as a full one — including the empty one, which
+// records the profile and reverts to the same prior state it already had.
+func planForProfile(p profiles.Profile, selected *[]string) settings.Plan {
 	id := p.ID
 	plan := settings.Plan{ActiveProfile: &id}
+	// narrowed is the absent-vs-empty question asked once, so the loop below
+	// cannot get it wrong on a fourth path. Absent (nil) does not narrow.
+	narrowed := selected != nil
+	want := map[string]bool{}
+	if narrowed {
+		for _, s := range *selected {
+			want[s] = true
+		}
+	}
 	seenPlugin, seenRule := map[string]bool{}, map[string]bool{}
 	for _, cap := range p.Capabilities {
 		if !cap.Available {
+			continue
+		}
+		if narrowed && !want[cap.ID] {
 			continue
 		}
 		if cap.Plugin != "" && !seenPlugin[cap.Plugin] {

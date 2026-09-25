@@ -37,7 +37,7 @@ import type {
 } from '../types/controls'
 import { ACTION_COMMANDS, UNBOUND_ACTIONS, commandFor } from './actions'
 import { renderControl, rendererKinds, type ControlContext } from './index'
-import { reset, stub } from '../test/fixtures'
+import { machine, reset, stub } from '../test/fixtures'
 import type { Control } from '../types/controls'
 
 afterEach(() => cleanup())
@@ -474,7 +474,17 @@ describe('every registered kind, with nothing and with a failure', () => {
       {
         kind: 'profileList',
         write: /^Apply /,
-        arm: () => {},
+        // The card's Apply is gated on the review (the menumate reviewList
+        // port), so the arm step looks at each capability first. Clicking a
+        // switch twice reviews the row and leaves the selection whole, and a
+        // test that pressed a disabled button would prove nothing about the
+        // in-flight state.
+        arm: (c) => {
+          for (const box of Array.from(c.querySelectorAll('input.ctl-toggle'))) {
+            fireEvent.click(box)
+            fireEvent.click(box)
+          }
+        },
       },
       {
         kind: 'keymapEditor',
@@ -756,6 +766,63 @@ const PROFILES: ProfileRow[] = [
   },
 ]
 
+// PREVIEWED is a card as the daemon serves it once the preview exists: the
+// two integers the old apply reported only AFTER the click, plus the
+// extension count that is the whole of the change on a fresh install.
+const PREVIEWED: ProfileRow = {
+  id: 'windows11',
+  label: 'Windows 11',
+  description: 'Windows keys and snap zones.',
+  active: false,
+  will_enable: 2,
+  already_on: 3,
+  will_disable: 0,
+  will_enable_plugins: 1,
+  capabilities: [
+    {
+      id: 'keys',
+      label: 'Windows keys',
+      plugin: 'window-keys',
+      available: true,
+      rule_ids: ['win.switch'],
+      enabled: 3,
+      total: 3,
+      live: true,
+      will_enable: 0,
+      will_enable_plugin: true,
+    },
+    {
+      id: 'snap',
+      label: 'Snap zones',
+      plugin: 'window-keys',
+      available: true,
+      rule_ids: ['win.snap'],
+      enabled: 0,
+      total: 2,
+      live: false,
+      will_enable: 2,
+    },
+  ],
+}
+
+// ACTIVE is a profile with a recorded snapshot: the door back is open.
+const ACTIVE: ProfileRow = {
+  id: 'plain',
+  label: 'Plain desktop',
+  description: 'Nothing turned on yet.',
+  active: true,
+  revertible: true,
+  capabilities: [],
+}
+
+// REFUSING is the case the criterion names: an active profile with no
+// recorded snapshot, which the daemon answers in words.
+const REFUSING: ProfileRow = {
+  ...ACTIVE,
+  revertible: false,
+  revert_reason: 'This profile was applied before CrossOS recorded what to return to, so there is no undo point for it. Apply the profile again to record one.',
+}
+
 describe('the profile cards', () => {
   it('draws one card per bundle, with the active one marked', async () => {
     show({ kind: 'profileList', id: 'profiles', label: 'Profiles' }, daemon({ Profiles: () => Promise.resolve(PROFILES) }))
@@ -785,6 +852,229 @@ describe('the profile cards', () => {
   it('says so when the daemon serves no profiles', async () => {
     show({ kind: 'profileList', id: 'profiles', label: 'Profiles' }, daemon())
     expect(await screen.findByText(/No profiles are available/)).toBeTruthy()
+  })
+
+  // --- the review gate, the preview, the switches and the way back ----------
+  //
+  // These four are the parts of the card that were absent before: a card you
+  // could only turn on, with no preview, no per-capability switch, and no
+  // door back. Each test states the one behaviour that would be a lie if it
+  // broke.
+  it('will not arm Apply until every capability has been looked at, and says how many are left', async () => {
+    show({ kind: 'profileList', id: 'profiles', label: 'Profiles' }, daemon({ Profiles: () => Promise.resolve([PREVIEWED]) }))
+    // The rollup is the menumate header's "n of m" (PacksScreen.swift:309-311,
+    // the enabledCount/totalCount Text):
+    // how much of the thing is selected, readable before opening the card.
+    expect(await screen.findByText(/2 of 2 capabilities/)).toBeTruthy()
+    // The gate, in words. A button that is merely disabled with no sentence
+    // beside it is indistinguishable from a button that is broken.
+    expect(screen.getByText(/Reviewed 0 of 2 — look at each one before applying/)).toBeTruthy()
+
+    const apply = screen.getByRole('button', { name: 'Apply Windows 11' }) as HTMLButtonElement
+    expect(apply.disabled, 'Apply is armed before anything was reviewed').toBe(true)
+
+    // One switch is one review: a row is marked by being looked at, not by a
+    // separate Done button (PackImportSheet.swift:260-263, the onTapGesture
+    // that inserts into `viewed`).
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Windows 11: Windows keys' }))
+    expect(screen.getByText(/Reviewed 1 of 2/)).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Apply Windows 11' }) as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Windows 11: Snap zones' }))
+    expect(screen.getByText('Reviewed 2 of 2')).toBeTruthy()
+    // The gate covered the SELECTED subset at first, which made it circular:
+    // switching a capability off took it out of the review set, so a card
+    // could arm by looking only at what it was already going to apply. Both
+    // switches now count whether they are on or off.
+    expect((screen.getByRole('button', { name: 'Apply Windows 11' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('previews what applying will change BEFORE the click, and the preview follows the switches', async () => {
+    show({ kind: 'profileList', id: 'profiles', label: 'Profiles' }, daemon({ Profiles: () => Promise.resolve([PREVIEWED]) }))
+    // The extension is the whole of the change on a fresh machine, so it
+    // leads: a preview that opened with "0 shortcuts" beside a keyboard that
+    // does not work would be true and useless.
+    expect(await screen.findByText('Applying will turn on the extension, switch on 2 shortcuts, 3 already on.')).toBeTruthy()
+
+    // Switch a capability off and the preview must shrink to what Apply will
+    // actually do. A preview that ignored its own switches is the same class
+    // of lie as an unavailable row claiming a capability does not exist.
+    //
+    // The two switches carry different numbers on purpose, so the two
+    // sentences below cannot both be produced by one hard-coded line: `keys`
+    // is the extension and the three already-on shortcuts, `snap` is the two
+    // that would be switched on.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Windows 11: Snap zones' }))
+    expect(
+      screen.getByText('Applying will turn on the extension, 3 already on.'),
+      'the preview did not follow the switch',
+    ).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Windows 11: Windows keys' }))
+    expect(
+      screen.getByText('Applying will change nothing.'),
+      'the preview did not come back when the switch did',
+    ).toBeTruthy()
+  })
+
+  it('sends the SELECTION with the apply, so a switch narrows the one write', async () => {
+    const seen: (string[] | undefined)[] = []
+    // The override is installed after daemon() builds the object, so `service`
+    // is in scope by the time the override RUNS even though the literal that
+    // closes over it comes first.
+    const service: ServiceApi & { calls: string[] } = daemon({
+      Profiles: () => Promise.resolve([PREVIEWED]),
+      ApplyProfile: (_id: string, capabilities?: string[]) => {
+        seen.push(capabilities)
+        // Recorded by name as well, so the assertion can say the write went
+        // through the BOUND call and not just that some function ran.
+        service.calls.push('ApplyProfile')
+        return Promise.resolve({})
+      },
+    })
+    show({ kind: 'profileList', id: 'profiles', label: 'Profiles' }, service)
+    await screen.findByText(/2 of 2 capabilities/)
+
+    // Look at both, then exclude one: the reviewed-all gesture and the
+    // narrowed apply are ONE write, not two.
+    // Each switch twice: the first click is the review, the second puts the
+    // capability back in the selection, so this applies the WHOLE bundle —
+    // which is the case the assertion is about.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Windows 11: Windows keys' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Windows 11: Windows keys' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Windows 11: Snap zones' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Windows 11: Snap zones' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Windows 11' }))
+    await waitFor(() => expect(seen).toHaveLength(1))
+    expect(seen[0], 'the apply did not carry the selection').toEqual(['keys', 'snap'])
+    expect(service.calls, 'the apply did not go through the bound call').toContain('ApplyProfile')
+  })
+
+  it('offers the way back on the ACTIVE card only, and runs the bound call', async () => {
+    const service = daemon({
+      Profiles: () => Promise.resolve([PREVIEWED, ACTIVE]),
+      ProfileDeactivate: () => {
+        service.calls.push('ProfileDeactivate')
+        return Promise.resolve({ profile: '', rules: 0, plugins: 0 })
+      },
+    })
+    show({ kind: 'profileList', id: 'profiles', label: 'Profiles' }, service)
+    await screen.findByText(/2 of 2 capabilities/)
+    // One profile is in force at a time and one snapshot exists to undo it,
+    // so a Revert on an inactive card would be a button acting on somebody
+    // else's state.
+    expect(screen.getAllByRole('button', { name: /^Put .* back$/ })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Put Plain desktop back' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Put Plain desktop back' }))
+    await waitFor(() => expect(service.calls).toContain('ProfileDeactivate'))
+  })
+
+  it('refuses the way back IN WORDS when there is nothing to return to', async () => {
+    show({ kind: 'profileList', id: 'profiles', label: 'Profiles' }, daemon({ Profiles: () => Promise.resolve([PREVIEWED, REFUSING]) }))
+    await screen.findByText(/2 of 2 capabilities/)
+    const back = screen.getByRole('button', { name: 'Put Plain desktop back' }) as HTMLButtonElement
+    expect(back.disabled, 'the way back was armed with no snapshot recorded').toBe(true)
+    // The sentence is ON THE PAGE, not only in a title attribute: a person
+    // who never hovers a disabled button would otherwise see a grey control
+    // and no reason.
+    expect(
+      screen.getByText(/no undo point for it.*Apply the profile again to record one/),
+      'the refusal is not rendered in words',
+    ).toBeTruthy()
+  })
+
+  it('says it has nothing to preview when the daemon sends no preview', async () => {
+    const bare = [PREVIEWED].map((p) => ({
+      ...p,
+      will_enable: undefined,
+      already_on: undefined,
+      will_enable_plugins: undefined,
+      capabilities: p.capabilities.map((c) => ({ ...c, will_enable: undefined, will_enable_plugin: undefined })),
+    }))
+    show({ kind: 'profileList', id: 'profiles', label: 'Profiles' }, daemon({ Profiles: () => Promise.resolve(bare) }))
+    // Absent means this daemon predates the preview. Saying so is right;
+    // inventing a number from a missing field is not.
+    expect(await screen.findByText('This daemon does not report what applying would change.')).toBeTruthy()
+  })
+
+  // The test that was MISSING, and the reason the dead control shipped.
+  //
+  // The test above ('sends the SELECTION with the apply') proves the control
+  // passes the selection to a bound call whose mock DECLARES the parameter, and
+  // the Go test in pagedata_test.go proves the daemon honours a payload no shell
+  // emits. Each proves a HALF, both passed, and between them the selection went
+  // nowhere: the App method took one argument, the Service one, the IPC payload
+  // carried only "profile", and the generated Wails binding took one argument
+  // and dropped the second before Go ever saw it. The card previewed a narrowed
+  // plan and the button applied the whole bundle, and no test in either language
+  // could tell, because each end of the wire was only ever asserted against its
+  // own end.
+  //
+  // So this one runs the REAL fixture — the one that now HONOURS the selection,
+  // which is what makes it observable — and asserts on what the apply actually
+  // DID. The fixture resolves the selection against the declared capabilities
+  // and assigns the extension verdicts rather than OR-ing them, so a control
+  // that dropped the selection leaves a different machine behind and the
+  // difference is visible here. This is the closest a single test gets to
+  // starting at actions.ts and ending at handleProfileApply.
+  it('the narrowed apply CHANGES THE OUTCOME, which is the half no test had', async () => {
+    reset()
+    // The fixture's own profile: two available capabilities over two different
+    // extensions, so a selection that names one of them has to leave the other
+    // off. A card whose two capabilities shared a plugin could not tell.
+    show({ kind: 'profileList', id: 'profiles', label: 'Profiles' }, stub)
+    await screen.findByText(/2 of 2 capabilities/)
+    expect(machine.extensions['window-keys'], 'the fixture did not start clean').toBe(false)
+    expect(machine.extensions['finder-actions'], 'the fixture did not start clean').toBe(false)
+
+    // The review gesture IS the toggle, so one click both acknowledges a row
+    // and flips it. Three clicks therefore: Finder off, Finder back on, and
+    // Windows keys off — leaving a reviewed card whose selection is Finder
+    // alone.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Windows 11: Finder actions' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Windows 11: Finder actions' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Windows 11: Windows keys' }))
+    expect(screen.getByText(/1 of 2 capabilities/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Windows 11' }))
+
+    // THE ASSERTION. A control that computed, previewed and then dropped the
+    // selection would turn BOTH extensions on here, because the fixture's
+    // absent-selection case is "every available capability" — which is exactly
+    // the fallback the old code fell into, and why this test failed nothing
+    // before: the mock simply did not care.
+    await waitFor(() => expect(machine.extensions['finder-actions']).toBe(true))
+    expect(
+      machine.extensions['window-keys'],
+      'the apply turned on the extension its switch was OFF for: the selection did not survive the write',
+    ).toBe(false)
+  })
+
+  // The other end of the same distinction, and the one a nil-guard in any layer
+  // would break: a card with EVERY switch off is a real request to apply
+  // nothing, and it must not read as "no selection" (which means all).
+  it('a card with every switch off applies NOTHING rather than everything', async () => {
+    reset()
+    show({ kind: 'profileList', id: 'profiles', label: 'Profiles' }, stub)
+    await screen.findByText(/2 of 2 capabilities/)
+
+    // One click each, which is one review each AND one switch-off each.
+    for (const name of ['Windows 11: Windows keys', 'Windows 11: Finder actions']) {
+      fireEvent.click(screen.getByRole('checkbox', { name }))
+    }
+    expect(screen.getByText(/0 of 2 capabilities/)).toBeTruthy()
+    // The preview says so before the click, and it must be true after it.
+    expect(screen.getByText('Applying will change nothing.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Windows 11' }))
+
+    await waitFor(() => expect(machine.calls).toContain('ApplyProfile'))
+    // An empty array, not an absent one. The daemon decodes the field as a
+    // *[]string for exactly this, and `undefined` here would be read as
+    // "apply every available capability" — the whole bundle, from a card whose
+    // every switch is off.
+    expect(machine.calls.filter((c) => c === 'ApplyProfile')).toHaveLength(1)
+    expect(machine.extensions['window-keys'], 'an all-off card applied the whole bundle').toBe(false)
+    expect(machine.extensions['finder-actions'], 'an all-off card applied the whole bundle').toBe(false)
   })
 })
 

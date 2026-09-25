@@ -41,15 +41,17 @@
 //
 // The reference is SwiftUI with a drag-to-reorder DropDelegate; this is React
 // over a served schema, so the handle is a keyboard-operable move control and
-// the drop is an explicit id list. No Swift was copied. §9.11: newfile is
-// MIT and recorded in third_party/newfile/ATTRIBUTION.md.
+// the drop is an explicit id list. No Swift LOGIC was copied; seven
+// user-facing strings were, verbatim, and third_party/newfile/ATTRIBUTION.md
+// names all seven with their reference lines. §9.11: newfile is MIT and
+// recorded in that block.
 
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { ServiceApi } from '../types/controls'
 import { asList, asText, failedTo } from '../lib/wire'
 import { useResource } from '../lib/useResource'
-import { commandFor } from './actions'
+import { commandFor, REORDER_FILE_TYPES, SET_FILE_TYPE } from './actions'
 import { ControlFrame, EmptyState, Toggle } from './common'
 import type { ControlProps } from './common'
 
@@ -96,13 +98,16 @@ function fileTypeService(service: ServiceApi): FileTypeService | null {
 }
 
 /**
- * The action ids, assembled rather than written out: the shell's own rule test
- * reads any namespaced "core" prefix in src/ as a page id, and these are
- * capability tokens the daemon issued — the kind of thing the action registry
- * is FOR, not a screen the shell branches on.
+ * The two write ids are IMPORTED, not spelled here. They are assembled rather
+ * than written out — the shell's own rule test reads any namespaced "core"
+ * prefix in src/ as a page id, and these are capability tokens the daemon
+ * issued, the kind of thing the action registry is FOR — but that is exactly
+ * why there must be ONE of each. This file used to carry private copies beside
+ * the registry's, and two spellings of one id is a promise that ends the first
+ * time the id changes: the table would dispatch to a verb this control no
+ * longer names, and the button would run nothing. One spelling per id, held by
+ * the registry that runs it.
  */
-const SET_FILE_TYPE = ['core', 'setFileType'].join('.')
-const REORDER_FILE_TYPES = ['core', 'reorderFileTypes'].join('.')
 
 /**
  * The handle a reorder names a row by — the filename the preset creates, which
@@ -152,14 +157,26 @@ function rowName(row: FileTypeRow): string {
 /**
  * Why an extension cannot be used, in words — or '' when it can.
  *
- * The rules are the reference's own: trimmed, lowercased, leading dots
- * dropped; non-empty; at most 16 characters; and nothing outside a-z 0-9 . _ -
- * (Shared/FileTypeEntry.swift, validateExtension). The reason is returned
- * rather than a boolean because a disabled row with no reason tells a person
- * nothing they can act on.
+ * The RULES are the reference's own: trimmed, lowercased, leading dots dropped;
+ * non-empty; at most 16 characters; and nothing outside a-z 0-9 . _ -
+ * (Shared/FileTypeEntry.swift, validateExtension). The three SENTENCES are the
+ * reference's too, and they are the same three strings its own row shows —
+ * errorMessage at FileTypeRow.swift:155-161 returns "Extension cannot be
+ * empty" (:157), "Extension too long (max 16 chars)" (:158) and
+ * "Allowed: a-z, 0-9, . _ -" (:159) for the three validation failures it can
+ * raise. A person who has met one build's wording should not have to learn a
+ * second one to read the other. The three are taken VERBATIM, which is why
+ * third_party/newfile/ATTRIBUTION.md names them rather than claiming nothing
+ * was copied; what is reimplemented here is the check that returns them, not
+ * the words it returns them in.
+ *
+ * The reason is returned rather than a boolean because a disabled row with no
+ * reason tells a person nothing they can act on.
  *
  * A built-in is never invalid: its extension was written by the daemon, and a
- * seed the person cannot fix is a row that would sit disabled forever.
+ * seed the person cannot fix is a row that would sit disabled forever. That is
+ * the reference's extIsValid (FileTypeRow.swift:82-84) with the same exemption
+ * on its other side.
  */
 function extensionProblem(row: FileTypeRow): string {
   if (row.builtIn) return ''
@@ -169,6 +186,27 @@ function extensionProblem(row: FileTypeRow): string {
   if (/[^a-z0-9._-]/.test(ext)) return 'Allowed: a-z, 0-9, . _ -'
   return ''
 }
+
+/**
+ * Why the default filename cannot be typed here, in the words the row shows.
+ *
+ * The daemon keys a catalog row on the PAIR (ext, baseName) — handleSetFileType
+ * finds the stored row by matching both, and then copies only DisplayName,
+ * Template and Enabled onto it. A caller that sent a different base name has
+ * not asked to edit a row; it has asked about a row that is not there, and is
+ * refused at finderdata.go:296 with `no file type %q`. There is no third verb
+ * that could move a row to a new base name: the page serves three
+ * (fileTypes, setFileType, reorderFileTypes) and none of them renames one.
+ *
+ * The value is still worth showing — a person needs to know a .md preset will
+ * create "Untitled.md" — so the field stays and reads. What the control must
+ * not do is offer the edit and report it saved, which is the same
+ * "looks live and is dead" failure the per-capability switch was.
+ */
+const BASE_NAME_LOCKED =
+  'Read-only: the extension and the base name together are how the daemon identifies this row, ' +
+  'and its row write only saves the label, the template and the on/off switch. There is no verb ' +
+  'to rename a default filename.'
 
 /** The id list a move produces: the whole order, every row named once. */
 function movedIds(ids: string[], from: number, to: number): string[] {
@@ -302,40 +340,102 @@ export function FileTypeListControl(props: ControlProps): ReactElement {
    * Two differences from the reference, both forced by the verb rather than
    * chosen. The reference debounces the WHOLE list because it persists the
    * whole list; here SET_FILE_TYPE is a validated read-modify-write of ONE
-   * existing row, so the debounce is per row. And the reference's sink applies
-   * validOnly on the way to the store, which is the other half of its rule and
-   * is enforced here by extensionProblem refusing the write rather than by
-   * filtering the table — the daemon is the boundary that decides what may
-   * exist, and a shell-side filter would be a second opinion.
+   * existing row, so the debounce is per row.
+   *
+   * The reference's sink ALSO applies validOnly (PreferencesView.swift:32-34),
+   * the other half of its rule: a row with an extension nothing can act on
+   * never reaches the store. That filter has no referent in this port, and
+   * saying so is the honest description rather than claiming a guard that is
+   * not there. newfile's row makes the extension an editable field, and it is
+   * how a row becomes invalid; this control has no extension field at all, and
+   * the reason is the daemon's, not a preference: setFileType matches the
+   * stored row on (ext, baseName) and copies only DisplayName, Template and
+   * Enabled onto it (finderdata.go:290). A caller that changed either half is
+   * asking about a row that is not there (finderdata.go:296).
+   *
+   * That constraint covers BOTH halves of the pair, and the two are handled
+   * differently, so neither can be waved through under the other. The EXTENSION
+   * is a plain non-issue: no row served here carries one to edit, so no row can
+   * become invalid, and a shell-side filter would be a second opinion on a
+   * question the daemon does not let anyone ask. The guard that IS load-bearing
+   * is the one on the toggle, which extensionProblem gates and which is why a
+   * row would stay visible and dark rather than vanish if the extension ever
+   * became editable. The BASE NAME is not a non-issue, because the daemon
+   * serves a value for it and the reference's row has a field for it: it is
+   * shown, and it is readOnly, and the reason is on screen beside it. It was
+   * once neither — an enabled input on the same saveField as the menu label,
+   * which reported a save the daemon could not accept. So `displayName` is now
+   * the only field the debounce can carry, in the type as well as in the view:
+   * a write to baseName is not a branch nobody took, it is one that cannot be
+   * written.
    */
-  const pending = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const pending = useRef(
+    new Map<
+      string,
+      {
+        timer: ReturnType<typeof setTimeout>
+        row: FileTypeRow
+        field: 'displayName'
+        value: string
+      }
+    >(),
+  )
 
+  /**
+   * The unmount FLUSH, and it is HALF the port's answer to the reference's Done
+   * button — the half that transfers, and only that half.
+   *
+   * newfile does not leave its settings sheet with a write in flight: Done is
+   * `vm.persist(); dismiss()` (PreferencesView.swift:111-113, its
+   * `.keyboardShortcut(.defaultAction)` at :115), over a persist() that writes
+   * the list (PreferencesView.swift:35-37). This port's debounce had the same
+   * window and the opposite ending — the timer was cleared and its word
+   * DROPPED, so a menu label typed and a page left inside 300ms was a label the
+   * daemon never heard of, with no refusal to point at. The pending entries are
+   * therefore fired rather than cancelled.
+   *
+   * What transfers is COMMIT-ON-EXIT: an edit still inside the debounce window
+   * reaches the store when the surface is left. What does NOT transfer is what
+   * makes the reference's Done worth pressing — an EXPLICIT, USER-INITIATED
+   * commit, a labelled button a person chooses, meaning something only because
+   * every other edit in that sheet saves itself. This flush is PASSIVE:
+   * navigation fires it and nobody chose anything. Same job, different
+   * behaviour, and the reference has no Save/Discard pair to port.
+   *
+   * The failure is still announced. The reference's persist() is a silent
+   * assignment that cannot report anything, and a webview cannot copy that: a
+   * word that did not reach the daemon has to be said out loud, and a notice
+   * outlives the control that raised it.
+   */
   useEffect(() => {
     const timers = pending.current
     return () => {
-      for (const timer of timers.values()) clearTimeout(timer)
+      for (const entry of timers.values()) {
+        clearTimeout(entry.timer)
+        void writeField(entry.row, entry.field, entry.value).catch((reason: unknown) => {
+          ctx.note(failedTo('Saving your last edit before leaving', reason))
+        })
+      }
       timers.clear()
     }
+    // The cleanup runs against the FIRST render's closures, which is what an
+    // unmount flush wants: every pending entry carries its own row, field and
+    // value, so nothing is read off a stale render.
   }, [])
 
-  function scheduleField(
-    row: FileTypeRow,
-    field: 'displayName' | 'baseName',
-    next: string,
-  ): void {
+  function scheduleField(row: FileTypeRow, field: 'displayName', next: string): void {
     const key = `${rowId(row)}.${field}`
-    const arm = (): void => {
-      pending.current.set(
-        key,
-        setTimeout(() => {
-          pending.current.delete(key)
-          void saveField(row, field, next)
-        }, 300),
-      )
-    }
     const existing = pending.current.get(key)
-    if (existing !== undefined) clearTimeout(existing)
-    arm()
+    if (existing !== undefined) clearTimeout(existing.timer)
+    pending.current.set(key, {
+      timer: setTimeout(() => {
+        pending.current.delete(key)
+        void saveField(row, field, next)
+      }, 300),
+      row,
+      field,
+      value: next,
+    })
   }
 
   const rows = written ?? readRows(catalog.data)
@@ -399,11 +499,21 @@ export function FileTypeListControl(props: ControlProps): ReactElement {
     if (ok) ctx.note(`${name} is now ${next ? 'on' : 'off'}.`)
   }
 
-  async function saveField(
-    row: FileTypeRow,
-    field: 'displayName' | 'baseName',
-    next: string,
-  ): Promise<void> {
+  /**
+   * The field write itself, with neither the re-arm nor the "is a command
+   * bound" check — both of those are about a LIVE editing session, and the
+   * unmount flush is not one. A missing command resolves to nothing here: with
+   * no bound verb there is no daemon to tell, and the caller is already
+   * unmounted, so a sentence aimed at a row nobody is looking at any more is
+   * the wrong place to spend one.
+   */
+  async function writeField(row: FileTypeRow, field: 'displayName', next: string): Promise<void> {
+    const command = commandFor(SET_FILE_TYPE)
+    if (!command) return
+    await command(ctx.service, { value: { ...row, [field]: next } })
+  }
+
+  async function saveField(row: FileTypeRow, field: 'displayName', next: string): Promise<void> {
     if (busy !== '') {
       // A write is already in flight, so this one cannot land yet. Re-arm
       // rather than return: a dropped edit here is a word the person was in
@@ -524,14 +634,24 @@ export function FileTypeListControl(props: ControlProps): ReactElement {
                       scheduleField(row, 'displayName', event.currentTarget.value)
                     }
                   />
+                  {/* The default filename is SHOWN and not typed, and the reason
+                      is beside it. It is half of the daemon's identity for this
+                      row — (ext, baseName), matched at finderdata.go:290 — and
+                      the row write saves only the label, the template and the
+                      on/off switch, so a new base name has no row to land on.
+                      This field used to be enabled and routed through the same
+                      saveField as the menu label: the person typed, the control
+                      reported the save, and the daemon refused a row that no
+                      longer existed. Same shape as the delete cell below, which
+                      also renders and refuses in words rather than pretending. */}
                   <input
                     className="ctl-input"
                     aria-label={`Default filename for ${name}`}
                     value={row.baseName}
                     placeholder={row.ext === '' ? 'filename' : `.${row.ext}`}
-                    disabled={busy !== ''}
-                    onChange={(event) => scheduleField(row, 'baseName', event.currentTarget.value)}
+                    readOnly
                   />
+                  <span className="ctl-value">{BASE_NAME_LOCKED}</span>
                   <button
                     type="button"
                     className="ctl-button"

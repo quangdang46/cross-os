@@ -168,8 +168,7 @@ export function PluginListControl(props: ControlProps): ReactElement {
   const meta = useResource(() => ctx.service.PluginMeta(), ctx.refreshToken, [], ctx.note)
   const groups = groupBy(plugins)
   // The writes this page declared for its rows, read through the index
-  // signature the way the two sibling list controls read it (PackListControl.tsx:86).
-  // A control the daemon declared none for is not guessing one.
+  // signature: a control the daemon declared none for is not guessing one.
   const declaredRowActions = Array.isArray(control.rowActions) ? control.rowActions : []
   const metaFor = (id: string): PluginMetaRow | undefined =>
     (meta.data ?? []).find((row) => row.id === id)

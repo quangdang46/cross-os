@@ -59,6 +59,57 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: cd platform/windows/spike_b && go vet -unsafeptr=false . && go test -short .
 
+  # Frontend: run the vitest suite so the frontend gates are not
+  # developer-only (bead cross-os-64q). Same macOS+Windows matrix the Go
+  # lanes use — the os list is the single line above (lint-test.matrix.os),
+  # repeated here as an explicit list rather than a YAML anchor so a typo in
+  # one job cannot break the whole workflow file's parse.
+  #
+  # 'npm ci', NEVER 'npm install': install reports "up to date" against a tree
+  # that is missing vitest / @testing-library / jsdom, because
+  # node_modules/.package-lock.json agrees with itself rather than with
+  # package.json. An install-based job can therefore be green on a tree that
+  # cannot run the suite at all.
+  frontend:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: app/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/frontend/package-lock.json
+      - name: Install (npm ci, not npm install)
+        run: npm ci
+      - name: Frontend suite (vitest)
+        run: npm test
+      # The typecheck half. app/frontend/bindings/ is gitignored
+      # (.gitignore:34) and src/lib/service.ts:19 imports it, so 'npx tsc
+      # --noEmit' emits TS2307 on a clean checkout. Generate the bindings
+      # first, then typecheck — a typecheck that cannot resolve its imports
+      # checks nothing while reporting green. 'npm test' above needs no
+      # bindings (src/test/harness.tsx:48 mocks the import), which is why the
+      # test half looks fine and the typecheck half is the trap. The
+      # ServiceApi / controlSurface contracts ride on this run and nothing
+      # else.
+      # The generator takes the app/ Go module root ('./'), pinned to the CLI
+      # version the bindings + typecheck were validated against; 'go run'
+      # avoids PATH juggling and behaves identically under bash and pwsh.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Generate Wails bindings (gitignored; tsc input)
+        working-directory: app
+        run: go run github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.119 generate bindings ./
+      - name: Typecheck (npx tsc --noEmit)
+        run: npx tsc --noEmit
+
   build:
     strategy:
       matrix:

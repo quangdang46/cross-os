@@ -193,6 +193,11 @@ func TestEveryPageDataMethodIsRegistered(t *testing.T) {
 		"core.pluginSchemas", "safety.ownershipAudit", "safety.trialState",
 		"core.readiness",
 		"core.profiles", "core.profileApply", "core.conflicts",
+		// The way back out, pinned beside the apply for the reason the apply
+		// is pinned: a card that can only turn a profile on is a half
+		// feature, and a handler left out of methods() is dead code the
+		// shell can never reach.
+		"core.profileDeactivate",
 		"core.traces", "core.pluginMeta", "core.onboardingState",
 		"core.onboardingComplete",
 		// The Alt+Tab switcher's three sources: the list, the long-poll the
@@ -1381,4 +1386,579 @@ func TestConflictsRankThroughRuleResolve(t *testing.T) {
 			t.Error("a rule with no competitor is reported as a conflict")
 		}
 	}
+}
+
+// --- the profile revert ----------------------------------------------------
+//
+// A profile card that can only turn a profile ON is a half-feature: the store
+// records what it overwrote and nothing can put it back, so a person who
+// applied one has neither a door nor a way to find out a door should exist.
+//
+// These tests are the fail-loud half for the whole undo path, and they are
+// written against the two halves separately because they fail differently. The
+// STORE half is what the document holds; the ROUTER half is what c.plugins
+// holds, and decideLocked recompiles from the router half. A revert that wrote
+// only the document would pass every store assertion here and still leave the
+// keyboard running the Windows profile until a restart — which is why the
+// decision path, and not the document, is what gets compared.
+
+// winLeft is the Win+Left chord: keycode 0x25, the Meta modifier. It is the
+// snap rule the Windows profile switches on, so it is a chord whose verdict has
+// to move on apply and move BACK on revert.
+var winLeft = event.Event{Type: event.EventKeyDown, KeyCode: 0x25, Modifiers: 1 << 3}
+
+// profileTestCore builds a daemon whose builtins are all registered but OFF,
+// and whose settings live in a temp file. Off is the interesting starting
+// point: it is what a fresh install looks like, and it is the state a first
+// apply's snapshot has to be able to describe.
+func profileTestCore(t *testing.T, path string) *Core {
+	t.Helper()
+	c, err := NewCoreWithSettings(builtin.All(), builtin.Grants(), path)
+	if err != nil {
+		t.Fatalf("NewCoreWithSettings: %v", err)
+	}
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, false)
+	}
+	return c
+}
+
+// kbPlugin is the plugin the Windows profile turns on. Spelled through the
+// registration table rather than typed, for the reason profiles.go:13 gives.
+func kbPlugin() string { return builtin.BuiltinIDs[0] }
+
+// routerHas reports the RUNNING router's verdict for a plugin — c.plugins,
+// the map decideLocked recompiles from — as opposed to the document's.
+//
+// It is a test-local helper rather than a Core method on purpose: the whole
+// bug this suite exists for is a store that is right and a router that is not,
+// and reaching that router's private map from outside the package is what it
+// takes to assert the second half independently. Reading it through a method
+// would assert whatever that method chose to report, which is the thing under
+// test.
+func routerHas(c *Core, id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.plugins[id]
+}
+
+// winChordWinner is the decision path's verdict for the Win+Left chord.
+func winChordWinner(c *Core) string {
+	return c.decideLocked(winLeft, event.FastContext{
+		AppID: "com.apple.Finder", AppMode: event.AppModeNative,
+	}).WinnerRule
+}
+
+// applyProfile runs the verb, failing the test on a refusal.
+func applyProfile(t *testing.T, c *Core, payload string) {
+	t.Helper()
+	if _, err := c.handleProfileApply(json.RawMessage(payload)); err != nil {
+		t.Fatalf("profileApply(%s): %v", payload, err)
+	}
+}
+
+// revertProfile runs the verb, failing the test on a refusal.
+func revertProfile(t *testing.T, c *Core) map[string]any {
+	t.Helper()
+	res, err := c.handleProfileDeactivate(nil)
+	if err != nil {
+		t.Fatalf("profileDeactivate: %v", err)
+	}
+	out, ok := res.(map[string]any)
+	if !ok {
+		t.Fatalf("profileDeactivate answered %T, want a map", res)
+	}
+	return out
+}
+
+// TestProfileRevertRestoresTheDecisionPath is the criterion's own test: the
+// daemon's decision path answers identically before apply and after revert,
+// with no restart anywhere in between.
+//
+// The comparison is the DECISION, not the document, and that is the whole
+// point. A revert that wrote only the store would leave c.plugins saying the
+// keyboard plugin is on, decideLocked would recompile from it, and Win+Left
+// would keep snapping — a document that agrees with itself and disagrees with
+// the machine.
+func TestProfileRevertRestoresTheDecisionPath(t *testing.T) {
+	c := profileTestCore(t, filepath.Join(t.TempDir(), "config.json"))
+
+	before := winChordWinner(c)
+	if before != "" {
+		t.Fatalf("Win+Left already resolves to %q on a fresh daemon; the revert test "+
+			"cannot tell 'restored' from 'never moved'", before)
+	}
+
+	applyProfile(t, c, `{"profile":"windows-11-experience"}`)
+
+	during := winChordWinner(c)
+	if during != "windows-keyboard.win-left-snap" {
+		t.Fatalf("Win+Left resolves to %q while the profile is applied, want the snap rule", during)
+	}
+	// The router half, asserted directly as well: c.plugins is the map
+	// decideLocked reads, so this is the field a store-only revert leaves
+	// stale.
+	if !routerHas(c, kbPlugin()) {
+		t.Errorf("the running router does not have %q on while the profile is applied", kbPlugin())
+	}
+
+	revertProfile(t, c)
+
+	after := winChordWinner(c)
+	if after != before {
+		t.Errorf("Win+Left resolves to %q after revert, want %q — the decision path did "+
+			"not return to where it started", after, before)
+	}
+	if routerHas(c, kbPlugin()) {
+		t.Errorf("the running router still has %q on after revert: the store was restored "+
+			"and the daemon was not, which is the half-revert", kbPlugin())
+	}
+	if got := c.set.ActiveProfile(); got != "" {
+		t.Errorf("ActiveProfile()=%q after revert, want \"\" — the store is still claiming a "+
+			"profile is in force", got)
+	}
+	if _, ok := c.set.ProfileSnapshot(); ok {
+		t.Error("a snapshot survives the revert, so the next Revert would restore an undo " +
+			"point that has already been spent")
+	}
+}
+
+// TestProfileRevertRefusesInWordsWhenThereIsNoSnapshot is the refusal
+// criterion: no snapshot, no silent grey-out, and above all no success.
+//
+// Three cases reach the same refusal and all three must SAY SO: a daemon that
+// has never applied a profile, a daemon whose profile was applied by a build
+// that predates the snapshot, and a second revert after a successful one. The
+// last is the interesting one — the snapshot is consumed, so the second click
+// has nothing to return to and must not report that it undid something.
+func TestProfileRevertRefusesInWordsWhenThereIsNoSnapshot(t *testing.T) {
+	c := profileTestCore(t, filepath.Join(t.TempDir(), "config.json"))
+
+	// Case one: nothing was ever applied.
+	_, err := c.handleProfileDeactivate(nil)
+	if err == nil {
+		t.Fatal("revert on a daemon that never applied a profile reported success")
+	}
+	if err.Code != ipc.ErrInvalid {
+		t.Errorf("refusal code=%v, want ErrInvalid", err.Code)
+	}
+	if !strings.Contains(err.Message, "nothing was recorded") {
+		t.Errorf("refusal %q does not say that nothing was recorded; a refusal in words is "+
+			"the deliverable, not a code", err.Message)
+	}
+
+	// The read says the same thing, so a card can show the sentence BEFORE
+	// anyone clicks: the refusal is not only available after the failure.
+	row := profileRowByID(t, c, "windows-11-experience")
+	if row.Revertible {
+		t.Error("a fresh daemon reports a revertible profile with no snapshot recorded")
+	}
+	if row.RevertReason == "" {
+		t.Error("RevertReason is empty, so a card would grey the button out silently")
+	}
+
+	// Case two and three: a successful revert, then a second one.
+	applyProfile(t, c, `{"profile":"windows-11-experience"}`)
+	if row := profileRowByID(t, c, "windows-11-experience"); !row.Revertible || row.RevertReason != "" {
+		t.Errorf("after an apply, revertible=%v reason=%q; want true with no reason",
+			row.Revertible, row.RevertReason)
+	}
+	revertProfile(t, c)
+	if _, err := c.handleProfileDeactivate(nil); err == nil {
+		t.Error("a second revert reported success, but the snapshot was consumed by the first")
+	}
+}
+
+// TestProfileSnapshotSurvivesRestart is the PERSISTED criterion, and it is the
+// one an in-memory snapshot would fail. The whole point of writing the undo
+// point into the settings document is that it outlives the process: a person
+// who applies a profile, quits, and comes back next week must still have a
+// Revert that works. Here the second Core is built from the SAME settings path
+// with no state carried over in Go, which is exactly what a relaunch is.
+func TestProfileSnapshotSurvivesRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	c := profileTestCore(t, path)
+	before := winChordWinner(c)
+
+	applyProfile(t, c, `{"profile":"windows-11-experience"}`)
+
+	// Relaunch: a brand new Core, the same document, nothing handed over.
+	restarted := profileTestCore(t, path)
+	if _, ok := restarted.set.ProfileSnapshot(); !ok {
+		t.Fatal("the snapshot did not survive a restart, so Revert greys out forever for " +
+			"anyone who quits between applying and undoing")
+	}
+	restarted.registerBuiltin(kbPlugin(), true) // the reload seeded it on
+	if restarted.set.ActiveProfile() != "windows-11-experience" {
+		t.Errorf("ActiveProfile()=%q after restart, want the applied profile", restarted.set.ActiveProfile())
+	}
+
+	revertProfile(t, restarted)
+	if got := restarted.set.ActiveProfile(); got != "" {
+		t.Errorf("ActiveProfile()=%q after a post-restart revert, want \"\"", got)
+	}
+	if routerHas(restarted, kbPlugin()) {
+		t.Errorf("%q is still on in the running router after a post-restart revert", kbPlugin())
+	}
+	_ = before
+}
+
+// TestProfileRevertUsesItsOwnApplySnapshot is subtlety four: the second apply
+// must record ITS OWN undo point, not restore the first apply's.
+//
+// The naive implementation — leaving the snapshot alone when it is already set,
+// or restoring from a snapshot captured at the first apply — passes a test that
+// only checks the neutral case twice, because applying and reverting the same
+// profile twice returns to the same place either way. So this test makes the
+// two states DIFFER: the machine is switched on by hand between the two
+// cycles, which is the only way to tell the second revert's answer from the
+// first's.
+func TestProfileRevertUsesItsOwnApplySnapshot(t *testing.T) {
+	c := profileTestCore(t, filepath.Join(t.TempDir(), "config.json"))
+
+	// Cycle one, from a machine with the plugin OFF. The snapshot is
+	// "off" + "no profile".
+	applyProfile(t, c, `{"profile":"windows-11-experience"}`)
+	revertProfile(t, c)
+	if routerHas(c, kbPlugin()) {
+		t.Fatalf("after the first revert %q is on", kbPlugin())
+	}
+
+	// A hand edit between the cycles: the person turns the plugin on from the
+	// Keyboard page rather than by applying a profile. The document now says
+	// on, and no profile is active.
+	if _, perr := c.handlePluginSetEnabled(
+		json.RawMessage(`{"id":"` + kbPlugin() + `","enabled":true}`)); perr != nil {
+		t.Fatalf("plugin.setEnabled: %v", perr)
+	}
+	if !routerHas(c, kbPlugin()) {
+		t.Fatalf("the hand edit did not take; %q is off", kbPlugin())
+	}
+
+	// Cycle two. If the revert below restores the FIRST apply's snapshot the
+	// plugin goes off; if it restores its OWN, the hand edit survives — which
+	// is the correct behaviour, because "undo the profile" must not also undo
+	// an edit the person made afterwards. That is the same distinction
+	// settings.snapshotTouched draws by capturing only the ids the plan named.
+	applyProfile(t, c, `{"profile":"windows-11-experience"}`)
+	revertProfile(t, c)
+
+	if !routerHas(c, kbPlugin()) {
+		t.Errorf("%q is off after the second revert, so the second apply restored the FIRST "+
+			"apply's snapshot as its undo point", kbPlugin())
+	}
+	if c.set.ActiveProfile() != "" {
+		t.Errorf("ActiveProfile()=%q after the second revert, want \"\"", c.set.ActiveProfile())
+	}
+}
+
+// TestProfileRevertRestoresOnlyTheIDsThePlanTouched is the other half of that
+// distinction: a revert that rewrote every rule in the table would also undo
+// hand edits made after the apply, which is not what "undo the profile" means.
+// A rule the profile never named must come back exactly as it was.
+func TestProfileRevertRestoresOnlyTheIDsThePlanTouched(t *testing.T) {
+	c := profileTestCore(t, filepath.Join(t.TempDir(), "config.json"))
+	// A rule the Windows profile does NOT claim, switched off by hand before
+	// the apply. A revert must leave it off.
+	const untouched = "windows-keyboard.alt-f4-close-window"
+	if _, perr := c.handleSetRuleEnabled(
+		json.RawMessage(`{"ruleId":"` + untouched + `","enabled":false}`)); perr != nil {
+		t.Fatalf("setRuleEnabled: %v", perr)
+	}
+
+	applyProfile(t, c, `{"profile":"windows-11-experience"}`)
+	revertProfile(t, c)
+
+	if c.set.IsRuleEnabled(untouched) {
+		t.Errorf("%q is on after the revert, but the plan never named it: a revert that "+
+			"rewrites the whole table is a reset, not an undo", untouched)
+	}
+}
+
+// TestProfileApplyHonoursTheCapabilitySelection is the per-capability switch.
+// Three things have to hold: a selection applies only what it names, an absent
+// selection still means everything (so the pre-switch caller is unchanged), and
+// an id the bundle does not declare is REFUSED rather than silently applied over.
+func TestProfileApplyHonoursTheCapabilitySelection(t *testing.T) {
+	t.Run("absent means every available capability", func(t *testing.T) {
+		c := profileTestCore(t, filepath.Join(t.TempDir(), "config.json"))
+		applyProfile(t, c, `{"profile":"windows-11-experience"}`)
+		if !c.set.IsRuleEnabled("windows-keyboard.ctrl-c-copy") {
+			t.Error("a payload with no capabilities applied none of them; absent must mean all")
+		}
+	})
+
+	t.Run("a selection applies only what it names", func(t *testing.T) {
+		c := profileTestCore(t, filepath.Join(t.TempDir(), "config.json"))
+		// Rules are ON unless explicitly disabled (IsRuleEnabled reads the
+		// absence from disabledRules), so a rule's verdict cannot show that a
+		// selection narrowed the plan — every rule reads on either way. The
+		// plan's actual content is asserted through its SIZE, which is what
+		// the selection really changes.
+		res, err := c.handleProfileApply(
+			json.RawMessage(`{"profile":"windows-11-experience","capabilities":["keyboard.shortcuts"]}`))
+		if err != nil {
+			t.Fatalf("profileApply: %v", err)
+		}
+		got := res.(map[string]any)
+		if got["rules"].(int) != 2 {
+			t.Errorf("a selection naming one two-rule capability wrote %v rules, want 2",
+				got["rules"])
+		}
+		// A partial apply is still the active profile: one of its
+		// capabilities running IS the profile running, and a store that
+		// recorded the string only for the whole-bundle case would report
+		// no profile while the Windows keys were live.
+		if got := c.set.ActiveProfile(); got != "windows-11-experience" {
+			t.Errorf("ActiveProfile()=%q after a partial apply, want the profile", got)
+		}
+		// And it is as undoable as a full one.
+		revertProfile(t, c)
+		if c.set.ActiveProfile() != "" {
+			t.Error("a partial apply left the profile active after its revert")
+		}
+	})
+
+	t.Run("an unknown capability is refused", func(t *testing.T) {
+		c := profileTestCore(t, filepath.Join(t.TempDir(), "config.json"))
+		_, err := c.handleProfileApply(
+			json.RawMessage(`{"profile":"windows-11-experience","capabilities":["nope.typed"]}`))
+		if err == nil {
+			t.Fatal("a payload naming a capability the bundle does not declare was applied")
+		}
+		if !strings.Contains(err.Message, "nope.typed") {
+			t.Errorf("refusal %q does not name the id that was refused", err.Message)
+		}
+		if c.set.ActiveProfile() != "" {
+			t.Error("the refused payload set the active profile anyway")
+		}
+		if routerHas(c, kbPlugin()) {
+			t.Error("the refused payload switched the extension on anyway")
+		}
+	})
+
+	// The third state of the same switch, and the one the daemon could not
+	// express at all until the field became a *[]string.
+	//
+	// "absent" and "present and empty" are both a zero-length list of ids, and
+	// with a bare []string they decoded to the same thing — so a card with
+	// every capability switched off fell through the filter guard and applied
+	// the WHOLE bundle. The control renders "Applying will change nothing"
+	// directly above that button, and the button applied everything. Nothing
+	// caught it: this file sent payloads directly and so never exercised a
+	// caller, and the shell never sent a selection at all.
+	t.Run("present and empty applies NOTHING", func(t *testing.T) {
+		c := profileTestCore(t, filepath.Join(t.TempDir(), "config.json"))
+		res, err := c.handleProfileApply(
+			json.RawMessage(`{"profile":"windows-11-experience","capabilities":[]}`))
+		if err != nil {
+			t.Fatalf("profileApply: %v", err)
+		}
+		got := res.(map[string]any)
+		if got["rules"] != 0 || got["plugins"] != 0 {
+			t.Errorf(`{"capabilities":[]} wrote %v rules and %v plugins, want none: an empty `+
+				"selection is a real request to apply nothing, and falling through to the whole "+
+				"bundle is the one outcome the per-capability switch must never produce",
+				got["rules"], got["plugins"])
+		}
+		// Not one rule either. Every rule reads on unless it was explicitly
+		// disabled, so "the rules are unchanged" proves nothing — the router
+		// is the only place a plugin verdict is visible, and it reads c.plugins
+		// rather than the document.
+		if routerHas(c, kbPlugin()) {
+			t.Error(`{"capabilities":[]} switched the extension on: the plan was not empty`)
+		}
+		// The profile string IS still recorded. An empty plan is a real apply
+		// and the card still reports the profile as active, because the revert
+		// it arms has to have something to return to.
+		if p := c.set.ActiveProfile(); p != "windows-11-experience" {
+			t.Errorf("ActiveProfile()=%q after an empty apply, want the profile recorded", p)
+		}
+		// And it is as undoable as a full apply: the snapshot rides along for
+		// any plan that names a profile, so a card that switched everything off
+		// and then put it back is not left with a grey button.
+		revertProfile(t, c)
+		if p := c.set.ActiveProfile(); p != "" {
+			t.Errorf("ActiveProfile()=%q after the revert, want it cleared", p)
+		}
+	})
+
+	// The three-way distinction, read back off the plan rather than off a
+	// count. This is the whole contract in one table, and it is the assertion
+	// that fails if a decoder ever collapses any two of the three cases.
+	t.Run("absent, narrowed and empty produce three different plans", func(t *testing.T) {
+		shape := func(payload string) (int, int) {
+			c := profileTestCore(t, filepath.Join(t.TempDir(), "config.json"))
+			res, err := c.handleProfileApply(json.RawMessage(payload))
+			if err != nil {
+				t.Fatalf("profileApply(%s): %v", payload, err)
+			}
+			got := res.(map[string]any)
+			return got["rules"].(int), got["plugins"].(int)
+		}
+		allR, allP := shape(`{"profile":"windows-11-experience"}`)
+		oneR, oneP := shape(`{"profile":"windows-11-experience","capabilities":["keyboard.shortcuts"]}`)
+		noneR, noneP := shape(`{"profile":"windows-11-experience","capabilities":[]}`)
+		// null must read as ABSENT, not as an empty selection: it is the other
+		// spelling a client could reach for, and a daemon that treated it as
+		// "apply nothing" would break every caller that sends an explicit null
+		// for a field it has no value for.
+		nullR, nullP := shape(`{"profile":"windows-11-experience","capabilities":null}`)
+
+		if allR == 0 && allP == 0 {
+			t.Fatal("the absent selection applied nothing, so this test cannot tell the cases apart")
+		}
+		// The RULES are the discriminator, not the plugin count: three of the
+		// four available capabilities share one plugin, so a narrowed selection
+		// that keeps any of them still writes that one plugin edit — which is
+		// the deduplication planForProfile documents, and is why the plugin
+		// half of this assertion is an inequality rather than a strict one.
+		if oneR >= allR {
+			t.Errorf("a one-capability selection wrote %d rules, want strictly fewer than the "+
+				"whole bundle's %d: a filter that did not filter would write the same plan", oneR, allR)
+		}
+		if oneP > allP {
+			t.Errorf("a narrowed selection wrote %d plugins, more than the whole bundle's %d", oneP, allP)
+		}
+		if noneR != 0 || noneP != 0 {
+			t.Errorf("an empty selection wrote %d / %d, want 0 / 0", noneR, noneP)
+		}
+		if nullR != allR || nullP != allP {
+			t.Errorf(`"capabilities":null wrote %d / %d, want the absent case's %d / %d: an `+
+				"explicit null is how a client with no value spells absent, and reading it as "+
+				"'apply nothing' would break every such caller", nullR, nullP, allR, allP)
+		}
+	})
+}
+
+// TestProfilePreviewCountsWhatApplyingWillChange is the preview criterion: the
+// card says what applying will change BEFORE the click, so the numbers have to
+// be live against the store rather than a count reported afterwards.
+//
+// Three states are checked, and the third is the one that catches a preview
+// computed once and cached: fresh, applied, and reverted. A preview that did
+// not move with the store would pass the first assertion and fail the rest.
+func TestProfilePreviewCountsWhatApplyingWillChange(t *testing.T) {
+	c := profileTestCore(t, filepath.Join(t.TempDir(), "config.json"))
+
+	fresh := profileRowByID(t, c, "windows-11-experience")
+	// A rule is ON unless it was explicitly disabled, so on a daemon nobody
+	// has touched the plan switches on NO rules — WillEnable is legitimately
+	// 0 and AlreadyOn is the whole table. The preview that matters is the
+	// EXTENSION, and this assertion is why WillEnablePlugins exists: a card
+	// that previewed only the rules would say this profile does nothing,
+	// at the exact moment it is the only thing that makes the six live.
+	if fresh.WillEnable != 0 {
+		t.Errorf("a fresh daemon previews WillEnable=%d, want 0 — no rule is off to switch on", fresh.WillEnable)
+	}
+	if fresh.AlreadyOn <= 0 {
+		t.Errorf("a fresh daemon previews AlreadyOn=%d, want the rules already on", fresh.AlreadyOn)
+	}
+	if fresh.WillEnablePlugins != 1 {
+		t.Errorf("a fresh daemon previews WillEnablePlugins=%d, want 1 — the extension is the "+
+			"whole of the change on a fresh install", fresh.WillEnablePlugins)
+	}
+	// The per-capability halves must add up to the row, because a card with
+	// switches excluded computes its preview by summing the capabilities it is
+	// about to apply. A row total that disagrees with its own parts is a card
+	// that lies as soon as one switch is off.
+	var sum int
+	for _, cap := range fresh.Capabilities {
+		sum += cap.WillEnable
+	}
+	if sum != fresh.WillEnable {
+		t.Errorf("per-capability WillEnable sums to %d but the row says %d", sum, fresh.WillEnable)
+	}
+	// An UNAVAILABLE capability must carry no preview, because a plan cannot
+	// switch on something it will not touch: a number on the Alt+Tab row
+	// would be a promise the apply cannot keep.
+	for _, cap := range fresh.Capabilities {
+		if !cap.Available && cap.WillEnable != 0 {
+			t.Errorf("unavailable capability %q previews %d rule(s)", cap.ID, cap.WillEnable)
+		}
+	}
+
+	applyProfile(t, c, `{"profile":"windows-11-experience"}`)
+	applied := profileRowByID(t, c, "windows-11-experience")
+	if applied.WillEnablePlugins != 0 {
+		t.Errorf("after an apply WillEnablePlugins=%d, want 0 — a preview that does not move "+
+			"with the store is a count reported too late", applied.WillEnablePlugins)
+	}
+	// AlreadyOn is UNCHANGED by the apply, and that is the point: the plan
+	// switched the extension on, not the rules, because the rules were
+	// already on. A test that expected AlreadyOn to climb to the apply's rule
+	// count would be asserting that the profile rewrites verdicts it does not.
+	if applied.AlreadyOn != fresh.AlreadyOn {
+		t.Errorf("after an apply AlreadyOn=%d, want the unchanged %d: the plan switches the "+
+			"extension on and the rules were already on", applied.AlreadyOn, fresh.AlreadyOn)
+	}
+	if !applied.Active {
+		t.Error("the applied profile does not report itself active")
+	}
+
+	revertProfile(t, c)
+	back := profileRowByID(t, c, "windows-11-experience")
+	if back.WillEnablePlugins != fresh.WillEnablePlugins {
+		t.Errorf("after a revert WillEnablePlugins=%d, want the %d the fresh daemon showed: "+
+			"the revert is a half-revert if the store came back and the preview did not",
+			back.WillEnablePlugins, fresh.WillEnablePlugins)
+	}
+	if back.Active {
+		t.Error("the reverted profile still reports itself active")
+	}
+}
+
+// TestProfilePreviewCountsARuleTheUserSwitchedOff is the other half of the
+// preview: WillEnable is 0 on a fresh daemon for a reason that is easy to
+// mistake for a broken field. A rule is on unless it was explicitly disabled,
+// so the only way a plan has a rule to switch on is if somebody turned one
+// off. This turns one off and checks the preview says so, which is the case a
+// person is actually looking at when they ask what applying will change.
+func TestProfilePreviewCountsARuleTheUserSwitchedOff(t *testing.T) {
+	c := profileTestCore(t, filepath.Join(t.TempDir(), "config.json"))
+	const off = "windows-keyboard.ctrl-c-copy"
+	if _, perr := c.handleSetRuleEnabled(
+		json.RawMessage(`{"ruleId":"` + off + `","enabled":false}`)); perr != nil {
+		t.Fatalf("setRuleEnabled: %v", perr)
+	}
+
+	row := profileRowByID(t, c, "windows-11-experience")
+	if row.WillEnable != 1 {
+		t.Errorf("WillEnable=%d with one rule switched off, want 1", row.WillEnable)
+	}
+	var inKeyboard int
+	for _, cap := range row.Capabilities {
+		if cap.ID == "keyboard.shortcuts" {
+			inKeyboard = cap.WillEnable
+		}
+	}
+	if inKeyboard != 1 {
+		t.Errorf("keyboard.shortcuts previews %d, want 1 — the per-capability halves are what a "+
+			"card with switches excluded adds up", inKeyboard)
+	}
+
+	applyProfile(t, c, `{"profile":"windows-11-experience"}`)
+	if again := profileRowByID(t, c, "windows-11-experience"); again.WillEnable != 0 {
+		t.Errorf("WillEnable=%d after the apply switched the rule back on, want 0", again.WillEnable)
+	}
+}
+
+// profileRowByID pulls one card out of the core.profiles read.
+func profileRowByID(t *testing.T, c *Core, id string) profileRow {
+	t.Helper()
+	res, err := c.handleCoreProfiles(nil)
+	if err != nil {
+		t.Fatalf("core.profiles: %v", err)
+	}
+	rows, ok := res.([]profileRow)
+	if !ok {
+		t.Fatalf("core.profiles answered %T, want []profileRow", res)
+	}
+	for _, r := range rows {
+		if r.ID == id {
+			return r
+		}
+	}
+	t.Fatalf("core.profiles served no row for %q", id)
+	return profileRow{}
 }

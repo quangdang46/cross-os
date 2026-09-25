@@ -259,6 +259,19 @@ export interface ProfileCapabilityRow {
   enabled: number
   total: number
   live: boolean
+  /**
+   * The PREVIEW, per capability: how many of this capability's rules applying
+   * would switch on that are off right now, and whether it would switch the
+   * extension on.
+   *
+   * Optional because a daemon that predates the preview simply does not send
+   * them, and a control that read `undefined` as NaN would render "NaN
+   * shortcuts to turn on" — so the shell treats absent as zero and says it
+   * has nothing to preview. A missing field is a fact about the daemon, not
+   * an error to paper over.
+   */
+  will_enable?: number
+  will_enable_plugin?: boolean
 }
 
 /**
@@ -273,6 +286,38 @@ export interface ProfileRow {
   description: string
   active: boolean
   capabilities: ProfileCapabilityRow[]
+  /**
+   * The card's PREVIEW — what applying this profile will change, computed by
+   * the daemon and read BEFORE the click rather than reported after it.
+   *
+   * `will_enable` counts rules that are off and would be switched on, and
+   * `already_on` the ones that are on and would be left alone.
+   * `will_enable_plugins` counts EXTENSIONS the apply would switch on, and it
+   * is the field that moves on a fresh install: a rule is on unless somebody
+   * explicitly turned it off, so applying a profile on an untouched machine
+   * switches on no rules at all and the whole of the change is the extension.
+   * A preview that showed only the rules would read "0 shortcuts to turn on"
+   * beside a keyboard that does not work, which is true and useless.
+   *
+   * All optional for the same reason as the per-capability halves: absent
+   * means this daemon does not preview, and the card says so rather than
+   * inventing a number.
+   */
+  will_enable?: number
+  already_on?: number
+  will_disable?: number
+  will_enable_plugins?: number
+  /**
+   * Whether a recorded undo point exists, and what to say when none does.
+   *
+   * These two arrive TOGETHER on purpose. A control handed only the boolean
+   * greys the Revert button out silently, and a silent grey-out is
+   * indistinguishable from a button that is broken — so the daemon sends the
+   * sentence and the control renders it. `revertible` absent means an older
+   * daemon that has no revert at all, which is its own sentence.
+   */
+  revertible?: boolean
+  revert_reason?: string
 }
 
 /** The physical input one decision was made from. */
@@ -433,6 +478,37 @@ export interface Status {
 }
 
 /**
+ * One row of the Explorer's file-type catalog: the presets the New > submenu
+ * offers, which a person edits rather than types.
+ *
+ * The Go row EMBEDS the catalog's own struct (app/backend/uisources.go), and
+ * the generator flattens an embedded struct into these flat properties —
+ * which is why there is no nested `fileType` object here. That is the wire, and
+ * it is the reason the row is declared against the daemon's fields rather than
+ * as a wrapper: a copy that nested them would decode a row of `undefined` in
+ * the settings pane.
+ *
+ * The catalog allows TWO presets to share one extension ("data.json" and
+ * "report.json" are two presets, not a duplicate), and a blank baseName is a
+ * dotfile — so a row's identity is (baseName, ext) together, and never ext
+ * alone.
+ *
+ * MenuTitle is the label Finder will show, derived by the daemon on every read
+ * rather than stored. It is included so a page can render the exact string the
+ * menu will, and it is never sent back: the write takes the editable fields
+ * only, because a stored copy of a derivation is a second thing to keep true.
+ */
+export interface FileTypeRow {
+  ext: string
+  baseName: string
+  displayName: string
+  template: string
+  enabled: boolean
+  builtIn: boolean
+  menuTitle: string
+}
+
+/**
  * The shell's typed view of the Wails-bound Service — the ONE seam between the
  * frontend and the daemon.
  *
@@ -464,6 +540,24 @@ export interface ServiceApi {
   SetShortcuts(shortcuts: ShortcutRow[]): Promise<number | null>
   FinderMenu(): Promise<({ [key: string]: unknown } | null)[] | null>
   SetMenuItemEnabled(id: string, enabled: boolean): Promise<({ [key: string]: unknown } | null)[] | null>
+  /**
+   * The Explorer's file-type catalog, in the order the editor left it.
+   *
+   * Both writes answer with the WHOLE catalog rather than with the row they
+   * touched, so the editor redraws from the daemon's own account of what is
+   * stored instead of assuming its own optimistic edit landed. A write that
+   * returned only the edited row would let a rejected edit sit on screen
+   * looking saved until the next poll.
+   */
+  FileTypes(): Promise<FileTypeRow[] | null>
+  SetFileType(row: FileTypeRow): Promise<FileTypeRow[] | null>
+  /**
+   * Replaces the catalog's order. The list is the COMPLETE permutation the
+   * daemon demands — no id twice, none missing, none invented — because a
+   * partial list is a drag the daemon could not see the end of, and the rows
+   * it did not name would keep positions the person is no longer looking at.
+   */
+  ReorderFileTypes(ids: string[]): Promise<FileTypeRow[] | null>
 
   GetMatrix(): Promise<MatrixRow[] | null>
   GetOverrides(): Promise<OverrideRow[] | null>
@@ -521,7 +615,34 @@ export interface ServiceApi {
   // app picker, and the person-authored rule table. Same rule as the ten
   // above — these are sources a page may declare, never per-page endpoints.
   Profiles(): Promise<ProfileRow[] | null>
-  ApplyProfile(profileID: string): Promise<Record<string, unknown> | null>
+  /**
+   * Applies a profile, optionally narrowed to a SUBSET of its capabilities.
+   *
+   * The subset travels with the apply rather than as a second write, because
+   * the two together are one gesture: a switch that had its own verb, and an
+   * apply that had its own, would let a person flip a switch and then apply
+   * the whole bundle with the second click and never know the first was
+   * ignored. Omitting it means every available capability, which is what the
+   * pre-switch card did and what a caller with no UI sends.
+   */
+  ApplyProfile(profileID: string, capabilities?: string[]): Promise<Record<string, unknown> | null>
+  /**
+   * Undoes the last profile apply: the exact prior verdict of every id the
+   * plan touched, the profile string, and the running router's in-memory
+   * plugin map.
+   *
+   * No argument, because there is one active profile and one recorded
+   * snapshot and the daemon holds both. The reply is the daemon's own account
+   * of what it restored rather than a bare "done", for the reason the trace's
+   * erase returns the rows that are LEFT: a page that redraws from its own
+   * click is a page showing the belief instead of the state.
+   *
+   * A rejection is a real refusal and carries its own words — the daemon has
+   * no snapshot to return to for a profile applied before the undo point was
+   * recorded, and saying so is the only honest answer. A resolved promise is
+   * never read as "something was undone".
+   */
+  ProfileDeactivate(): Promise<Record<string, unknown> | null>
   Traces(): Promise<TraceRow[] | null>
   /**
    * Empties the recorder and answers with the list as it stands afterwards —

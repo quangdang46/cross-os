@@ -627,11 +627,27 @@ func (c *IPCCore) Profiles() ([]ProfileRow, error) {
 	return decodeList[ProfileRow]("core.profiles", raw)
 }
 
-// ApplyProfile implements Core via core.profileApply: {"profile":"<id>"} →
-// {profile, rules, plugins}. The counts come from the plan the daemon actually
-// applied, so a card shows what landed rather than what it hoped for.
-func (c *IPCCore) ApplyProfile(profileID string) (map[string]any, error) {
-	raw, err := c.call("core.profileApply", map[string]any{"profile": profileID})
+// ApplyProfile implements Core via core.profileApply:
+// {"profile":"<id>","capabilities":["<id>",…]} → {profile, rules, plugins}. The
+// counts come from the plan the daemon actually applied, so a card shows what
+// landed rather than what it hoped for.
+//
+// The capabilities KEY IS OMITTED ENTIRELY when there is no selection, and the
+// omission is the contract rather than a shorthand. The daemon's handler decodes
+// that field as a *[]string precisely so it can tell absent (nil — every
+// available capability, which is what the pre-switch card meant) from present
+// and empty (apply nothing). Serialising a nil slice as JSON null would be
+// indistinguishable from absent, and serialising an empty one as [] is
+// indistinguishable from a selection of nothing — so the two cases have to
+// differ in the payload, and a nil guard is the only place they can. The shell's
+// own callers still get the old behaviour for free, because nil is what they
+// send.
+func (c *IPCCore) ApplyProfile(profileID string, capabilities []string) (map[string]any, error) {
+	payload := map[string]any{"profile": profileID}
+	if capabilities != nil {
+		payload["capabilities"] = capabilities
+	}
+	raw, err := c.call("core.profileApply", payload)
 	if err != nil {
 		return nil, err
 	}
@@ -829,4 +845,56 @@ func (c *IPCCore) SetMenuItemEnabled(id string, enabled bool) ([]map[string]any,
 		return nil, err
 	}
 	return decodeList[map[string]any]("core.setMenuItemEnabled", raw)
+}
+
+// FileTypes implements Core via core.fileTypes.
+func (c *IPCCore) FileTypes() ([]FileTypeRow, error) {
+	raw, err := c.call("core.fileTypes", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[FileTypeRow]("core.fileTypes", raw)
+}
+
+// SetFileType implements Core via core.setFileType. The row travels WHOLE,
+// because its identity is (ext, baseName) and the daemon matches on those:
+// trimming the payload to the fields that changed would ask the daemon to
+// read-modify-write a row it cannot find. MenuTitle rides along and is
+// ignored — it is the daemon's own derivation, and sending a copy back would
+// be a second thing to keep true.
+func (c *IPCCore) SetFileType(row FileTypeRow) ([]FileTypeRow, error) {
+	raw, err := c.call("core.setFileType", row)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[FileTypeRow]("core.setFileType", raw)
+}
+
+// ReorderFileTypes implements Core via core.reorderFileTypes. The list is the
+// COMPLETE new order, because that is the only shape the daemon accepts: a
+// partial list is a drag it could not see the end of, and the rows it did not
+// name would keep positions the person is no longer looking at.
+func (c *IPCCore) ReorderFileTypes(ids []string) ([]FileTypeRow, error) {
+	raw, err := c.call("core.reorderFileTypes", map[string]any{"ids": ids})
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[FileTypeRow]("core.reorderFileTypes", raw)
+}
+
+// ProfileDeactivate implements Core via core.profileDeactivate. No params:
+// there is one active profile and one recorded snapshot, both the daemon's to
+// hold, and naming either in the payload would be a second copy of a fact it
+// already has. The reply is a map for the same reason ApplyProfile's is — the
+// page redraws from the daemon's own account of what it restored.
+func (c *IPCCore) ProfileDeactivate() (map[string]any, error) {
+	raw, err := c.call("core.profileDeactivate", nil)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("shell: ipc decode core.profileDeactivate: %w", err)
+	}
+	return out, nil
 }

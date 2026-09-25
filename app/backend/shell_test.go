@@ -9,6 +9,7 @@ package shell
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"crossos/core/pkg/pluginapi"
@@ -145,6 +146,17 @@ type stubCore struct {
 	observing bool
 	// conflicts is what the stub reports for core.conflicts.
 	conflicts []ConflictRow
+	// fileTypes is the Explorer's catalog, held so the reorder stub can
+	// answer with a genuinely different order and the row write can be seen
+	// to have landed — a stub that returned its argument would let a bridge
+	// that ignored the daemon pass.
+	fileTypes []FileTypeRow
+	// lastApply is the per-capability selection the LAST ApplyProfile carried,
+	// recorded by the stub that declares the method. The bridge is a pass-
+	// through and the daemon's payload is asserted in ipc_client_test.go, so
+	// without a record here nothing in this package would notice the bridge
+	// quietly stopping to forward it — which is exactly what it did.
+	lastApply *appliedSelection
 }
 
 func (s *stubCore) IsRunning() bool    { return s.running }
@@ -211,6 +223,49 @@ func (s *stubCore) FinderMenu() ([]map[string]any, error) {
 
 func (s *stubCore) SetMenuItemEnabled(id string, enabled bool) ([]map[string]any, error) {
 	return []map[string]any{}, nil
+}
+
+func (s *stubCore) FileTypes() ([]FileTypeRow, error) { return s.fileTypes, nil }
+
+func (s *stubCore) SetFileType(row FileTypeRow) ([]FileTypeRow, error) {
+	// The daemon's own rule, restated: the row's identity is (ext, baseName)
+	// and it is the STORED row's, so an edit the catalog does not hold is
+	// refused rather than minting a new preset.
+	for i, f := range s.fileTypes {
+		if f.Ext == row.Ext && f.BaseName == row.BaseName {
+			s.fileTypes[i].DisplayName = row.DisplayName
+			s.fileTypes[i].Template = row.Template
+			s.fileTypes[i].Enabled = row.Enabled
+			return s.fileTypes, nil
+		}
+	}
+	return nil, errors.New("shell: unknown file type")
+}
+
+func (s *stubCore) ReorderFileTypes(ids []string) ([]FileTypeRow, error) {
+	// A complete permutation or nothing, the same contract the daemon keeps:
+	// a partial list is a move the daemon could not see the end of.
+	if len(ids) != len(s.fileTypes) {
+		return nil, errors.New("shell: reorder must name every file type")
+	}
+	byID := make(map[string]FileTypeRow, len(s.fileTypes))
+	for _, f := range s.fileTypes {
+		byID[fileTypeRowID(f)] = f
+	}
+	next := make([]FileTypeRow, 0, len(ids))
+	for _, id := range ids {
+		f, ok := byID[id]
+		if !ok {
+			return nil, errors.New("shell: reorder names a file type that does not exist")
+		}
+		next = append(next, f)
+	}
+	s.fileTypes = next
+	return s.fileTypes, nil
+}
+
+func (s *stubCore) ProfileDeactivate() (map[string]any, error) {
+	return map[string]any{"profile": "", "rules": 0, "plugins": 0}, nil
 }
 
 // The source stubs below stand in for the DAEMON's side of the two config
@@ -425,4 +480,86 @@ func TestConfigBridgeSurfaced(t *testing.T) {
 	if n, err := app.SetShortcuts(nil); err != nil || n != 0 {
 		t.Fatalf("SetShortcuts(nil)=%d,%v, want 0,nil (the daemon accepts a clear)", n, err)
 	}
+}
+
+// TestBridgeForwardsTheCapabilitySelection is the layer where the per-capability
+// selection was lost, and it is worth a test of its own because the loss was
+// silent at every layer: the card previewed a narrowed plan, the shell's
+// ApplyProfile took no second parameter, and nothing anywhere compared the
+// selection the control computed against the one the daemon received. The
+// preview was arithmetically correct and described a change that never
+// happened.
+//
+// The bridge's job here is to be a pass-through, and the test is that it is one
+// INCLUING NIL-NESS. The daemon decodes `capabilities` as a *[]string so that
+// absent (apply everything) and present-and-empty (apply nothing) are different
+// requests, which means a bridge that normalised one into the other — a `nil`
+// guard, an `if len(...) > 0` check, a defensive empty-slice default — would
+// turn a card with every switch off into a card that applied the whole bundle.
+// There is no other layer left to catch that: the daemon tests send payloads
+// directly and the frontend tests stop at the bound call.
+func TestBridgeForwardsTheCapabilitySelection(t *testing.T) {
+	t.Run("a narrowed selection arrives narrowed", func(t *testing.T) {
+		c := &stubCore{}
+		app := NewApp(c)
+		want := []string{"keyboard.shortcuts", "window.snap"}
+		if _, err := app.ApplyProfile("windows-11", want); err != nil {
+			t.Fatalf("ApplyProfile: %v", err)
+		}
+		if c.lastApply == nil {
+			t.Fatal("the bridge never reached the daemon's ApplyProfile")
+		}
+		if got := c.lastApply.capabilities; len(got) != 2 ||
+			got[0] != want[0] || got[1] != want[1] {
+			t.Fatalf("the daemon received %v, want %v", got, want)
+		}
+	})
+
+	t.Run("an empty selection stays empty and non-nil", func(t *testing.T) {
+		c := &stubCore{}
+		app := NewApp(c)
+		if _, err := app.ApplyProfile("windows-11", []string{}); err != nil {
+			t.Fatalf("ApplyProfile: %v", err)
+		}
+		// nil is the assertion, not len() == 0. Both cases have length zero and
+		// they mean opposite things; a bridge that forwarded nil here would hand
+		// the daemon "apply everything" for a card that asked to apply nothing.
+		if c.lastApply == nil || c.lastApply.capabilities == nil {
+			t.Fatalf("an empty selection arrived as %v, want a non-nil empty slice: nil is "+
+				"'apply every available capability' to the daemon", c.lastApply)
+		}
+		if len(c.lastApply.capabilities) != 0 {
+			t.Fatalf("the daemon received %v, want no capabilities at all", c.lastApply.capabilities)
+		}
+	})
+
+	t.Run("no selection stays absent", func(t *testing.T) {
+		// The back-compat half: every existing shell caller sends nothing, and
+		// that must keep meaning "everything available". A bridge that invented
+		// an empty slice here would silently switch every one of them to
+		// "apply nothing".
+		c := &stubCore{}
+		app := NewApp(c)
+		if _, err := app.ApplyProfile("windows-11", nil); err != nil {
+			t.Fatalf("ApplyProfile: %v", err)
+		}
+		if c.lastApply == nil || c.lastApply.capabilities != nil {
+			t.Fatalf("an absent selection arrived as %v, want nil", c.lastApply)
+		}
+	})
+
+	t.Run("a refusal is still logged with the profile id", func(t *testing.T) {
+		// The error path keeps its own words, and the log line is what a person
+		// reads afterwards — so it must still name WHICH profile was refused
+		// even now that a second argument rides along.
+		c := &stubCore{failSources: errors.New("ipc: daemon unreachable")}
+		app := NewApp(c)
+		if _, err := app.ApplyProfile("windows-11", []string{"keyboard.shortcuts"}); err == nil {
+			t.Fatal("a failing daemon must surface the error")
+		}
+		logs := app.UILogs()
+		if len(logs) == 0 || !strings.Contains(logs[0], "ApplyProfile windows-11:") {
+			t.Fatalf("UILogs=%v, want the refusal naming the profile", logs)
+		}
+	})
 }

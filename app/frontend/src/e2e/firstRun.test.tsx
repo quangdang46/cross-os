@@ -50,6 +50,30 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { failOn, grantAccessibility, machine, press, reset } from '../test/fixtures'
 
+/**
+ * reviewAndApply opens a profile card, looks at every capability, and applies
+ * it — the three gestures a person makes, in that order.
+ *
+ * The order is the point. The card's Apply is gated on the review (the
+ * menumate reviewList port: a bulk write that touches several things at once
+ * should not be one click away from a list nobody looked at), so a run that
+ * pressed Apply straight away was pressing a disabled button. Each switch is
+ * clicked TWICE so the card is reviewed and the selection is left whole: the
+ * run is checking that applying the whole bundle works, and narrowing it is
+ * its own test.
+ */
+async function reviewAndApply(scope: HTMLElement, name: string): Promise<void> {
+  // Every query here is an await, not a get: selecting the step renders the
+  // card as a BODY of the step, so the card is not in the DOM until the
+  // step's re-render lands. The synchronous form would race it.
+  fireEvent.click(await within(scope).findByRole('button', { name: `Show ${name}` }))
+  for (const box of await within(scope).findAllByRole('checkbox')) {
+    fireEvent.click(box)
+    fireEvent.click(box)
+  }
+  fireEvent.click(await within(scope).findByRole('button', { name: `Apply ${name}` }))
+}
+
 // Replaces lib/service, the shell's only module that names the generated
 // bindings. Loaded through the factory rather than a top-level binding so the
 // hoisted mock does not capture a variable that is not initialised yet.
@@ -122,7 +146,7 @@ describe('a fresh machine, from the first launch to the last decision', () => {
     // No nav click between here and the write: that is the point of the step.
     const firstRun = pane('Welcome to CrossOS')
     fireEvent.click(within(firstRun).getByRole('button', { name: /Pick a Windows profile/ }))
-    fireEvent.click(await within(firstRun).findByRole('button', { name: 'Apply Windows 11' }))
+    await reviewAndApply(firstRun, 'Windows 11')
     await waitFor(() => expect(machine.calls).toContain('ApplyProfile'))
 
     // The rollup on the card is the answer to "did the click land", and the
@@ -347,7 +371,7 @@ describe('when a source fails', () => {
     // must not keep reporting the checks it saw a moment ago.
     await open()
     await goTo('Profiles')
-    fireEvent.click(await screen.findByRole('button', { name: 'Apply Windows 11' }))
+    await reviewAndApply(pane('Profiles'), 'Windows 11')
     await waitFor(() => expect(machine.profile).toBe('windows11'))
 
     failOn('Readiness', 'readiness source unavailable')

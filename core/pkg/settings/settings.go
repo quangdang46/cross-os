@@ -67,8 +67,25 @@ type Store struct {
 	// a user edited has to be here after a restart, or the Finder menu quietly
 	// offers back the eight presets they deleted.
 	fileTypes []filetype.FileType
-	cfg       *config.Manager
-	cfgPath   string
+	// menuOff is the Explorer's per-item toggle: the ids a user has switched
+	// OFF. Absence means on, exactly as the daemon's own in-memory map had it
+	// before this field existed — an item the user never touched is in the
+	// menu, and the only thing a document that predates this key changes is
+	// that a toggle the user makes from now on is remembered.
+	//
+	// It was in memory only, which made the bound action a promise the
+	// daemon did not keep: a user switched an item off, the control redrew
+	// from the reply, and the item was back after a restart with nothing
+	// said. The map is here so the write has somewhere to land.
+	menuOff map[string]bool
+	// snapshot is the prior verdict of every id the last profile plan
+	// touched, so the same plan can be undone. Nil is the honest "nothing was
+	// recorded", not "nothing was on": a profile applied by a build that
+	// predates this field has no snapshot, and RevertProfile refuses in words
+	// rather than pretending it returned somewhere.
+	snapshot *ProfileSnapshot
+	cfg      *config.Manager
+	cfgPath  string
 }
 
 // Override is one stored per-app verdict on a matrix rule. The json tags are
@@ -84,6 +101,28 @@ type Override struct {
 type Toggle struct {
 	ID      string `json:"id"`
 	Enabled bool   `json:"enabled"`
+}
+
+// ProfileSnapshot is the state a profile plan is about to overwrite, kept so
+// the same plan can be undone exactly — the missing half of ApplyBatch, not a
+// second model.
+//
+// Every id the plan touches is here, and so is the profile string, because
+// planForProfile writes that too: restoring the enablement while leaving the
+// store claiming a profile is active would be a store that says the opposite
+// of what the machine is doing. A snapshot is OVERWRITTEN by each apply, so
+// apply → revert → apply → revert returns to the same place twice rather than
+// to the first apply's state the second time.
+type ProfileSnapshot struct {
+	// Profile is the active-profile id as it was BEFORE the plan — usually
+	// "", which is what a first apply restores to.
+	Profile string `json:"profile"`
+	// Rules and Plugins are the prior verdicts, in the same Toggle shape the
+	// plan that overwrote them was written in. Only ids the plan named appear,
+	// because only those were touched: a revert that rewrote every rule in the
+	// table would undo hand edits made after the apply.
+	Rules   []Toggle `json:"rules,omitempty"`
+	Plugins []Toggle `json:"plugins,omitempty"`
 }
 
 // Plan is one atomic settings change: the rule verdicts, plugin verdicts,
@@ -122,6 +161,17 @@ type document struct {
 	EnabledPlugins     []string             `json:"enabledPlugins"`
 	ActiveProfile      string               `json:"activeProfile"`
 	FileTypes          []filetype.FileType  `json:"fileTypes"`
+	// MenuOff is the Explorer's per-item toggle, as the sorted ids the user
+	// switched OFF. A list rather than an object for the reason
+	// disabledRules is one: the same verdict two writes, and a diff of a
+	// user's config shows what changed rather than what map order felt like.
+	MenuOff []string `json:"menuOff"`
+	// ProfileSnapshot is ABSENT until a profile plan is applied, and a nil
+	// pointer marshals to nothing — which is the whole point. A document
+	// written by a build that predates the key carries no snapshot, and the
+	// revert's answer for that is the refusal RevertProfile returns in
+	// words, rather than a button that reports it undid something.
+	ProfileSnapshot *ProfileSnapshot `json:"profileSnapshot,omitempty"`
 }
 
 // state is the whole persisted value at one instant. Writes render the
@@ -138,6 +188,8 @@ type state struct {
 	plugins       map[string]bool
 	profile       string
 	fileTypes     []filetype.FileType
+	menuOff       map[string]bool
+	snapshot      *ProfileSnapshot
 }
 
 // ShortcutSchema constrains the persisted shortcuts document: the shortcut
@@ -173,6 +225,14 @@ func ShortcutSchema() config.Schema {
 		// reason: an undeclared key is a rejected whole layer, so a catalog
 		// the user edited would be gone on the next launch.
 		"fileTypes": {Type: "array", Required: false},
+		// The Explorer's per-item toggle, for the same reason once more. It
+		// was bound while the write lived in memory only, so this key is the
+		// difference between a switch that takes and a switch that lies.
+		"menuOff": {Type: "array", Required: false},
+		// The undo point for the last profile plan. An object rather than an
+		// array because it is one record — the prior verdict of a set of ids
+		// — and a list of them would need a rule for which one is current.
+		"profileSnapshot": {Type: "object", Required: false},
 	}
 }
 
@@ -187,6 +247,7 @@ func New(cfgPath string) (*Store, error) {
 		Overrides:      []Override{},
 		EnabledPlugins: []string{},
 		FileTypes:      []filetype.FileType{},
+		MenuOff:        []string{},
 	})
 	cfg, err := config.New(defaults, ShortcutSchema())
 	if err != nil {
@@ -196,6 +257,7 @@ func New(cfgPath string) (*Store, error) {
 		disabledRules:  map[string]bool{},
 		overrides:      map[string]bool{},
 		pluginsEnabled: map[string]bool{},
+		menuOff:        map[string]bool{},
 		shortcuts:      winlayout.DefaultShortcuts(),
 		zones:          winlayout.DefaultZones(),
 		fileTypes:      filetype.Seeds(),
@@ -255,6 +317,26 @@ func New(cfgPath string) (*Store, error) {
 						}
 					}
 					s.activeProfile = doc.ActiveProfile
+					// The Explorer's per-item toggle, same best-effort deal
+					// as the trio above: absent decodes to nil, and that is
+					// the "nothing is switched off" answer the fresh store
+					// already holds, so a document written before the key
+					// existed comes up with every declared item ON — the
+					// exact state the daemon was already serving from its
+					// in-memory map. Nothing the user could see changes.
+					for _, id := range doc.MenuOff {
+						if id != "" {
+							s.menuOff[id] = true
+						}
+					}
+					// The profile undo point. A document with none is a
+					// profile applied before this field existed, and the
+					// honest reading of that is "there is nothing recorded
+					// to return to" — the refusal RevertProfile says in
+					// words, not a revert that silently succeeds.
+					if doc.ProfileSnapshot != nil {
+						s.snapshot = cloneSnapshot(doc.ProfileSnapshot)
+					}
 				}
 			}
 		}
@@ -531,6 +613,155 @@ func (s *Store) SetFileTypes(set []filetype.FileType) error {
 	})
 }
 
+// MenuOff returns the Explorer's menu ids the user has switched OFF, sorted.
+//
+// Absent is the answer, not a gap: a store whose document predates the key
+// returns an empty list, which reads as "nothing is switched off" and hands
+// the daemon exactly the map it was already holding. Sorted because the
+// Explorer page polls this and Go map order would reshuffle rows between
+// refreshes — the same reason PluginsEnabled sorts.
+func (s *Store) MenuOff() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return enabledIDs(s.menuOff)
+}
+
+// SetMenuItemDisabled records one Explorer's menu row as off (or back on) and
+// persists it. Absent = on, so turning a row back on DELETES it from the set
+// rather than storing a false: a document that grew a list of explicit "on"
+// verdicts would pin the menu to whatever it looked like the day the key
+// landed, and every item added afterwards would be off.
+//
+// The id is not validated against the menu catalog here, and that is the same
+// division of labour SetOverride keeps: the daemon's handler resolves the id
+// against findermenu first and refuses one it does not know, so a second rule
+// book in this layer would only be a second thing to drift. What IS rejected
+// is the blank id, because a verdict nothing can act on is not a preference.
+func (s *Store) SetMenuItemDisabled(id string, disabled bool) error {
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("settings: empty menu item id")
+	}
+	return s.update(func(next *state) {
+		if disabled {
+			next.menuOff[id] = true
+		} else {
+			delete(next.menuOff, id)
+		}
+	})
+}
+
+// ProfileSnapshot returns the recorded undo point for the last profile plan,
+// and whether there is one.
+//
+// ok=false is the answer for a profile applied by a build that predates the
+// field, and for a document that has never applied a profile at all. It is the
+// same answer in both cases and it is meant to be shown: a Revert that has
+// nowhere to go has to say so in words rather than grey out silently or report
+// a success it did not earn.
+func (s *Store) ProfileSnapshot() (ProfileSnapshot, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.snapshot == nil {
+		return ProfileSnapshot{}, false
+	}
+	return *cloneSnapshot(s.snapshot), true
+}
+
+// RevertProfile restores the recorded prior state: the rule and plugin
+// verdicts the last profile plan overwrote, the profile string it replaced,
+// and the snapshot itself, all in ONE write.
+//
+// Atomic for the same reason ApplyBatch is. A revert that restored the
+// plugins in one write and the rules in another could fail between them and
+// leave the store disagreeing with itself — which is precisely the
+// half-activated outcome the batch form exists to prevent, here in the
+// undoing direction.
+//
+// The snapshot is CLEARED, and that is what makes the second click honest:
+// there is nothing left to return to, so the next call refuses in words
+// rather than re-applying an undo point that has already been spent. The
+// window apply → revert → apply → revert is therefore the same neutral state
+// twice, and the second apply recorded the reverted state as its own undo
+// point on the way in.
+//
+// The snapshot is read INSIDE the write, not before it. Reading it under a
+// separate lock and then writing would leave a window in which a concurrent
+// apply replaces the undo point and this call restores the one it read — two
+// writers undoing each other, which is the store disagreeing with itself in
+// the one direction the batch form exists to prevent. Reading inside update's
+// closure is free: the closure already runs under the write lock, and a nil
+// snapshot there means the closure changes nothing, so the document it lands
+// is the same bytes the store already held.
+func (s *Store) RevertProfile() (ProfileSnapshot, error) {
+	var restored ProfileSnapshot
+	missing := false
+	err := s.update(func(next *state) {
+		if next.snapshot == nil {
+			missing = true
+			return
+		}
+		snap := *next.snapshot
+		for _, t := range snap.Rules {
+			if t.Enabled {
+				delete(next.disabledRules, t.ID)
+			} else {
+				next.disabledRules[t.ID] = true
+			}
+		}
+		for _, t := range snap.Plugins {
+			if t.Enabled {
+				next.plugins[t.ID] = true
+			} else {
+				delete(next.plugins, t.ID)
+			}
+		}
+		next.profile = snap.Profile
+		next.snapshot = nil
+		restored = snap
+	})
+	if err != nil {
+		return ProfileSnapshot{}, err
+	}
+	if missing {
+		return ProfileSnapshot{}, fmt.Errorf("settings: no profile snapshot to return to; " +
+			"nothing was recorded when the profile was applied, so there is nothing to undo")
+	}
+	return restored, nil
+}
+
+// cloneSnapshot copies a snapshot and its two slices. The write path hands the
+// copy out to a caller that will read it after the lock is released, so an
+// aliased slice would be a race against the next apply — the same reason
+// cloneVerdicts copies rather than shares.
+func cloneSnapshot(in *ProfileSnapshot) *ProfileSnapshot {
+	if in == nil {
+		return nil
+	}
+	return &ProfileSnapshot{
+		Profile: in.Profile,
+		Rules:   append([]Toggle(nil), in.Rules...),
+		Plugins: append([]Toggle(nil), in.Plugins...),
+	}
+}
+
+// snapshotTouched captures the prior verdict of every id the plan is about to
+// write, from a state that has NOT been mutated yet. Caller holds the lock.
+//
+// Only the ids the plan names are captured, and that is the difference between
+// an undo and a reset: a revert that rewrote every rule in the table would also
+// undo hand edits a person made after the apply, which is not what "undo the
+// profile" means to them.
+func snapshotTouched(snap state, p Plan) *ProfileSnapshot {
+	out := &ProfileSnapshot{Profile: snap.profile}
+	for _, t := range p.Rules {
+		out.Rules = append(out.Rules, Toggle{ID: t.ID, Enabled: !snap.disabledRules[t.ID]})
+	}
+	for _, t := range p.Plugins {
+		out.Plugins = append(out.Plugins, Toggle{ID: t.ID, Enabled: snap.plugins[t.ID]})
+	}
+	return out
+}
+
 // validate checks every element of the plan against the caller's catalogs
 // before anything is mutated — the batch form of the same fail-closed contract
 // the per-item setters keep. A nil predicate rejects: "no catalog" is a
@@ -558,11 +789,25 @@ func (p Plan) validate(cat Catalog) error {
 // therefore leaves both the file and the running set exactly as they were —
 // the difference between a profile that activated and a profile that half
 // activated, which is worse than either because the UI reported success.
+//
+// A plan that NAMES a profile also records its undo point, in the same write.
+// The alternative — a separate SetProfileSnapshot call beside this one — is a
+// crash between the two: a profile applied with no record of what it replaced
+// is exactly the state Revert cannot undo, and the user is no worse off than
+// with no Revert at all. Taking it here rather than asking the caller to
+// supply it is also what keeps the promise true by construction: a handler
+// cannot forget to build one, because there is nothing to build.
+//
+// The snapshot is overwritten by each such plan, so the undo point is always
+// the state the LAST apply found.
 func (s *Store) ApplyBatch(p Plan, cat Catalog) error {
 	if err := p.validate(cat); err != nil {
 		return err
 	}
 	return s.update(func(next *state) {
+		if p.ActiveProfile != nil {
+			next.snapshot = snapshotTouched(*next, p)
+		}
 		for _, t := range p.Rules {
 			if t.Enabled {
 				delete(next.disabledRules, t.ID)
@@ -624,6 +869,8 @@ func (s *Store) snapshotLocked() state {
 		plugins:       cloneVerdicts(s.pluginsEnabled),
 		profile:       s.activeProfile,
 		fileTypes:     append([]filetype.FileType(nil), s.fileTypes...),
+		menuOff:       cloneVerdicts(s.menuOff),
+		snapshot:      cloneSnapshot(s.snapshot),
 	}
 }
 
@@ -638,6 +885,8 @@ func (s *Store) adoptLocked(next state) {
 	s.pluginsEnabled = next.plugins
 	s.activeProfile = next.profile
 	s.fileTypes = next.fileTypes
+	s.menuOff = next.menuOff
+	s.snapshot = next.snapshot
 }
 
 // cloneVerdicts copies a verdict map. The write path mutates its own copy so a
@@ -709,5 +958,7 @@ func marshalDocument(snap state) ([]byte, error) {
 		EnabledPlugins:     orEmpty(enabledIDs(snap.plugins)),
 		ActiveProfile:      snap.profile,
 		FileTypes:          orEmpty(snap.fileTypes),
+		MenuOff:            orEmpty(enabledIDs(snap.menuOff)),
+		ProfileSnapshot:    cloneSnapshot(snap.snapshot),
 	})
 }

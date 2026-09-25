@@ -19,6 +19,12 @@
 // same kind: a list leaves in a fixed order (the shell polls it), and a write
 // validates the whole payload before it replaces anything (a half-applied
 // catalog is a menu offering a file the daemon will refuse to create).
+//
+// The menu toggle PERSISTS, unlike the plugin maps this file's neighbour seeds
+// into: core.setMenuItemEnabled is bound, the Service method exists, and the
+// control re-renders from the reply, so a write that stayed in memory answered
+// success and then lost the answer to the next restart. It writes through to
+// the settings document and loadMenuOff seeds the running map back from it.
 
 package main
 
@@ -37,14 +43,22 @@ import (
 // --- core:finderMenu ---
 
 // menuRow is the wire row for core:finderMenu: the shared item, the user's
-// toggle, and whether this host can run the item at all.
+// toggle, and whether this host can run the item at all — with the daemon's own
+// words for the "no".
 //
 // The item is embedded rather than copied field by field, so a field added to
 // findermenu.Item is a field the page shows with no second struct to update.
 // contexts is never null: an item with no context is one nothing can offer.
+//
+// Reason is the half a bare supported=false cannot carry. A greyed row with no
+// sentence is the failure a person cannot see from the keyboard they are still
+// holding, and "disabled" does not say WHICH of the two very different refusals
+// applies. It is empty exactly when Supported is true, so the page never has to
+// decide whether a reason belongs on a row that works.
 type menuRow struct {
 	findermenu.Item
-	Supported bool `json:"supported"`
+	Supported bool   `json:"supported"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // hostAdapterNames are the capabilities whose adapter opens a process or talks
@@ -59,36 +73,61 @@ var hostAdapterNames = map[string]bool{
 	"app.open":                   true,
 }
 
-// menuSupported answers whether this capability actually runs here. Two ways
-// it does not, and the page has to be able to say which:
-//
-//   - The registry does not carry it. copyRelativePath and duplicateWithName
-//     name the rows the intent registry has not gained yet (findermenu's own
-//     header says so), so no adapter would be reached from a keyboard rule or
-//     a menu click. Those rows are unsupported on every host, and marking them
-//     otherwise would be a row that looks live and fails on click.
-//   - The adapter exists but refuses this platform. The gate is finderHost,
-//     which is runtime.GOOS in production — the same value darwinOnly reads,
-//     and the same one the keyboard path refuses on — so a row says "disabled"
-//     exactly when the key it is bound to would pass straight through. It is
-//     read through the variable rather than through darwinOnly so a test can
-//     ask what a Windows user sees without a Windows build.
-//
-// The Windows row is the point of both: a capability that quietly does nothing
-// is the one failure a user cannot see from the keyboard they are still holding.
+// menuSupported answers whether this capability actually runs here. The two
+// ways it does not, and the words for each, are menuUnavailableReason's — this
+// is a predicate over it rather than a second copy of its tests, because
+// supported and the reason the page prints beside it are one fact about one
+// host, and two functions answering that fact separately is how a row ends up
+// greyed with no sentence, or live with one.
 func menuSupported(capability string) bool {
+	return menuUnavailableReason(capability) == ""
+}
+
+// menuUnavailableReason is the daemon's own sentence for why this host cannot
+// run a capability, or "" when it can — the single place the verdict and its
+// wording are decided together.
+//
+// The two refusals are kept apart because they are different facts with
+// different remedies, and a person shown one of them is being told a truth
+// they can act on:
+//
+//   - The registry has no row for the capability. copyRelativePath and
+//     duplicateWithName name it, and both have working handlers over IPC
+//     (findermenu.go's handleFinderCopyRelativePath and
+//     handleFinderDuplicateWithName), but intent.DefaultRegistry is the
+//     dispatch table a keyboard rule and a menu click both go through, and it
+//     does not carry them yet. So the sentence says the verb is not wired into
+//     the dispatcher — NOT that the operation is missing, which would send
+//     someone looking for a feature to build that is already written.
+//   - The adapter is present and refuses this platform. That is a permanent
+//     property of the host, so the sentence names the host rather than
+//     apologising.
+func menuUnavailableReason(capability string) string {
 	if _, ok := intent.DefaultRegistry().Get(capability); !ok {
-		return false
+		return fmt.Sprintf(
+			"%s is not in the daemon's intent registry yet, so nothing dispatches it. "+
+				"The Finder menu verb is written and answers over IPC; adding the capability "+
+				"to the registry is what would turn this row on, on every host at once.",
+			capability)
 	}
 	if !hostAdapterNames[capability] {
-		return true // no platform seam: a plain os call
+		return "" // no platform seam: a plain os call
 	}
-	return finderHost == "darwin"
+	if finderHost == "darwin" {
+		return ""
+	}
+	return fmt.Sprintf(
+		"%s opens a host application or talks to the window server, and that adapter "+
+			"runs only on macOS. This daemon is running on %s.",
+		capability, finderHost)
 }
 
 // menuRows renders the menu in the table's order with the user's toggles
 // applied. The slice is always the same length: a disabled item is a row the
 // user can turn back on, not a row that vanished.
+//
+// The support verdict and its sentence are asked of one function, so a row can
+// never be greyed without words or carry words on a row that works.
 func (c *Core) menuRows() []menuRow {
 	c.mu.Lock()
 	off := make(map[string]bool, len(c.menuOff))
@@ -102,7 +141,12 @@ func (c *Core) menuRows() []menuRow {
 		if off[item.ID] {
 			item.Enabled = false
 		}
-		out = append(out, menuRow{Item: item, Supported: menuSupported(item.Capability)})
+		reason := menuUnavailableReason(item.Capability)
+		out = append(out, menuRow{
+			Item:      item,
+			Supported: reason == "",
+			Reason:    reason,
+		})
 	}
 	return out
 }
@@ -128,6 +172,15 @@ func (c *Core) handleFinderMenu(_ json.RawMessage) (any, *ipc.RPCError) {
 // enabled is the user's answer to "do I want it"; the page disables the
 // control on an unsupported host, and the daemon does not overrule a person
 // who set the flag anyway.
+//
+// The verdict is written THROUGH to the settings document before the running
+// map moves, and the two orders are not interchangeable. This verb is bound,
+// the Service method exists, and the control re-renders from the reply — so a
+// write that only touched memory answered "done" and then lost the answer to
+// the next restart, which is the shape of a promise the product does not keep.
+// Writing the store first also means a failed write leaves memory and the
+// document agreeing with each other, instead of leaving a row the daemon is
+// serving a state it could not record.
 func (c *Core) handleSetMenuItemEnabled(raw json.RawMessage) (any, *ipc.RPCError) {
 	var p struct {
 		ID      string `json:"id"`
@@ -140,10 +193,33 @@ func (c *Core) handleSetMenuItemEnabled(raw json.RawMessage) (any, *ipc.RPCError
 		return nil, &ipc.RPCError{Code: ipc.ErrInvalid,
 			Message: fmt.Sprintf("no menu item %q", p.ID)}
 	}
+	if err := c.set.SetMenuItemDisabled(p.ID, !p.Enabled); err != nil {
+		return nil, &ipc.RPCError{Code: ipc.ErrInternal, Message: err.Error()}
+	}
 	c.mu.Lock()
 	c.menuOff[p.ID] = !p.Enabled
 	c.mu.Unlock()
 	return c.menuRows(), nil
+}
+
+// loadMenuOff seeds the running per-item toggle map from the settings document,
+// so a restart comes up with the verdicts the person left rather than
+// re-enabling every row. loadPluginEnablement is the same shape for plugins and
+// is called beside it on start.
+//
+// The default is the one the map already had: an id the document does not name
+// is ON, because findermenu.Menu is what the product declares and a person
+// narrows it. That direction matters for an added row — a menu item shipped
+// after the document was written is in the menu until somebody switches it off,
+// rather than arriving invisible because the document predates it.
+func (c *Core) loadMenuOff() {
+	off := make(map[string]bool)
+	for _, id := range c.set.MenuOff() {
+		off[id] = true
+	}
+	c.mu.Lock()
+	c.menuOff = off
+	c.mu.Unlock()
 }
 
 // --- core:fileTypes ---

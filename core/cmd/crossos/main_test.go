@@ -892,20 +892,52 @@ func TestEveryShellMethodIsRegistered(t *testing.T) {
 		"config.getZones", "config.setZones", "core.commands",
 		"core.pluginSchemas", "safety.ownershipAudit", "safety.trialState",
 		"core.readiness",
-		// The second wave's page sources, and the user-rule table's four.
+		// The second wave's page sources, and the user-rule table's three.
 		// pagedata_test.go pins the same six from the page side; they are
 		// listed here as well because they are shell-called over the one
 		// socket, and a method that is registered on neither list is
 		// reachable from neither.
+		//
+		// The user-rule table's fourth handler, config.getUserRuleVocabulary,
+		// is deliberately absent. The daemon registers and serves it (main.go,
+		// TestUserRuleMethodsAreReachableOverTheSocket reads it back over real
+		// JSON-RPC), but no Service method in app/backend wraps it and no page
+		// dispatches it — ipc_client.go has no call site for it at all. This
+		// list is a statement about what the SHELL reaches over the socket, and
+		// its header says so; naming a verb nothing dispatches makes the header
+		// a lie and hides the real gap, which is that the vocabulary read has no
+		// Service method. The day the rule builder gets one, it comes back here.
 		"core.profiles", "core.profileApply", "core.conflicts", "core.apps",
 		"core.traces", "core.pluginMeta", "core.onboardingState",
 		"config.getUserRules", "config.setUserRule",
-		"config.deleteUserRule", "config.getUserRuleVocabulary",
+		"config.deleteUserRule",
 		// Observe mode — the write AND the read, because the page that owns the
 		// toggle has to be able to say which way round it is, and a shell that
 		// could only write would label it from the click. Plus the permissions
 		// deep link the first-run flow sends the person to.
 		"core.setObserve", "core.observeState", "core.tracesClear", "permissions.openSettings",
+		// The Explorer page's own five (cross-os-b6s). The list was stale for
+		// all of them while the shell called them, which is the exact failure
+		// this list exists to catch: a verb the window dispatches and this
+		// file cannot name is a verb nothing re-checks when it is renamed.
+		"core.finderMenu", "core.fileTypes", "core.setFileType",
+		"core.reorderFileTypes", "core.setMenuItemEnabled",
+		// The way back out of a profile (cross-os-n4n). Paired with
+		// core.profileApply above on purpose: a card that can only turn a
+		// profile on is a half-feature, and this list is where a reader looks
+		// to see whether a capability has a whole story.
+		"core.profileDeactivate",
+		// The first-run wizard's one write, beside the read it is derived from.
+		// The list carried core.onboardingState for a whole wave while the
+		// wizard's finish button called core.onboardingComplete, so the read
+		// was pinned and the write was not.
+		"core.onboardingComplete",
+		// The switcher's three, in the order the panel uses them: the tile
+		// list, the long poll that opens it, and the focus a click performs.
+		// Same story as the wizard's write — the page called all three
+		// (SwitcherPanelControl reads the list, actions.ts drives the other
+		// two) and this list could not name one of them.
+		"core.windows", "core.switcherWait", "core.switcherFocus",
 	}
 	for _, name := range shellCalls {
 		if _, ok := reg[name]; !ok {

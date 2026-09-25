@@ -24,8 +24,11 @@
 //
 // Honesty: a capability CrossOS cannot deliver is declared unavailable with
 // the reason, never as a passing check. pagedata.go:11 — "a fabricated row is
-// worse than an honest gap" — is why Alt+Tab is a gap here: the spec promises
-// it, and there is no window-switcher capability, plugin, or rule behind it.
+// worse than an honest gap" — is why Alt+Tab is a gap here. The reason is NOT
+// that the switcher is missing, which is the story this file used to tell and
+// the intent registry contradicts: window.switcher is registered and two rules
+// drive it. The gap is that this bundle does not claim those rules, which the
+// two row reasons below now say, and the two table tests now hold them to.
 package profiles
 
 import (
@@ -92,9 +95,16 @@ func zones(actions ...winlayout.Action) []string {
 
 // windows11 is the profile layer's one builtin: the Windows 11 Experience. Its
 // two declared gaps (Alt+Tab, File Explorer extras) are capabilities the spec
-// promises and CrossOS does not yet implement — carried with their reasons
+// promises and this bundle does not yet carry — carried with their reasons
 // rather than ticked, so a future release fills them by making the capability
 // available, not by the UI re-drawing a checkmark.
+//
+// "Does not yet carry" is the load-bearing phrase, and it is deliberately not
+// "does not yet exist": the rules behind both rows already exist. The gaps are
+// in what this bundle CLAIMS, which is a smaller and more tractable hole than a
+// missing capability, and it is why both row reasons are written from the rule
+// and capability tables rather than from what was true when they were first
+// typed.
 var windows11 = Profile{
 	ID:          "windows-11-experience",
 	Label:       "Windows 11 Experience",
@@ -136,13 +146,54 @@ var windows11 = Profile{
 			ID:        "window.alt-tab",
 			Label:     "Alt+Tab Window Switcher",
 			Available: false,
-			Reason:    "no window-switcher capability, plugin, or rule exists yet — a passing row would be a fabricated control",
+			// The one string that was a falsehood and is now a fact. It used
+			// to read "no window-switcher capability, plugin, or rule
+			// exists yet", and all three of those DO exist: window.switcher
+			// is in the intent registry (registry_v1.go:75), and
+			// windows-keyboard.alt-tab-summon-switcher and
+			// -commit-switcher are two rules behind it (rules.go:152,157)
+			// with the switcher shipped in cmd/crossos/switcher.go. The
+			// rules.go comment says so outright — "these rules are the
+			// capability that row said it did not have yet."
+			//
+			// So the row stays unavailable, for the one reason that is
+			// true: this bundle claims neither rule, so applying it does
+			// not turn Alt+Tab on, and profiles.go:93-96 says a passing
+			// row must not advertise a control that does nothing. The
+			// missing thing is the CLAIM, not the capability. Adding the
+			// two RuleIDs here is what flips this row, and
+			// TestAltTabRowIsTrueOfTheTables is what says so.
+			Reason: "the switcher ships — window.switcher is a registered capability and " +
+				"windows-keyboard.alt-tab-summon-switcher and " +
+				"windows-keyboard.alt-tab-commit-switcher are the two rules driving it — " +
+				"but this bundle claims neither, so applying the profile leaves Alt+Tab off",
 		},
 		{
 			ID:        "finder.explorer",
 			Label:     "File Explorer Shortcuts",
 			Available: false,
-			Reason:    "F2 rename and Win+E have no rule or shortcut behind them; only the core file.moveToTrash capability exists, unclaimed",
+			// Also re-derived from the tables rather than from memory, and
+			// it fixes the same kind of error one clause over. The old
+			// string said F2 rename and Win+E "have no rule or shortcut
+			// behind them", and the second half was false: BOTH are rows
+			// in winlayout.Windows11Shortcuts(). What is missing is the
+			// rule that FIRES them, and for F2 the intent those two rows
+			// would carry.
+			//
+			// F2's preset row has an empty intent and the registry has no
+			// filesystem.rename to fill it with; Win+E's preset row is
+			// bound to app.open, and the only rule emitting app.open is
+			// the developer plugin's Ctrl+Shift+P. file.moveToTrash is
+			// real, registered and dispatched, and it is bound to
+			// Shift+Delete — but it is the one Explorer verb this bundle
+			// does not claim, which is the only part of the old sentence
+			// that was right. TestFinderExplorerRowIsTrueOfTheTables
+			// pins every clause.
+			Reason: "F2 rename and Win+E are declared chords that no rule fires. " +
+				"F2's intent is empty, because no filesystem.rename capability is " +
+				"registered to fill it. Win+E's app.open intent is fired only by the " +
+				"developer plugin's own chord. file.moveToTrash is the one Explorer " +
+				"verb that does fire, on Shift+Delete, and this bundle does not claim it",
 		},
 	},
 }

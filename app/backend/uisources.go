@@ -25,6 +25,8 @@
 // pinned by a test rather than by this comment.
 package shell
 
+import "crossos/core/pkg/filetype"
+
 // MatrixRow is one behavior-matrix rule (config.getMatrix). Contexts are the
 // app contexts the rule fires in; the Keyboard page matrix toggles Enabled
 // through config.setRuleEnabled, never by editing this row.
@@ -345,4 +347,25 @@ type SwitcherTrigger struct {
 	Triggered bool   `json:"triggered"`
 	Action    string `json:"action,omitempty"`
 	WindowID  string `json:"window_id,omitempty"`
+}
+
+// FileTypeRow is one row of the Explorer's file-type catalog
+// (core.fileTypes, core.setFileType, core.reorderFileTypes) — the presets the
+// New > submenu offers, which a person edits rather than types.
+//
+// The catalog's own struct is EMBEDDED rather than copied field by field, and
+// that is the point rather than a saving: the daemon's row embeds
+// filetype.FileType the same way, so a field added to the catalog is a field
+// the shell and the menu both show, with no second struct to update and
+// nothing to forget. Copying the six fields would be a second declaration of
+// the same thing, and the first field the daemon adds would arrive as a
+// column the shell has nowhere to put.
+//
+// MenuTitle is the derived menu label, recomputed by the daemon on every read
+// rather than stored. A stored copy would be a second thing to keep true —
+// the exact "New .md" string is a function of displayName and ext, and the
+// Editor's rename would have to be applied twice to stay correct.
+type FileTypeRow struct {
+	filetype.FileType
+	MenuTitle string `json:"menuTitle"`
 }
