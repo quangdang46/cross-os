@@ -140,6 +140,9 @@ type stubCore struct {
 	trial       TrialState
 	readiness   []ReadinessRow
 	failSources error
+	// observing is the recorder's dry-run flag, held so ObserveState can read
+	// back what SetObserve wrote rather than echoing the argument at it.
+	observing bool
 }
 
 func (s *stubCore) IsRunning() bool    { return s.running }

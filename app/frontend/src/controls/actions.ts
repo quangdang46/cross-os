@@ -188,6 +188,14 @@ export const ACTION_COMMANDS: Record<string, ActionCommand> = {
   // it decides nothing, which is why the step's verdict stays the daemon's.
   'permissions.openSettings': (service) => settingsCalls(service).OpenSystemSettings(),
 
+  // Observe mode, off the unbound table and into a real call. The flag comes
+  // from the control, which read it from the recorder's own state a moment
+  // earlier — so this is not a "flip whatever it was" but a "make it this",
+  // and a state that moved underneath the page does not silently get toggled
+  // back. `=== true` rather than Boolean(): a control that forgot the field
+  // must ask for OFF, the direction that stops recording.
+  [OBSERVE]: (service, args) => service.SetObserve(args?.enabled === true),
+
   // The writes a row names, each async so a write with no row refuses as a
   // rejected promise rather than a synchronous throw: a caller that forgot the
   // try/catch would otherwise take the whole window down over a missing id.
@@ -235,14 +243,6 @@ export const ACTION_COMMANDS: Record<string, ActionCommand> = {
  * renderers.test.tsx fails when a served page declares an id in neither table.
  */
 export const UNBOUND_ACTIONS: Record<string, UnboundAction> = {
-  [OBSERVE]: {
-    what: 'turn the dry-run recorder on or off',
-    waitsOn: 'a Service.SetObserve binding; the daemon serves this one over IPC only',
-  },
-  'observe.set': {
-    what: 'turn the dry-run recorder on or off',
-    waitsOn: 'a Service.SetObserve binding; the daemon serves this one over IPC only',
-  },
   'plugin.installDisk': {
     what: 'install an extension from a file the person picked',
     waitsOn: 'a Service.InstallPlugin binding; no daemon method serves it today',

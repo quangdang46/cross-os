@@ -372,9 +372,13 @@ func TestPageControlKinds(t *testing.T) {
 		t.Fatalf("profiles missing profileList/apply: %s", s)
 	}
 	// Observe: the event inspector on its own page, with the dry-run toggle
-	// and the live feed.
-	if s := schemas["core.observe"]; !strings.Contains(s, "core.setObserve") || !strings.Contains(s, `"kind":"traceList"`) {
-		t.Fatalf("observe missing setObserve/traceList: %s", s)
+	// and the decision feed. The toggle is its own kind because its label is a
+	// fact about the recorder, not a caption the page chose (cross-os-pbd), so
+	// the page no longer carries an `action` field on it. The id is still
+	// declared, in the page's action list, and the registry test that reads
+	// these declarations off disk is what checks it resolves to a command.
+	if s := schemas["core.observe"]; !strings.Contains(s, `"kind":"observeToggle"`) || !strings.Contains(s, `"kind":"traceList"`) {
+		t.Fatalf("observe missing observeToggle/traceList: %s", s)
 	}
 	// Observe is a page of its own, not a second control on Activity: §5
 	// (conflicts) and §6 (observe) are separate questions.

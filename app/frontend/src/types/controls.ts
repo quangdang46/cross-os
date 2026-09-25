@@ -160,6 +160,28 @@ export interface OnboardingStep {
  * its own beside this one: two cursors on one flow is the disagreement this
  * row exists to make impossible.
  */
+/**
+ * What the recorder is ACTUALLY doing, read back from it. The snake_case
+ * spelling is the daemon's own (`app/backend/uisources.go`), like every other
+ * wire row here.
+ *
+ * Mode is a string rather than a number because a person has to read what each
+ * one keeps, and "2" says nothing. The daemon owns the vocabulary and the
+ * labels are spelled in record.Mode's String.
+ */
+export interface ObserveStateRow {
+  observe: boolean
+  mode: string
+}
+
+/** What each privacy mode keeps, in the words the recorder's own comment uses. */
+export const OBSERVE_MODES: Record<string, string> = {
+  'metadata-only': 'Metadata only — the decision, the app, the rule, the intent. Typed text, file contents and secrets are replaced.',
+  debug: 'Debug — metadata plus the structural parameters of each action.',
+  'full-trace': 'Full trace — everything, including the values above. Never on by default.',
+  off: 'Off — nothing is recorded.',
+}
+
 export interface OnboardingRow {
   completed: boolean
   current_step: string
@@ -442,6 +464,20 @@ export interface ServiceApi {
    * arrives here as a rejection carrying its own message.
    */
   OpenSystemSettings(): Promise<void>
+  /**
+   * Turns the recorder's dry-run on or off. The argument is a plain bool
+   * because the daemon treats a payload without the flag as a bad request
+   * rather than as a state — a toggle that can be left in no state is not a
+   * toggle.
+   */
+  SetObserve(on: boolean): Promise<void>
+  /**
+   * Reads the recorder's ACTUAL position: whether it is dry-running, and the
+   * privacy mode it is keeping. Read rather than echoed from the last write,
+   * because a page that learns the state only from its own write can only
+   * ever label the belief.
+   */
+  ObserveState(): Promise<ObserveStateRow | null>
 
   // Wave 3: the profile cards, the decision trace, the manifest facts, the
   // app picker, and the person-authored rule table. Same rule as the ten

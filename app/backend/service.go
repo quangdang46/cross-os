@@ -233,6 +233,24 @@ func (s *Service) CompleteOnboarding() error {
 // be the shell inventing an answer the daemon deliberately did not give.
 func (s *Service) OpenSystemSettings() error { return s.app.OpenSystemSettings() }
 
+// SetObserve turns the recorder's dry-run on or off (core.setObserve).
+//
+// Observe mode is what lets a person read back what their rules do without
+// disturbing the desktop: each decision that WOULD have fired is staged onto
+// the trace instead. Turning it on is a change to what the machine does with a
+// keypress, so the write is explicit and the position is read back rather than
+// assumed.
+func (s *Service) SetObserve(on bool) error { return s.app.SetObserve(on) }
+
+// ObserveState reports the recorder's own position (core.observeState): the
+// dry-run flag read from the recorder, and the privacy mode it is keeping.
+//
+// A product that records every keystroke decision owes the person reading it
+// two things at once — where it stands, and what it is keeping. Both come from
+// the daemon here, and neither is optimistically reported: a toggle that could
+// only be written would label itself from the click that produced it.
+func (s *Service) ObserveState() (ObserveStateRow, error) { return s.app.ObserveState() }
+
 // Profiles serves the profile cards.
 func (s *Service) Profiles() ([]ProfileRow, error) { return s.app.Profiles() }
 

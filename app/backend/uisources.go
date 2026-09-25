@@ -127,6 +127,20 @@ type OnboardingRow struct {
 	Total       int              `json:"total"`
 }
 
+// ObserveStateRow is what the recorder is ACTUALLY doing, read back from it
+// (core.observeState). It is a read of the recorder and not an echo of the
+// last write: a toggle that can only be written reports the click it just
+// received, which is the belief rather than the state.
+//
+// Mode is the privacy level the recorder is keeping, and it is REPORTED here
+// rather than settable. A page that could set it would be a second, quieter
+// way to decide what a product that watches every keystroke keeps — so the
+// copy has to name what each mode buys, and the daemon keeps the policy.
+type ObserveStateRow struct {
+	Observe bool   `json:"observe"`
+	Mode    string `json:"mode"`
+}
+
 // OnboardingStep is one wizard step with its verdict. Detail is why the step is
 // not done — the reason to act, not merely the fact of waiting — and is absent
 // (not empty) on a done step, so a page leaves the slot out rather than render

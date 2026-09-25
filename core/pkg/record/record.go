@@ -27,6 +27,24 @@ const (
 // redacted is the placeholder written over secrets.
 const redacted = "[REDACTED]"
 
+// String is the wire spelling of a mode. The numeric values are an
+// implementation detail of the enum; the page names these modes in copy a
+// person reads and has to be able to say what each one BUYS, which it cannot
+// do from a number. Sending the string also survives a reorder of the const
+// block, which sending the int would not.
+func (m Mode) String() string {
+	switch m {
+	case ModeMetadataOnly:
+		return "metadata-only"
+	case ModeDebug:
+		return "debug"
+	case ModeFullTrace:
+		return "full-trace"
+	default:
+		return "off"
+	}
+}
+
 // Trace is one recorded event: the router Outcome plus recorder metadata.
 // Parameters arrive here as the router logged them; ApplyMode redacts at
 // record time so secrets never reach storage.

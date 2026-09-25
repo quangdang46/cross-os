@@ -275,6 +275,28 @@ func (s *stubCore) CompleteOnboarding() error {
 	return nil
 }
 
+// SetObserve records the flag, because a stub that dropped it could not tell
+// a read-back from a write. The stub holds the state rather than echoing the
+// call back, so a test that reads ObserveState is reading something the write
+// actually changed — the property the real recorder has and an optimistic
+// echo would not.
+func (s *stubCore) SetObserve(on bool) error {
+	if s.failSources != nil {
+		return s.failSources
+	}
+	s.observing = on
+	return nil
+}
+
+// ObserveState reports what SetObserve last recorded, or the zero row when it
+// never was called. It is a read of stored state for the same reason.
+func (s *stubCore) ObserveState() (ObserveStateRow, error) {
+	if s.failSources != nil {
+		return ObserveStateRow{}, s.failSources
+	}
+	return ObserveStateRow{Observe: s.observing, Mode: "metadata-only"}, nil
+}
+
 // OpenSystemSettings accepts the call, for the same reason: a stub that refused
 // it would make a test assert a rejection the daemon only performs off darwin,
 // which is the daemon's own rule and not the shell's to invent.
@@ -483,6 +505,10 @@ func TestServiceExposesFrozenSources(t *testing.T) {
 		// latches it, and the one door onto another application — the pane
 		// where the Accessibility grant is actually made.
 		"OnboardingState", "CompleteOnboarding", "OpenSystemSettings",
+		// Observe mode: the write that turns it on, and the read that says
+		// where it actually stands. Both, because a toggle that can only be
+		// written labels itself from the click instead of the state.
+		"SetObserve", "ObserveState",
 		// The switcher: its tiles, the long poll that opens it, and the focus a
 		// click performs.
 		"Windows", "SwitcherWait", "SwitcherFocus",

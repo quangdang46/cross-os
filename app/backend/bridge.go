@@ -160,6 +160,17 @@ type Core interface {
 	// an unsupported platform says so rather than reporting a success that
 	// opened nothing.
 	OpenSystemSettings() error
+	// SetObserve turns the recorder's dry-run on or off (core.setObserve). The
+	// flag is required by the daemon and a plain bool here is what makes
+	// omitting it impossible: a toggle with a tri-state argument is a toggle
+	// that can be left in no state at all.
+	SetObserve(on bool) error
+	// ObserveState reports what the recorder is ACTUALLY doing
+	// (core.observeState): the dry-run flag read back from the recorder, and
+	// the privacy mode it is keeping. Reading rather than echoing is the
+	// whole point — a page that learns the state only from its own write can
+	// only ever label the belief.
+	ObserveState() (ObserveStateRow, error)
 	// Profiles returns the profile cards (core.profiles): each bundle with the
 	// live rollup of its capabilities, so a card can say whether a click landed.
 	Profiles() ([]ProfileRow, error)
@@ -534,6 +545,31 @@ func (a *App) OpenSystemSettings() error {
 		return err
 	}
 	return nil
+}
+
+// SetObserve turns observe mode on or off. A refusal is returned AND logged:
+// the toggle is the page's only control, so a toggle that silently did
+// nothing would leave a person watching a feed and believing it was live.
+func (a *App) SetObserve(on bool) error {
+	if err := a.core.SetObserve(on); err != nil {
+		a.log.Append("SetObserve: " + err.Error())
+		return err
+	}
+	return nil
+}
+
+// ObserveState reports the recorder's own position. A daemon that cannot
+// answer leaves the toggle's label unknowable, so the failure is returned and
+// logged rather than answered with a row the daemon never confirmed — an
+// optimistic false here would read as "observe is off" on a machine that is
+// recording.
+func (a *App) ObserveState() (ObserveStateRow, error) {
+	state, err := a.core.ObserveState()
+	if err != nil {
+		a.log.Append("ObserveState: " + err.Error())
+		return ObserveStateRow{}, err
+	}
+	return state, nil
 }
 
 // Profiles serves the profile cards. An unavailable capability keeps its

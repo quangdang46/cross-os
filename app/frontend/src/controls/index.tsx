@@ -27,6 +27,7 @@ import { KeymapEditorControl } from './KeymapEditorControl'
 import { LicenseControl } from './LicenseControl'
 import { MatrixControl } from './MatrixControl'
 import { NoteControl } from './NoteControl'
+import { ObserveToggleControl } from './ObserveToggleControl'
 import { OverridesControl } from './OverridesControl'
 import { PackListControl } from './PackListControl'
 import { PaletteControl } from './PaletteControl'
@@ -86,6 +87,7 @@ const RENDERERS = new Map<string, ControlRenderer>([
   ['license', LicenseControl],
   ['matrix', MatrixControl],
   ['note', NoteControl],
+  ['observeToggle', ObserveToggleControl],
   ['overrides', OverridesControl],
   ['packList', PackListControl],
   ['palette', PaletteControl],

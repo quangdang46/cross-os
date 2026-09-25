@@ -432,6 +432,23 @@ func (c *Core) handleSetObserve(raw json.RawMessage) (any, *ipc.RPCError) {
 	return map[string]any{"observe": *p.Enabled}, nil
 }
 
+// handleObserveState serves core.observeState: what the recorder is ACTUALLY
+// doing, read back from the recorder rather than echoed from the last thing
+// the shell asked for. handleSetObserve can only be written, and a write with
+// no read is a fire-and-forget — a toggle that cannot say which position it is
+// in can only ever be labelled from the click that produced it, which is the
+// belief, not the state.
+//
+// The mode is reported and NOT set here. It changes what the recorder keeps,
+// and who may change that is a policy question with its own answer; a read
+// that also took a mode would be a second, quieter way to change it.
+func (c *Core) handleObserveState(json.RawMessage) (any, *ipc.RPCError) {
+	return map[string]any{
+		"observe": c.rec.DryRun(),
+		"mode":    c.rec.Mode().String(),
+	}, nil
+}
+
 // accessibilityPane is the one system-settings deep link this daemon can
 // act on: the focused-window watcher cannot prime without Accessibility
 // consent, so every not-ready keyboard row points the user here.
@@ -857,6 +874,7 @@ func (c *Core) methods() map[string]ipc.Handler {
 		// permission the daemon can actually ask for: Accessibility,
 		// which the focused-window watcher needs before it can prime.
 		"core.setObserve":          c.handleSetObserve,
+		"core.observeState":        c.handleObserveState,
 		"permissions.openSettings": c.handleOpenSettings,
 		// The Explorer page (be-finderdata): the Finder menu the user can
 		// switch items off in, and the file-type catalog behind New >.

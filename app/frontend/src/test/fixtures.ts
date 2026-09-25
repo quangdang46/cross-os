@@ -292,6 +292,14 @@ interface Machine {
   /** The keyboard tap: what the Accessibility permission buys. */
   interception: boolean
   /**
+   * Whether the recorder is dry-running, and what it is keeping. Held as state
+   * rather than echoed, so ObserveState is a READ of what SetObserve changed —
+   * the same distinction the real recorder makes, and the one a fire-and-forget
+   * toggle would lose.
+   */
+  observing: boolean
+  recordMode: string
+  /**
    * Readiness reads still to answer "the tap is not back" AFTER a grant landed.
    *
    * This is the gap the wizard's settle exists for, modelled rather than
@@ -342,6 +350,8 @@ function fresh(): Machine {
     onboarded: false,
     profile: '',
     interception: false,
+    observing: false,
+    recordMode: 'metadata-only',
     tapReinstallsIn: 0,
     extensions: { 'window-keys': false, 'finder-actions': false },
     rules: [],
@@ -787,6 +797,17 @@ const controlSurface: ServiceApi = {
   // too: returning the daemon's {opened, pane} would be the shell knowing more
   // about the call's outcome than the Service publishes.
   OpenSystemSettings: () => answer('OpenSystemSettings', () => undefined),
+
+  // Observe mode. The write stores and the read reports the store, so a test
+  // that flips the toggle and then reads the state is exercising the same
+  // round trip the daemon does — and a control that labelled itself from its
+  // own click instead would still pass a fire-and-forget test.
+  SetObserve: (on) =>
+    answer('SetObserve', () => {
+      machine.observing = on
+    }),
+  ObserveState: () =>
+    answer('ObserveState', () => ({ observe: machine.observing, mode: machine.recordMode })),
 
   Profiles: () => answer('Profiles', profileRows),
   ApplyProfile: (profileID) =>

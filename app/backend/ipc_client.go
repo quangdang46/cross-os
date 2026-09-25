@@ -561,6 +561,35 @@ func (c *IPCCore) CompleteOnboarding() error {
 	return err
 }
 
+// SetObserve implements Core via core.setObserve. The flag is always sent —
+// the daemon treats a payload without one as a bad request rather than as a
+// state, which is the right refusal and would otherwise turn a dropped
+// argument into "stop observing".
+func (c *IPCCore) SetObserve(on bool) error {
+	raw, err := json.Marshal(map[string]any{"enabled": on})
+	if err != nil {
+		return fmt.Errorf("shell: ipc encode core.setObserve: %w", err)
+	}
+	_, err = c.call("core.setObserve", raw)
+	return err
+}
+
+// ObserveState implements Core via core.observeState.
+func (c *IPCCore) ObserveState() (ObserveStateRow, error) {
+	raw, err := c.call("core.observeState", nil)
+	if err != nil {
+		return ObserveStateRow{}, err
+	}
+	var out *ObserveStateRow
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return ObserveStateRow{}, fmt.Errorf("shell: ipc decode core.observeState: %w", err)
+	}
+	if out == nil {
+		return ObserveStateRow{}, fmt.Errorf("shell: ipc core.observeState: null result, want the recorder's own state")
+	}
+	return *out, nil
+}
+
 // OpenSystemSettings implements Core via permissions.openSettings. The handler
 // answers with {"pane","opened"} and refuses off darwin with a message worth
 // showing, so the error is returned as it came rather than flattened.

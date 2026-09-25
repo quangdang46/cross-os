@@ -147,8 +147,18 @@ func ObservePage() pluginapi.UIContribution {
 		"type":        "page",
 		"description": "Watch what CrossOS sees. With Observe on, actions are shown instead of performed.",
 		"controls": []any{
-			map[string]any{"kind": "button", "id": "observeToggle", "label": "Turn Observe on", "action": "core.setObserve", "note": "Dry run — CrossOS reports what it would do and changes nothing."},
-			map[string]any{"kind": "traceList", "id": "events", "source": "core:traces", "format": "Key → App → Rule → Intent → Action", "note": "The live feed, one decision per entry."},
+			// Not a `button`: this one's label is a fact about the recorder, so
+			// it reads where observe mode stands and offers the other position
+			// (cross-os-pbd). A button captioned "Turn Observe on" that is
+			// already on tells the reader something false about their machine.
+			map[string]any{"kind": "observeToggle", "id": "observeToggle", "label": "Observe", "note": "Dry run — CrossOS reports what it would do and changes nothing."},
+			// The copy below used to call this "The live feed". It is not one:
+			// there is no push, and this is the shell's five-second poll of a
+			// 200-row tail (traceRowLimit, pagedata.go:1105; the interval is
+			// App.tsx:273). A page that names itself live and is polled teaches
+			// the reader to trust a freshness it does not have — on the one
+			// surface whose whole job is telling them what their rules did.
+			map[string]any{"kind": "traceList", "id": "events", "source": "core:traces", "format": "Key → App → Rule → Intent → Action", "note": "The last 200 decisions, newest first, re-read every few seconds — polled, not pushed. A decision that falls off the end is gone."},
 		},
 	}, []string{"core.setObserve"}, "true")
 }
