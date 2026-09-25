@@ -165,12 +165,18 @@ describe('the shortcut tables, dispatched by source', () => {
     })
 
     show(windowControl, service)
-    // The window table's own row: an ACTION name in an editable field, a key,
-    // and a modifier — the three columns config.getShortcuts serves.
+    // The window table's own row: an ACTION name in an editable field beside a
+    // RECORDER for the chord — one recorder per row, which is what Rectangle
+    // binds (actionsToViews, PrefsViewController.swift:8). The key and the
+    // modifier are no longer typed fields, so a served chord is now READ back
+    // off the recorder's own chip rather than off two inputs.
     const action = await screen.findByLabelText('Action, row 1')
     expect((action as HTMLInputElement).value).toBe('snapLeft')
-    expect((screen.getByLabelText('Key, row 1') as HTMLInputElement).value).toBe('Left')
-    expect((screen.getByLabelText('Modifiers, row 1') as HTMLInputElement).value).toBe('Win')
+    // formatChord renders a chord in DISPLAY names, so the daemon's 'Win' reads
+    // as 'cmd' and its 'Ctrl' as 'ctrl' — the same reason a rendered chord must
+    // never be compared against a served one, and the reason this asserts the
+    // chip rather than rebuilding the string.
+    expect(await screen.findByText('cmd+Left')).toBeTruthy()
     // The registry's action names are nowhere in this table.
     expect(screen.queryByText('Left Half')).toBeNull()
 

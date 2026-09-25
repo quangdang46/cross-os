@@ -35,5 +35,17 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],
     restoreMocks: true,
+    // Vitest's default is 5s, which is a budget for a test that checks one
+    // thing. src/e2e/firstRun.test.tsx is the exception: it drives the whole
+    // first run — land on the wizard, pick a profile, open System Settings,
+    // come back, verify, read back a decision, resolve a conflict — across
+    // eleven pages with a real settle wait in the middle, and it failed
+    // intermittently on a machine with four node processes running.
+    //
+    // The budget is HERE rather than passed per test because the per-test
+    // argument had no effect under vitest 5.0.1, which is why this comment
+    // exists at all. And it is not set high enough to hide a hang: a test that
+    // never settles still fails, it just takes twenty seconds to say so.
+    testTimeout: 20000,
   },
 });

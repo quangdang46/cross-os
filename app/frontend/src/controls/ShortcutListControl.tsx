@@ -35,10 +35,11 @@
 
 import { useState } from 'react'
 import type { ReactElement } from 'react'
-import type { MatrixRow, ShortcutRow } from '../types/controls'
+import type { ChordCapture, MatrixRow, ShortcutRow } from '../types/controls'
 import { asText, failedTo, splitModifiers } from '../lib/wire'
 import { formatChord, humanize } from '../lib/format'
 import { useResource } from '../lib/useResource'
+import { ChordRecorder } from './ChordRecorder'
 import { ControlFrame, EmptyState, TextField, Toggle } from './common'
 import type { ControlProps } from './common'
 
@@ -74,6 +75,20 @@ function modifierText(row: ShortcutRow): string {
   return Array.isArray(row.modifiers) ? row.modifiers.join(', ') : ''
 }
 
+/**
+ * A served row as the recorder wants it, or null when the row has no key yet.
+ *
+ * The two halves of a chord live in two columns, and a row with no key is
+ * genuinely empty rather than half-full: handing the recorder a blank key
+ * would print an empty chip beside the chord the person is about to press,
+ * which is worse than printing nothing until they have pressed something.
+ */
+function rowChord(row: ShortcutRow): ChordCapture | null {
+  const key = asText(row.key).trim()
+  if (key === '') return null
+  return { key, modifiers: splitModifiers(modifierText(row)) }
+}
+
 /** The window table, editable in place. */
 function WindowShortcutTable(props: ControlProps): ReactElement {
   const { ctx } = props
@@ -94,6 +109,19 @@ function WindowShortcutTable(props: ControlProps): ReactElement {
   function edit(index: number, field: string, value: string): void {
     const next = (draft ?? [...(table.data ?? [])]).map((row, at) =>
       at === index ? { ...row, [field]: value } : row,
+    )
+    setDraft(next)
+  }
+
+  /**
+   * A capture owns BOTH chord fields, so it cannot go through edit()'s
+   * single-field map. Writing them one at a time would leave a row holding a
+   * new key and the modifiers that went with the old one, which is a shortcut
+   * that fires on a chord nobody chose.
+   */
+  function editChord(index: number, capture: ChordCapture): void {
+    const next = (draft ?? [...(table.data ?? [])]).map((row, at) =>
+      at === index ? { ...row, modifiers: capture.modifiers, key: capture.key } : row,
     )
     setDraft(next)
   }
@@ -160,18 +188,30 @@ function WindowShortcutTable(props: ControlProps): ReactElement {
                 onChange={(value) => edit(index, 'action', value)}
                 disabled={busy}
               />
-              <TextField
-                label={`Modifiers, row ${index + 1}`}
-                value={modifierText(row)}
-                onChange={(value) => edit(index, 'modifiers', value)}
-                placeholder="ctrl, shift"
+              {/* The chord is CAPTURED, one recorder per row — which is what
+                  the reference binds: actionsToViews (PrefsViewController.swift:8)
+                  maps every active action to its own MASShortcutView, one
+                  outlet per action (:11-60, :68-73). A table of typed
+                  modifier and key columns asks a person to know that the daemon
+                  spells a modifier 'Ctrl' and stores a key under its Windows
+                  virtual-key name, which is the same three vocabularies the
+                  recorder exists to stop them having to learn.
+
+                  The action stays a text field on purpose. No bound call
+                  serves the window-action names, and a hand-kept list of them
+                  in this file would be a second vocabulary the daemon does
+                  not keep — the failure window.rules.go's own header warns
+                  about. */}
+              <ChordRecorder
+                value={rowChord(row)}
+                onCapture={(capture) => editChord(index, capture)}
+                onReject={(reason) => {
+                  setError(reason)
+                  ctx.note(reason)
+                }}
                 disabled={busy}
-              />
-              <TextField
-                label={`Key, row ${index + 1}`}
-                value={asText(row.key)}
-                onChange={(value) => edit(index, 'key', value)}
-                disabled={busy}
+                service={ctx.service}
+                note={ctx.note}
               />
               <div className="ctl-actions">
                 <button className="ctl-input" type="button" disabled={busy} onClick={() => remove(index)}>
