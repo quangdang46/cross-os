@@ -54,3 +54,13 @@ CrossOS destination: app/frontend/src/controls/RuleBuilderControl.tsx (the rule 
 Modification: structural port, no code copied. What transfers is the ROW: two ends of a rule, each with its own control, and neither end a text field the person has to spell correctly. CrossOS's two ends are the app scope and the action, and the key between them is captured by pressing it.
 Reason for modification: language and medium port; the reference edits Karabiner's own remapping document, CrossOS writes a rule the rules engine compiles through the capability API (config.setUserRule).
 CrossOS license: MIT
+
+Source repository: pqrs-org/Karabiner-Elements
+Source commit: c7197aaf27345c11a0d1e4bf9ddad0c9020ae387
+Source file: src/apps/EventViewer/src/View/CaptureInputEventsView.swift:15-32 and src/apps/EventViewer/src/View/CaptureActiveLabel.swift:16-49
+Original license: Unlicense (public domain dedication)
+Original copyright: No copyright reserved — the authors dedicated the work to the public domain
+CrossOS destination: app/frontend/src/controls/ObserveToggleControl.tsx and the .ctl-live / .ctl-live-dot / .ctl-stop rules in app/frontend/public/style.css
+Modification: structural port, no code copied. Three things transfer. (1) The running state is a role:.destructive control carrying stop.fill, not the idle button re-rendered: stopping a recorder is not the mirror of starting one, and a button that reads "start" beside a machine that is already recording is the failure this control exists to prevent. (2) The sign of a live recorder sits BESIDE the control that ends it, as a filled circle whose opacity breathes on a 2s cycle dimming to 0.35, updated at 1/30s and touching only the opacity so the label never moves with it. (3) A third state Karabiner treats as first-class: waiting, drawn still and dimmed, because the daemon is up and asked to capture but the device it needs is not accessible yet. Two deviations, both forced by the medium and both commented at the point they happen — SwiftUI's accessibilityReduceMotion becomes the reduced-motion block already in style.css, and SF Symbols become text glyphs.
+Reason for modification: the reference captures raw input events in a standalone macOS app; CrossOS reads a recorder the daemon already runs and answers three questions from it (where observe mode stands, what a decision was, and what is being kept). The reference has no privacy mode to disclose, so the line naming what the daemon records is not a port of anything — it is the part a product that records every keystroke decision owes the person reading it. The waiting state also needs a retry affordance the reference does not, because the reference holds the capture state locally and this one does not.
+CrossOS license: MIT

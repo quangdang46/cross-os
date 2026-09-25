@@ -23,6 +23,11 @@
   --bg-sunken: #f5f5f7;
   --accent: #0a66ff;
   --danger: #c8102e;
+  /* "This machine is recording you right now." Deliberately not --accent: the
+     accent marks selection, and a selected row that happens to be on the
+     Observe page would read as live. 7.0:1 on --bg, so the 11px label clears
+     4.5:1 (Karabiner's capture label is .green for the same reason). */
+  --live: #166534;
   --sel-bg: #0a66ff; /* the active nav item: white on it clears 4.5:1 */
   --row-gap: 5px; /* mirrors the reference stack's spacing:5 */
   --radius: 5px;
@@ -40,6 +45,7 @@
     --bg-sunken: #2a2a2c;
     --accent: #5b9bff;
     --danger: #ff6f81;
+    --live: #4ade80;
     --sel-bg: #1f5fbf;
   }
 }
@@ -417,6 +423,78 @@ body {
   color: var(--text-dim);
   font-size: 11px;
   white-space: nowrap;
+}
+
+/* --- the live indicator ----------------------------------------------------
+ *
+ * A structural port of Karabiner-Elements' CaptureActiveLabel, which is the
+ * capture control's whole signal: a filled circle whose opacity breathes, in
+ * green, beside the control that stops the capture.
+ * (EventViewer/src/View/CaptureActiveLabel.swift:16-22 and :24-35 — a 2s cycle
+ * dimming to 0.35, and TimelineView at 1/30s updating ONLY the opacity so the
+ * label never moves.)
+ *
+ * The two deviations are both forced by the medium. SwiftUI reads
+ * accessibilityReduceMotion to freeze the cycle; here the reduced-motion block
+ * at the end of this file already collapses animation-duration and
+ * iteration-count to a single pass, so the same freeze arrives from CSS and
+ * the component needs no media query of its own. And the pulse is a keyframe
+ * rather than a per-frame opacity write, because 30 React renders a second to
+ * animate one property is the kind of cost this file's own motion comment
+ * exists to avoid.
+ *
+ * --stop is the other half of the port: CaptureInputEventsView.swift:16-19
+ * gives the running state a role:.destructive button with stop.fill rather
+ * than another start button, because stopping a recorder is not the mirror of
+ * starting one.
+ */
+
+.ctl-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--live);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ctl-live-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: ctl-live-pulse 2s ease-in-out infinite;
+}
+
+/* The waiting state is Karabiner's third one (CaptureWaitingForDeviceAccessLabel,
+ * CaptureActiveLabel.swift:38-49): the daemon is up and asked to capture, but
+ * the input device it needs is not accessible yet. It is dimmed and still —
+ * a dot pulsing next to a machine that has not started recording would be the
+ * one lie this whole control exists to avoid. */
+.ctl-live[data-state='waiting'] {
+  color: var(--text-dim);
+}
+
+.ctl-live[data-state='waiting'] .ctl-live-dot {
+  background: currentColor;
+  border: 1px solid currentColor;
+  animation: none;
+  opacity: 0.6;
+}
+
+@keyframes ctl-live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.ctl-stop {
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 .ctl-empty {
@@ -910,9 +988,13 @@ body {
 
 /* --- motion ----------------------------------------------------------------
  *
- * The only motion in the shell is a 120ms state change on a control the user
- * just operated, which is feedback rather than decoration. When reduced motion
- * is asked for, it stops: an instant state change carries the same meaning. */
+ * Two kinds of motion in the shell, and both are feedback rather than
+ * decoration. The first is a 120ms state change on a control the user just
+ * operated. The second is the live dot's 2s breathing pulse (see .ctl-live),
+ * which is the capture control's entire signal — a recorder with no visible
+ * sign of running is a recorder nobody turns off. When reduced motion is asked
+ * for, both stop: an instant state change carries the same meaning, and a dot
+ * that never pulses still says the machine is recording. */
 
 @media (prefers-reduced-motion: reduce) {
   *,
