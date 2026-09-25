@@ -59,6 +59,7 @@ func TestAllPagesDiscovered(t *testing.T) {
 		{"core.home", "home", 0},
 		{"core.profiles", "home", 10},
 		{"core.keyboard", "shortcuts", 20},
+		{"core.myRules", "shortcuts", 25},
 		{"core.windows", "shortcuts", 30},
 		{"core.switcher", "shortcuts", 35},
 		{"core.shortcuts", "shortcuts", 40},

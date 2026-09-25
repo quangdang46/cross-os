@@ -113,7 +113,7 @@ func TestRelaunchPreservesTheFrozenNavOrder(t *testing.T) {
 	// Order 0 as Home, and the id tiebreak sorts "core.home" first.
 	want := []string{
 		"core.home", "core.onboarding", "core.profiles",
-		"core.keyboard", "core.windows", "core.switcher", "core.shortcuts", "core.finder",
+		"core.keyboard", "core.myRules", "core.windows", "core.switcher", "core.shortcuts", "core.finder",
 		"core.activity", "core.observe",
 		"core.extensions", "core.schemaHelp", "core.safety", "core.about",
 	}

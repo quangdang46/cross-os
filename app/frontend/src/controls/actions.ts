@@ -12,7 +12,7 @@
 // closed is the whole point: the button says it has no command, and the
 // capability is never invoked.
 
-import type { ServiceApi } from '../types/controls'
+import type { ServiceApi, UserRuleRow } from '../types/controls'
 
 /**
  * What a row-scoped action carries. The ids here are the ROW's own — a plugin,
@@ -204,6 +204,18 @@ export const ACTION_COMMANDS: Record<string, ActionCommand> = {
   'plugin.enable': async (service, args) => service.TogglePlugin(rowId(args), true),
   'plugin.disable': async (service, args) => service.TogglePlugin(rowId(args), false),
   'shortcut.setEnabled': async (service, args) => service.SetRuleEnabled(rowId(args), args?.enabled === true),
+
+  // The two writes behind a rule a person wrote themselves. They were missing
+  // because no page declared them: RuleBuilderControl reached ServiceApi
+  // directly, so the write path worked and the page could not say it existed.
+  // A page that declares an action the registry cannot run is a button that
+  // runs nothing, and the action gate is right to refuse it — the fix is
+  // here, not on the page. The daemon answers SetUserRule with the id it
+  // derived from the chord and scope, and DeleteUserRule with the whole table.
+  'config.setUserRule': async (service, args) =>
+    service.SetUserRule(args?.value as UserRuleRow),
+  'config.deleteUserRule': async (service, args) =>
+    service.DeleteUserRule(String(args?.id ?? '')),
   'profile.apply': async (service, args) => service.ApplyProfile(rowId(args)),
 
   // The file-type catalog's two writes. Both answer with the WHOLE catalog, so

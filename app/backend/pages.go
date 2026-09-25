@@ -166,6 +166,14 @@ func ObservePage() pluginapi.UIContribution {
 // MatrixPage (10s, §7.2 Keyboard MVP 0): behavior-matrix content editing +
 // app overrides, owned by the s4i rules. Per-plugin config_schema forms are
 // jpr.2 scope; the global Shortcuts registry is jpr.6 scope (read-mostly).
+//
+// The keymap editor and the conflict resolver are declared HERE rather than on
+// a page of their own because they are about the same table this page already
+// shows: a person asking "why did Ctrl+Shift+C not copy" is asking about a
+// row above them. Both kinds were registered and unit-tested and reachable
+// from no daemon page at all (cross-os-1uu) — the e2e fixture declared them on
+// its own copy of a Shortcuts page, which is exactly how a gap like that stays
+// invisible behind a green suite.
 func MatrixPage() pluginapi.UIContribution {
 	return contrib("core.keyboard", "Keyboard", nav{group: "shortcuts", order: 20}, map[string]any{
 		"type":        "page",
@@ -173,8 +181,34 @@ func MatrixPage() pluginapi.UIContribution {
 		"controls": []any{
 			map[string]any{"kind": "matrix", "id": "matrix", "source": "core:behaviorMatrix", "immediate": true, "note": "Disabling a shortcut takes effect without restart."},
 			map[string]any{"kind": "overrides", "id": "overrides", "source": "core:appOverrides", "note": "App-specific overrides."},
+			map[string]any{"kind": "keymapEditor", "id": "editor", "note": "Press the chord you want, scope it to an app if you want it there only, and pick what it does."},
+			map[string]any{"kind": "conflictResolver", "id": "conflicts", "note": "Two rules claiming one chord. The winner is the one the keyboard will actually use."},
 		},
 	}, []string{"config.writeMatrix", "config.writeOverride"}, "true")
+}
+
+// RuleBuilderPage (cross-os-1uu): the rules a person wrote themselves.
+//
+// It is its own page because it is a different QUESTION from the Keyboard
+// page's. That page answers "which shortcuts do what" about the table the
+// daemon ships; this one answers "what did I make this do" about rules nobody
+// shipped, and a person who has written three of them wants them listed, not
+// buried under a matrix of eleven built-ins they never touched.
+//
+// The row is Karabiner's simple-modification row and the port is already
+// recorded: two ends, each editable on its own, an arrow between them, and a
+// destructive delete at the end (SimpleModificationsView.swift:47-98, in
+// third_party/Karabiner-Elements/ATTRIBUTION.md). What is new here is the
+// condition — IF this app — which the reference has no vocabulary for,
+// because its rows are global to a device.
+func RuleBuilderPage() pluginapi.UIContribution {
+	return contrib("core.myRules", "My Rules", nav{group: "shortcuts", order: 25}, map[string]any{
+		"type":        "page",
+		"description": "Rules you wrote. Each one is a chord, an optional app, and what it does.",
+		"controls": []any{
+			map[string]any{"kind": "ruleBuilder", "id": "rules", "note": "A rule you saved is compiled into the live decision path — it is not a draft."},
+		},
+	}, []string{"config.setUserRule", "config.deleteUserRule"}, "true")
 }
 
 // WindowsPage (nir.5, §7.2 MVP 1): §6.2 shortcut defaults (editable,
@@ -233,7 +267,7 @@ func CommandsPage() pluginapi.UIContribution {
 func CorePages() []pluginapi.UIContribution {
 	return []pluginapi.UIContribution{
 		HomePage(), ProfilesPage(),
-		MatrixPage(), WindowsPage(), SwitcherPage(), CommandsPage(),
+		MatrixPage(), RuleBuilderPage(), WindowsPage(), SwitcherPage(), CommandsPage(),
 		FinderPage(),
 		ActivityPage(), ObservePage(),
 		ExtensionsPage(), SchemaFormHelp(), SafetyPage(), AboutPage(),
