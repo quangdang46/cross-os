@@ -39,3 +39,17 @@ CrossOS destination: core/pkg/winlayout/layout.go (MoveToDisplay index arithmeti
 Modification: index arithmetic only; NSScreen enumeration NOT ported (darwin adapter bead owns it)
 Reason for modification: platform-agnostic core stays testable on any OS
 CrossOS license: MIT
+
+**Why Nudge/Helpers/AccessibilityHelper.swift has no block here** (recorded
+under cross-os-xxr, which asked for either a block or a reason). §9.11
+enumerates five copyable files and this file is one of them, so a block is
+owed if anything was taken from it. Nothing was: the AX move and resize calls
+it holds are written directly against the accessibility API in C and Go —
+platform/darwin/adapter/ax_bridge.c and platform/darwin/spike_c — not ported
+from that Swift helper. The four blocks above are the geometry primitives,
+which is what the NOTICE already said this repository informed.
+
+This also settles a disagreement between two tables in the plan. §9.10 listed
+six files for nudge and added DragSnapManager.swift; §9.11, which is the locked
+gate, lists five. The five-file list is the one that binds, and §9.10 now
+matches it.

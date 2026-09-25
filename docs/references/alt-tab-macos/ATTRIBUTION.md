@@ -3,9 +3,25 @@
 **No AltTab source is vendored.** Nothing in this directory is a copy, a
 transliteration or a partial extract of lwouis/alt-tab-macos, and no file
 anywhere in CrossOS is derived from its GPL-3.0 text. This entry exists only to
-record a LEARN-ONLY decision and to give §9.11's merge gate something to check
-against: a GPL source can never contribute code, and the blocks below are the
-evidence that none did. Each one names the rule that was read, the file and
+record a LEARN-ONLY decision, and the blocks below are the evidence that a GPL
+source contributed no code: each one names the rule that was read, the file and
+lines it was read from, and the CrossOS file that implements it in a different
+language against different contracts.
+
+**This directory is NOT under third_party/, and that is deliberate.** It sat
+there until cross-os-s6e, and the §9.11 merge gate could not pass it — twice,
+for reasons that have nothing to do with the decision it records. The gate
+requires LICENSE + NOTICE + ATTRIBUTION.md in every directory it scans, and
+this one carries no LICENSE on purpose: copying a GPL licence text into an MIT
+tree is the very thing the gate exists to prevent. Supplying one would not
+help, because the gate also rejects an `Original license:` line that names
+GPL, and every block below correctly names GPL-3.0. So the record and the gate
+were disagreeing about what a learn-only entry IS. The gate's model is "this
+directory holds something we copied or adapted"; a decision not to copy is a
+different thing, and it now lives where the gate does not look — still
+tracked, still reviewable, still the evidence. Moving it is what the licence of
+record requires rather than a way around the check: there is no source here to
+check. Each one names the rule that was read, the file and
 lines it was read from, and the CrossOS file that implements it in a different
 language against different contracts.
 

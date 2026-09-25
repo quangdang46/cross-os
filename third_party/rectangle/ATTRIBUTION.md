@@ -2,6 +2,7 @@
 
 Source repository: ramonwessels/rectangle
 Source commit: 12a9bc79f99abeb86297da3d7436b4489f920fa2
+Source file: Rectangle/PrefsWindow/SettingsViewController.swift:10,15,60,307-311 (the settings surface: one scrolling form of grouped rows, a closing About block carrying the version, and one control per setting)
 Original license: MIT
 Original copyright: Copyright (c) 2019-2026 Ryan Hanson
 
@@ -27,6 +28,15 @@ read as a native macOS pane inside a webview.
 
 No rectangle source is included; the LICENSE is recorded here for the
 structural reference only.
+Reason for modification: AppKit on macOS becomes React over a declared schema in
+a webview. What transfers is the SHAPE of a settings surface — grouped rows,
+a label beside each control, a version and an update line in one place — and
+what does not is AppKit's itself: its Auto Layout, its NSView hierarchy, its
+run loop. CrossOS's rows are not hardcoded at all, which is the one place this
+port departs from the reference's structure: the Go Host discovers the pages
+and their controls (§3.6c), so a new settings page is a Go change and never a
+UI change. §9.11 records rectangle as BEHAVIOR-only — the surface informed the
+layout, no code was taken from it.
 CrossOS license: MIT
 
 Source repository: ramonwessels/rectangle

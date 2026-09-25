@@ -161,12 +161,43 @@ EOF
   echo "b" > $GATE_SCRATCH/partial/b.c
 }
 
+# Two well-formed-enough blocks where the SECOND is missing exactly one
+# mandatory field. This is the case a per-FILE check cannot see: the first
+# block supplies every field, so grep -q finds each of the nine somewhere in
+# the file, and the old gate passed. It is how third_party/rectangle came to
+# carry three blocks and two complete ones — the real repository, found by
+# auditing every block in the tree.
+partialblock() {
+  mk_base partial
+  cat > $GATE_SCRATCH/partial/ATTRIBUTION.md <<'EOF'
+Source repository: example/partial
+Source commit: 0123456789abcdef0123456789abcdef01234567
+Source file: src/a.swift
+Original license: MIT
+Original copyright: Copyright (c) test
+CrossOS destination: app/
+Modification: none
+Reason for modification: n/a
+CrossOS license: MIT
+
+Source repository: example/partial-again
+Source commit: 0123456789abcdef0123456789abcdef01234567
+Source file: src/b.swift
+Original license: MIT
+Original copyright: Copyright (c) test
+CrossOS destination: app/
+Modification: none
+CrossOS license: MIT
+EOF
+}
+
 run_case "positive-mit-passes" positive 0
 run_case "unattributed-fails" unattributed 1
 run_case "gpl-fails" gpl 1
 run_case "no-license-fails" nolicense 1
 run_case "unpinned-fails" unpinned 1
 run_case "smuggled-gpl-header-fails" smuggledgpl 1
+run_case "partial-block-fails" partialblock 1
 run_case "spdx-only-fails" spdxonly 1
 run_case "partial-attribution-fails" partialattr 1
 

@@ -18,7 +18,27 @@
 #   4. Declared AND vendored licenses are never GPL/copyleft/no-license —
 #      the vendored files themselves are scanned, so a GPL header with a
 #      clean declaration still fails.
-#   5. All 9 mandatory fields present in every block.
+#   5. All 9 mandatory fields present in EVERY BLOCK (cross-os-baz). A
+#      per-FILE check is a check one well-formed block satisfies for the whole
+#      directory, which is how third_party/rectangle came to carry three blocks
+#      with only two complete and the gate reporting PASS.
+#
+# What this gate still CANNOT see, so nobody mistakes the above for coverage:
+#   - Whether an entry names the file it claims to. Nothing here reads a path
+#     out of a Source file: line and compares it to anything on disk. A block
+#     can name a file that does not exist and pass.
+#   - Whether the pinned commit EXISTS in the named repository, or whether that
+#     repository is the one the source actually came from. The pin is checked
+#     for SHAPE (40 hex) and nothing else. Verifying it is step one of the
+#     §9.11 merge gate and it is still a reviewer's job.
+#   - Whether the named file's licence matches the declared one.
+#   - Anything under a path other than third_party/. A learn-only record lives
+#     at docs/references/alt-tab-macos/ precisely because the gate's model is
+#     "this directory holds something we copied" and a decision not to copy is
+#     not that — see that directory's ATTRIBUTION.md.
+# Those are the same three gaps the count check always had. The per-block
+# assertion closes a fourth that was found by auditing the real tree, not by a
+# test: a block missing a field while a sibling block supplies it.
 #
 # Pure-Core PRs (no third_party changes) pass trivially with a note.
 set -euo pipefail
@@ -141,14 +161,52 @@ check_repo() {
     echo "$hit"
     return 1
   fi
-  # (a) All 9 mandatory fields present.
-  local field
-  for field in Source\ repository: Source\ commit: Source\ file: Original\ license: Original\ copyright: CrossOS\ destination: Modification: Reason\ for\ modification: CrossOS\ license:; do
-    if ! grep -q "^$field" "$dir/ATTRIBUTION.md"; then
-      echo "license-gate FAIL [$repo]: ATTRIBUTION.md missing mandatory field '$field'"
-      return 1
-    fi
-  done
+  # (a) All 9 mandatory fields present — PER BLOCK, not per file.
+  #
+  # A per-FILE check is a check that one well-formed block satisfies for the
+  # whole directory, which is how third_party/rectangle came to carry three
+  # blocks and two of them complete: block 1 named its file and its reason only
+  # inside another field's prose, and the gate passed. Nine fields per REUSED
+  # FILE is what §9.11 says, and a file is a block.
+  #
+  # The split is on ^Source repository:, which is what starts a block. Prose
+  # before the first one (the header) is not a block and is not counted, which
+  # is why the awk below reports "no Source repository block" rather than
+  # silently passing a file with none.
+  local blockreport
+  blockreport=$(awk '
+    BEGIN {
+      n = 0; f = 0; bad = 0; repo = ""; commit = ""
+      split("Source repository|Source commit|Source file|Original license|Original copyright|CrossOS destination|Modification|Reason for modification|CrossOS license", a, "|")
+    }
+    function close_block(   msg) {
+      if (n == 0) return
+      if (f < 9) {
+        printf "block %d (%s @ %s) carries %d of 9 mandatory fields\n", n, repo, (commit == "" ? "no commit" : commit), f
+        bad++
+      }
+    }
+    /^Source repository:/ {
+      close_block()
+      n++; f = 0; repo = $0; sub(/^Source repository:[[:space:]]*/, "", repo); commit = ""
+      f = 1
+      next
+    }
+    n > 0 {
+      if ($0 ~ /^Source commit:/) { commit = $0; sub(/^Source commit:[[:space:]]*/, "", commit) }
+      for (i = 1; i <= 9; i++) if (index($0, a[i] ":") == 1) f++
+    }
+    END {
+      close_block()
+      if (n == 0) { print "no Source repository block found in ATTRIBUTION.md"; bad++ }
+      exit (bad > 0) ? 1 : 0
+    }
+  ' "$dir/ATTRIBUTION.md" 2>/dev/null || true)
+  if [ -n "$blockreport" ]; then
+    echo "license-gate FAIL [$repo]: ATTRIBUTION.md is not nine-fields-per-block:"
+    echo "$blockreport"
+    return 1
+  fi
   echo "license-gate PASS [$repo]"
   return 0
 }
