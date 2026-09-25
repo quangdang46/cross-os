@@ -211,14 +211,31 @@ func (c *Core) handleStatus(_ json.RawMessage) (any, *ipc.RPCError) {
 	}, nil
 }
 
-// handlePluginList serves plugin.list: [{id,enabled,healthy}].
+// handlePluginList serves plugin.list: [{id,enabled,healthy,origin}].
 func (c *Core) handlePluginList(_ json.RawMessage) (any, *ipc.RPCError) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := make([]map[string]any, 0, len(c.order))
 	for _, id := range c.order {
+		// "disabled" is one of the three words PluginState documents and the
+		// one this handler never sent, so a row for a switched-off plugin
+		// carried a healthy chip beside the word Disabled and contradicted
+		// itself. The trial gate reads this same field (TrialControl sends it
+		// back as the healthy= claim), and a trial on a plugin that is off
+		// should fail closed — so the two uses agree rather than one of them
+		// being decoration.
+		//
+		// "degraded" is still unreachable while no Level-B supervisor runs and
+		// no plugin is a child process. That is honest: there is nothing to
+		// degrade. The builtins are compiled into this binary from the rule
+		// table, so they cannot crash and cannot be health-checked either, and
+		// origin says so where a person can act on it.
+		health := "healthy"
+		if !c.plugins[id] {
+			health = "disabled"
+		}
 		out = append(out, map[string]any{
-			"id": id, "enabled": c.plugins[id], "healthy": "healthy",
+			"id": id, "enabled": c.plugins[id], "healthy": health, "origin": "builtin",
 		})
 	}
 	return out, nil

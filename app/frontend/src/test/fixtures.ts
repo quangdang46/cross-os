@@ -549,8 +549,8 @@ function appRows(): AppRow[] {
 
 function pluginStates(): PluginState[] {
   return [
-    { ID: 'window-keys', Enabled: machine.extensions['window-keys'], Healthy: machine.extensions['window-keys'] ? 'healthy' : 'disabled' },
-    { ID: 'finder-actions', Enabled: machine.extensions['finder-actions'], Healthy: machine.extensions['finder-actions'] ? 'healthy' : 'disabled' },
+    { ID: 'window-keys', Enabled: machine.extensions['window-keys'], Healthy: machine.extensions['window-keys'] ? 'healthy' : 'disabled', Origin: 'builtin' },
+    { ID: 'finder-actions', Enabled: machine.extensions['finder-actions'], Healthy: machine.extensions['finder-actions'] ? 'healthy' : 'disabled', Origin: 'builtin' },
   ]
 }
 

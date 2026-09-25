@@ -417,6 +417,8 @@ export interface PluginState {
   ID: string
   Enabled: boolean
   Healthy: string
+  /** Where it came from. "builtin" is compiled into the daemon and cannot crash. */
+  Origin: string
 }
 
 /** The daemon's status payload. Version comes from the daemon, never a literal. */

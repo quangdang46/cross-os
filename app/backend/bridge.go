@@ -17,7 +17,13 @@ import (
 type PluginState struct {
 	ID      string
 	Enabled bool
-	Healthy string // "healthy" | "degraded" | "disabled"
+	Healthy string // "healthy" | "degraded" | "disabled" — the daemon now sends all three
+	// Origin says WHERE the plugin came from, which is what the Extensions page
+	// groups by. "builtin" means compiled into this binary from the rule table:
+	// it cannot crash, and there is no process to health-check. A registry that
+	// drew a built-in beside an installed one without saying which was which
+	// would be asking a person to tell them apart from the id.
+	Origin string
 }
 
 // Status is the Dashboard payload.

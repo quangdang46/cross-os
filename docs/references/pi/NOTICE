@@ -1,0 +1,17 @@
+No pi source is included in this repository, and none is vendored. This
+directory records a LEARN-ONLY decision and the evidence behind it.
+
+pi is MIT, which would pass the §9.11 gate if anything were copied from it.
+Nothing is, because §9.11's LOCKED table grades earendil-works/pi NO —
+"concepts/behavior/UX only — reimplement through CrossOS contracts" — the
+same grade rectangle and Amethyst carry, and the same reason: what CrossOS
+needed from it is the SHAPE of a resource registry, not its code.
+
+This directory lives here rather than under third_party/ for the same reason
+docs/references/alt-tab-macos does. The merge gate's model is "this directory
+holds something we copied or adapted", and a decision not to copy is a
+different thing. The two gates would otherwise disagree about what a learn-only
+entry is.
+
+The reference clone is at .tmp/research/pi, is not a dependency, is not built,
+and is not required to build, test or ship CrossOS.
