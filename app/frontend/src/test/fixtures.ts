@@ -869,6 +869,15 @@ const controlSurface: ServiceApi = {
       return { profile: profileID, enabled: Object.keys(machine.extensions).filter((id) => machine.extensions[id]) }
     }),
   Traces: () => answer('Traces', () => [...machine.decisions]),
+  // The erase empties the SAME list the read serves, and answers with what is
+  // left. A fixture that returned a fresh empty array while leaving
+  // machine.decisions alone would let a control that forgot to redraw from the
+  // reply pass — which is the whole error this binding exists to prevent.
+  TracesClear: () =>
+    answer('TracesClear', () => {
+      machine.decisions = []
+      return []
+    }),
   PluginMeta: () => answer('PluginMeta', metaRows),
   Apps: () => answer('Apps', appRows),
   UserRules: () => answer('UserRules', () => [...machine.rules]),

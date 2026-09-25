@@ -653,6 +653,19 @@ func (c *IPCCore) Traces() ([]TraceRow, error) {
 	return decodeList[TraceRow]("core.traces", raw)
 }
 
+// TracesClear implements Core via core.tracesClear. The reply is decoded
+// through the same path as the read's, so a clear cannot answer a shape the
+// page cannot draw — and a null result is refused rather than read as "emptied",
+// which is the failure mode that would tell a person their keystroke record is
+// gone when the daemon answered something the shell did not understand.
+func (c *IPCCore) TracesClear() ([]TraceRow, error) {
+	raw, err := c.call("core.tracesClear", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[TraceRow]("core.tracesClear", raw)
+}
+
 // PluginMeta implements Core via core.pluginMeta, in the daemon's registration
 // order.
 func (c *IPCCore) PluginMeta() ([]PluginMetaRow, error) {

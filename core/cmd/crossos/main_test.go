@@ -905,7 +905,7 @@ func TestEveryShellMethodIsRegistered(t *testing.T) {
 		// toggle has to be able to say which way round it is, and a shell that
 		// could only write would label it from the click. Plus the permissions
 		// deep link the first-run flow sends the person to.
-		"core.setObserve", "core.observeState", "permissions.openSettings",
+		"core.setObserve", "core.observeState", "core.tracesClear", "permissions.openSettings",
 	}
 	for _, name := range shellCalls {
 		if _, ok := reg[name]; !ok {

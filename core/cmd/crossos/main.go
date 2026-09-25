@@ -865,10 +865,15 @@ func (c *Core) methods() map[string]ipc.Handler {
 		// The second wave: the profile layer (w2-pagedata), the conflict
 		// verdict, structured traces, plugin manifest facts, the first-run
 		// wizard's derived state.
-		"core.profiles":        c.handleCoreProfiles,
-		"core.profileApply":    c.handleProfileApply,
-		"core.conflicts":       c.handleConflicts,
-		"core.traces":          c.handleTraces,
+		"core.profiles":     c.handleCoreProfiles,
+		"core.profileApply": c.handleProfileApply,
+		"core.conflicts":    c.handleConflicts,
+		"core.traces":       c.handleTraces,
+		// The erase behind the Observe page's clear button. Registered beside
+		// the read rather than on its own because a recorder that keeps every
+		// keystroke decision this session and cannot be emptied is a list
+		// nobody can get rid of — see pagedata.go's handleTracesClear.
+		"core.tracesClear":     c.handleTracesClear,
 		"core.pluginMeta":      c.handlePluginMeta,
 		"core.onboardingState": c.handleOnboardingState,
 		// The wizard's one write, beside its read: the derived steps cannot

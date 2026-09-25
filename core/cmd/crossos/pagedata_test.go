@@ -1176,6 +1176,116 @@ func TestTracesExposeTheRecordedDetail(t *testing.T) {
 	}
 }
 
+// TestTracesClearEmptiesTheRecorderAndSaysWhatIsLeft: the erase is a real one —
+// the read behind it agrees the list is gone, so a page cannot be showing a
+// decision the daemon has already dropped — and it answers with the list as it
+// stands rather than a count, so the page redraws from the recorder's own
+// account instead of waiting a poll to learn what survived.
+func TestTracesClearEmptiesTheRecorderAndSaysWhatIsLeft(t *testing.T) {
+	c := testCore(t)
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, true)
+	}
+	decide := func() {
+		if _, err := c.handleKeyEvent(json.RawMessage(
+			`{"keyCode":67,"modifiers":1,"appId":"com.apple.Finder","appMode":"native"}`)); err != nil {
+			t.Fatalf("keyEvent: %v", err)
+		}
+	}
+	decide()
+	decide()
+
+	res, rerr := c.handleTraces(nil)
+	if rows := decodeRows[wireTraceRow](t, res, rerr); len(rows) != 2 {
+		t.Fatalf("traces=%+v, want the two decisions just made", rows)
+	}
+
+	res, rerr = c.handleTracesClear(nil)
+	if rows := decodeRows[wireTraceRow](t, res, rerr); len(rows) != 0 {
+		t.Fatalf("the clear answered %d rows, want the emptied list itself: %+v", len(rows), rows)
+	}
+	// And the READ agrees. An erase that only the write's own answer reflects
+	// would still leave a poll serving the dropped decisions, and the page would
+	// put them straight back on screen.
+	res, rerr = c.handleTraces(nil)
+	if rows := decodeRows[wireTraceRow](t, res, rerr); len(rows) != 0 {
+		t.Fatalf("core.traces still serves %d rows after the clear: %+v", len(rows), rows)
+	}
+	// The recorder itself, read directly rather than through the page source, so
+	// the claim is about what was erased rather than about the handler reading
+	// its own write.
+	if kept := c.rec.Traces(); len(kept) != 0 {
+		t.Fatalf("the recorder still holds %d traces after the clear", len(kept))
+	}
+
+	// Clearing again is not an error and does not invent rows: the button is
+	// offered only over a non-empty list, and a verb that refused here would
+	// report a failure for a state the person cannot reach.
+	res, rerr = c.handleTracesClear(nil)
+	if rerr != nil {
+		t.Fatalf("clearing an already-empty recorder: %v", rerr)
+	}
+	if rows := decodeRows[wireTraceRow](t, res, rerr); len(rows) != 0 {
+		t.Fatalf("the second clear answered %d rows, want none: %+v", len(rows), rows)
+	}
+}
+
+// TestTracesClearIsRegistered: a handler the method table does not publish is a
+// handler every client reaches as "no such method" — safety.resume shipped
+// exactly that way, with every direct-call test passing.
+func TestTracesClearIsRegistered(t *testing.T) {
+	c := testCore(t)
+	if _, ok := c.methods()["core.tracesClear"]; !ok {
+		t.Fatal("the daemon never registers core.tracesClear, so no client can reach the erase")
+	}
+}
+
+// TestTracesClearAnswersTheSameRowsTheReadServes: the clear's reply and the
+// read's are built by one function, and this is what holds them to it — a
+// decision the page drew and a decision an exported copy names are the same
+// decision, so the focused app and the losing rules must read alike in both.
+func TestTracesClearAnswersTheSameRowsTheReadServes(t *testing.T) {
+	// Two daemons, each making the SAME decision. One is read and cleared, the
+	// other only read, so the clear's (empty) reply and the read's rows are the
+	// same handler's output on the same input — which is the property, asserted
+	// without a field-by-field diff that would only re-state the struct tags.
+	c := testCore(t)
+	for _, id := range builtin.BuiltinIDs {
+		c.registerBuiltin(id, true)
+	}
+	if _, err := c.handleKeyEvent(json.RawMessage(
+		`{"keyCode":67,"modifiers":1,"appId":"com.apple.Finder","appMode":"native"}`)); err != nil {
+		t.Fatalf("keyEvent: %v", err)
+	}
+	servedRes, servedErr := c.handleTraces(nil)
+	served := decodeRows[wireTraceRow](t, servedRes, servedErr)
+	if len(served) != 1 {
+		t.Fatalf("core.traces served %d rows, want the one decision just made: %+v", len(served), served)
+	}
+	res, rerr := c.handleTracesClear(nil)
+	if rerr != nil {
+		t.Fatalf("tracesClear: %v", rerr)
+	}
+	// A reply that is not a []traceRow at all — a count, a null, a bare true —
+	// would decode as zero rows here and as zero rows on the page, which is how
+	// "cleared" and "the daemon is broken" end up drawing the same thing. So the
+	// reply is checked for its SHAPE, not only its length.
+	if _, ok := res.([]traceRow); !ok {
+		t.Fatalf("the clear answered %T, want the cleared rows themselves", res)
+	}
+	after := decodeRows[wireTraceRow](t, res, rerr)
+	if len(after) != 0 {
+		t.Fatalf("the clear answered %d rows: %+v", len(after), after)
+	}
+	// And the row the read served is well-formed in the fields an export copies
+	// — this is the "same handler" claim stated about the data a person pastes
+	// into a bug report, which is the only consumer of either verb.
+	row := served[0]
+	if row.Context.AppID == "" || row.Event.Keys == "" || row.Winner == "" {
+		t.Errorf("the served row lacks what an export copies: %+v", row)
+	}
+}
+
 // TestPluginMetaIsHonestWithoutAManifest: no manifest is loaded at runtime, so
 // there is no display name or version to report — the row says so instead of
 // the daemon prettifying a plugin id and stamping a version. The permissions are

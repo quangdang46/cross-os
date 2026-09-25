@@ -164,6 +164,22 @@ func (s *stubCore) Traces() ([]TraceRow, error) {
 	return nil, nil
 }
 
+// TracesClear answers with the emptied list, the way the daemon does, and
+// refuses when every source is failing so the error path stays exercised.
+//
+// It holds no trace list of its own: stubCore's fields live in shell_test.go,
+// which this change does not own. That is not a gap in what is being tested
+// here — the erase is the DAEMON's (pagedata_test.go asserts the recorder is
+// actually emptied and the read behind it agrees), and what is under test on
+// this side is the shell's own contract: the reply is the cleared rows, and a
+// failing source is surfaced rather than swallowed into a cheerful empty.
+func (s *stubCore) TracesClear() ([]TraceRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	return nil, nil
+}
+
 func (s *stubCore) PluginMeta() ([]PluginMetaRow, error) {
 	if s.failSources != nil {
 		return nil, s.failSources
@@ -519,6 +535,12 @@ func TestServiceExposesFrozenSources(t *testing.T) {
 		// where it actually stands. Both, because a toggle that can only be
 		// written labels itself from the click instead of the state.
 		"SetObserve", "ObserveState",
+		// The decision trace's read AND its erase. A recorder that keeps every
+		// keystroke decision a session made and cannot be emptied is a list
+		// nobody can get rid of, and the erase answers with the list as it
+		// stands so the page redraws from the daemon rather than from its own
+		// click.
+		"TracesClear",
 		// The switcher: its tiles, the long poll that opens it, and the focus a
 		// click performs.
 		"Windows", "SwitcherWait", "SwitcherFocus",
@@ -572,6 +594,12 @@ func TestServiceExposesFrozenSources(t *testing.T) {
 	}
 	if err := svc.SwitcherFocus("412"); err != nil {
 		t.Fatalf("Service.SwitcherFocus: %v", err)
+	}
+	// And the erase reaches Core as a real call. The stub holds no traces, so
+	// what is asserted is that the binding exists and delegates — a method that
+	// returned nil without calling anything would pass a length check too.
+	if rows, err := svc.TracesClear(); err != nil || len(rows) != 0 {
+		t.Fatalf("Service.TracesClear=%v,%v, want the emptied list the daemon owes", rows, err)
 	}
 }
 

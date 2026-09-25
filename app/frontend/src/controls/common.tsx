@@ -71,6 +71,17 @@ export function Toggle(props: {
   name: string
   checked: boolean
   disabled?: boolean
+  /**
+   * Why the box cannot be moved, for the window while it cannot.
+   *
+   * A disabled control that names an action and no reason reads as a control
+   * that is broken. Ported from Windhawk's ModCard.tsx:441-450, whose switch
+   * takes its own title explaining the block, so the box is never just greyed.
+   * A `title` attribute rather than a class: it needs no stylesheet rule, every
+   * existing caller is unaffected, and a caller that does not pass it renders
+   * no title at all.
+   */
+  reason?: string
   onToggle: (next: boolean) => void
 }): ReactElement {
   return (
@@ -80,6 +91,7 @@ export function Toggle(props: {
       checked={props.checked}
       disabled={props.disabled}
       aria-label={props.name}
+      title={props.reason}
       onChange={(event) => props.onToggle(event.currentTarget.checked)}
     />
   )

@@ -16,6 +16,27 @@
 // says which checks it wanted, the daemon says what they are, and anything the
 // page wanted and the daemon did not answer is named as unreported rather than
 // quietly missing.
+//
+// That last clause is the one this file is careful about, because "did not
+// answer" has three quite different causes and only one of them is the daemon's
+// to be reported about:
+//
+//   - It answered, and the answer left this id out. "Not checked" is the truth.
+//   - The read is still in flight. Nothing is known yet.
+//   - The read FAILED. Nothing is known, and nothing is coming.
+//
+// The first-run page is where a person decides whether they are finished, so
+// drawing a pending or a failed read as a row of findings tells them to wait
+// for an answer that is not on its way — and on a daemon that is down, to wait
+// for it indefinitely. The rows the daemon actually filled in are still drawn,
+// because those are facts; what is withheld is the verdict on everything the
+// daemon did not answer, which is replaced by one line saying that.
+//
+// The reference this follows is menumate's onboarding diagnosis: a check whose
+// state it cannot read carries NO verdict mark at all, rather than a red one
+// (App/UI/OnboardingView.swift:210-213, where `granted` is a Bool? and the icon
+// is drawn only when it is non-nil). A row with no mark is honest about not
+// knowing; a row with a mark is a claim about the machine.
 
 import type { ReactElement } from 'react'
 import type { ReadinessRow } from '../types/controls'
@@ -59,6 +80,20 @@ export function ChecklistControl(props: ControlProps): ReactElement {
   // and one row per installed plugin.
   const extra = reported.filter((row) => !declared.includes(row.id))
 
+  // Whether a read has LANDED, which is the only state in which a declared id
+  // the daemon left out is a fact about the daemon rather than about this page.
+  // A load in flight and a load that failed are both "no answer yet", and both
+  // render as no verdict rather than as a row of findings.
+  const landed = !readiness.loading && readiness.error === ''
+
+  // The line that stands in for the rows a read cannot produce yet. Said in
+  // words rather than left silent, because silence next to a list of verdicts
+  // reads as "those are all of them" — the missing checks become the checks
+  // that passed.
+  const noVerdictYet = readiness.error !== ''
+    ? 'The daemon was not read, so the checks it did not report have not been looked at. That is a gap in this answer, not a finding about this machine.'
+    : 'Asking the daemon now. The checks it has not answered for have not been looked at.'
+
   if (reported.length === 0 && declared.length === 0) {
     return (
       <ControlFrame
@@ -66,7 +101,11 @@ export function ChecklistControl(props: ControlProps): ReactElement {
         note={control.note}
         error={readiness.error}
       >
-        <EmptyState>The daemon reported no readiness checks.</EmptyState>
+        <EmptyState>
+          {landed
+            ? 'The daemon reported no readiness checks.'
+            : noVerdictYet}
+        </EmptyState>
         {readiness.loading ? <p className="ctl-value">Checking…</p> : null}
       </ControlFrame>
     )
@@ -82,17 +121,20 @@ export function ChecklistControl(props: ControlProps): ReactElement {
         {answered.map((id) => (
           <ReadinessLine key={id} row={rowFor(id)!} />
         ))}
-        {unreported.map((id) => (
-          <li className="ctl-item" key={`unreported-${id}`}>
-            <span className="ctl-chip">Not checked</span>
-            <span className="ctl-label">{humanize(id)}</span>
-            <span className="ctl-value">The daemon did not report on this one yet.</span>
-          </li>
-        ))}
+        {landed
+          ? unreported.map((id) => (
+              <li className="ctl-item" key={`unreported-${id}`}>
+                <span className="ctl-chip">Not checked</span>
+                <span className="ctl-label">{humanize(id)}</span>
+                <span className="ctl-value">The daemon did not report on this one yet.</span>
+              </li>
+            ))
+          : null}
         {extra.map((row) => (
           <ReadinessLine key={row.id} row={row} />
         ))}
       </ul>
+      {landed ? null : <p className="ctl-value">{noVerdictYet}</p>}
       {readiness.loading ? <p className="ctl-value">Checking…</p> : null}
     </ControlFrame>
   )

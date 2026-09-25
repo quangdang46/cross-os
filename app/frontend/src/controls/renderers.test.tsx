@@ -60,6 +60,10 @@ function daemon(over: Partial<ServiceApi> = {}): ServiceApi & { calls: string[] 
     Profiles: record('Profiles', [] as ProfileRow[]),
     ApplyProfile: record('ApplyProfile', {}),
     Traces: record('Traces', [] as TraceRow[]),
+    // The erase beside the read. Recorded by name for the same reason the read
+    // is: a control that emptied its own copy of the rows would look identical
+    // on screen, and only the call list tells the two apart.
+    TracesClear: record('TracesClear', [] as TraceRow[]),
     PluginMeta: record('PluginMeta', [] as PluginMetaRow[]),
     TogglePlugin: record('TogglePlugin', undefined),
     SetRuleEnabled: record('SetRuleEnabled', true),
@@ -828,6 +832,50 @@ describe('the decision pipeline', () => {
   it('says so when the recorder logged nothing', async () => {
     show(control, daemon())
     expect(await screen.findByText(/Nothing has been decided yet/)).toBeTruthy()
+  })
+
+  it('empties through the daemon rather than by throwing the rows away locally', async () => {
+    // The claim the whole erase rests on. A control that spliced its own array
+    // would draw exactly the same empty list and would be lying the moment the
+    // write failed, so this fake is STATEFUL: the rows come back from the read
+    // until the erase has happened, exactly as a real recorder keeps them. A
+    // control that emptied its own copy would therefore have to ignore the
+    // reload and still pass — so the reload is what this also pins.
+    let held: TraceRow[] = [TRACE]
+    const service = daemon({
+      Traces: () => {
+        service.calls.push('Traces')
+        return Promise.resolve(held)
+      },
+      TracesClear: () => {
+        service.calls.push('TracesClear')
+        held = []
+        return Promise.resolve(held)
+      },
+    })
+    show(control, service)
+    await screen.findByText(/com\.apple\.finder \(finder\)/)
+    fireEvent.click(
+      screen.getByRole('button', { name: /Clear recorded decisions/ }) as HTMLButtonElement,
+    )
+    await screen.findByText(/Nothing has been decided yet/)
+    expect(service.calls).toContain('TracesClear')
+    // And the list did not come back on the reload, which is the read half of
+    // the same claim.
+    expect(await service.Traces()).toEqual([])
+  })
+
+  it('offers no copy and no clear over an empty recorder', async () => {
+    // Karabiner disables both (InputEventHistoryView.swift:28,35) and the rule
+    // is worth pinning here too, because the sweep above only checks that a kind
+    // is not BLANK — it would pass a control offering two buttons that can only
+    // ever lie about an empty list.
+    show(control, daemon())
+    await screen.findByText(/Nothing has been decided yet/)
+    for (const name of [/Copy as JSON/, /Copy as TSV/, /Clear recorded decisions/]) {
+      const found = screen.getByRole('button', { name }) as HTMLButtonElement
+      expect(found.disabled, `${name} is disabled over an empty recorder`).toBe(true)
+    }
   })
 })
 

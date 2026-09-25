@@ -12,10 +12,12 @@
 // relative, "..", over the cap, or a rule table's unresolved "{finderDir}" is
 // refused with a typed error the appex can show, never acted on.
 //
-// finderMenuHandlers is deliberately not in methods() yet. Publishing the eight
-// methods is two lines in the map be-finderdata owns; until they are there
-// these handlers are reachable from a test and from nowhere else, which is the
-// dead-code case the note on methods() warns about.
+// finderMenuHandlers is the appex's method set, and methods() merges it in
+// through the one loop at the end of that map rather than copying the eight
+// names in beside it. A handler the map does not carry is the dead-code case
+// the note on methods() warns about, and a second spelling of the same names is
+// how a typo becomes a menu verb the appex can call and the daemon does not
+// answer.
 package main
 
 import (
@@ -61,17 +63,26 @@ type finderMenu struct {
 
 // handleFinderMenuEntries serves finder.menuEntries.
 //
-// The file types are the enabled rows of the daemon's catalog, so a settings
-// page that turns a type off removes it from the menu without either side
-// keeping its own list. A fresh catalog enables txt alone (newfile parity, and
-// filetype's own seed test pins it), so until a store is wired behind it the
-// New File submenu carries one row — that is the current catalog, not a menu
-// that failed to load.
+// The file types are the enabled rows of the CATALOG THE SETTINGS STORE HOLDS —
+// the same rows the Explorer page lists and writes — so switching a type on
+// there is what puts it in Finder's New submenu, and switching it off is what
+// takes it out. The catalog as it shipped is a different thing, and reading
+// filetype.Seeds() here answered from it: a fresh catalog enables txt alone, so
+// the submenu carried one row no matter what the person had done, and a type
+// they had just enabled never reached the menu they right-click. That is the
+// disagreement FinderRight's single-catalog rule exists to prevent — both ends
+// read one list by one set of ids, "避免「设置里的开关与右键菜单对不上」"
+// (MenuFeature.swift:5-6) — so this reads what the page writes.
+//
+// A store that has never been configured still hands back the seeds
+// (settings.Store.FileTypes), so a fresh daemon's submenu is unchanged: one
+// row, because that is the catalog, not a menu that failed to load.
 func (c *Core) handleFinderMenuEntries(_ json.RawMessage) (any, *ipc.RPCError) {
 	items := make([]findermenu.Item, 0, len(findermenu.Menu))
 	items = append(items, findermenu.Menu...)
-	fileTypes := make([]filetype.FileType, 0, len(filetype.Seeds()))
-	for _, ft := range filetype.Seeds() {
+	catalog := c.set.FileTypes()
+	fileTypes := make([]filetype.FileType, 0, len(catalog))
+	for _, ft := range catalog {
 		if ft.Enabled {
 			fileTypes = append(fileTypes, ft)
 		}
@@ -113,7 +124,7 @@ func (c *Core) handleFinderCreateFile(raw json.RawMessage) (any, *ipc.RPCError) 
 	if err != nil {
 		return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: err.Error()}
 	}
-	ext, rerr := finderFileType(params)
+	ext, rerr := finderFileType(c.set.FileTypes(), params)
 	if rerr != nil {
 		return nil, rerr
 	}
@@ -446,15 +457,24 @@ func absoluteSlash(p string) error {
 }
 
 // finderFileType resolves the ext a createFile was asked for against the
-// catalog. An ext the submenu never offered is refused rather than created:
-// the file would land with a name the user did not pick and cannot connect to
-// the menu entry that made it.
-func finderFileType(params map[string]json.RawMessage) (filetype.FileType, *ipc.RPCError) {
+// catalog the submenu was actually built from — the store's, the same rows
+// handleFinderMenuEntries serves. An ext the submenu never offered is refused
+// rather than created: the file would land with a name the user did not pick
+// and cannot connect to the menu entry that made it.
+//
+// The catalog is passed in rather than read from the seeds because these two
+// have to be the same list or neither works. Resolve against the seeds while
+// the menu serves the store and a type the person just switched on appears in
+// the submenu and is refused on the click — the submenu row that fails on
+// click. Resolve against the store and the two agree, because it is one list
+// with one set of enabled flags, which is the rule this whole file is a door
+// onto.
+func finderFileType(catalog []filetype.FileType, params map[string]json.RawMessage) (filetype.FileType, *ipc.RPCError) {
 	ext, err := stringParam(params, "ext")
 	if err != nil {
 		return filetype.FileType{}, &ipc.RPCError{Code: ipc.ErrBadParams, Message: err.Error()}
 	}
-	for _, ft := range filetype.Seeds() {
+	for _, ft := range catalog {
 		if ft.Ext == ext {
 			if !ft.Enabled {
 				return filetype.FileType{}, &ipc.RPCError{

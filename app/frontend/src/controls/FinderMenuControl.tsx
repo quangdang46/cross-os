@@ -95,16 +95,38 @@ export interface EditorEntry {
  * The Wails Service is the shell's single seam (types/controls.ts) and does not
  * carry this call yet, so the surface is declared here rather than reached for
  * by name. A missing binding is a REFUSAL in words, not a TypeError on a
- * settings page — the same treatment CreditsControl gives a source nothing
- * serves, because a control that reports "this build cannot" is a defect
+ * settings page — the same treatment the sibling Explorer list gives its own
+ * source, because a control that reports "this build cannot" is a defect
  * someone can go and fix, and a control that throws is a blank window.
  */
 /** The two calls this control needs, off the declared service surface. */
-function menuService(service: ServiceApi): Pick<ServiceApi, 'FinderMenu' | 'SetMenuItemEnabled'> {
-  return {
-    FinderMenu: () => service.FinderMenu(),
-    SetMenuItemEnabled: (id, enabled) => service.SetMenuItemEnabled(id, enabled),
-  }
+export interface FinderMenuService {
+  FinderMenu(): Promise<unknown>
+  SetMenuItemEnabled(id: string, enabled: boolean): Promise<unknown>
+}
+
+/**
+ * Narrows the seam, or returns null when this build carries none of it.
+ *
+ * It has to CHECK rather than build, and that is the whole content of the
+ * function. An earlier version assembled the two methods by reaching through to
+ * `service.FinderMenu` inside a closure — which always returned an object, so
+ * the "this build has no binding" branch below could never be taken, and the
+ * read it guarded still ran: `ctx.service.FinderMenu()` on a build that does
+ * not carry the call throws a TypeError, and that throw happens inside the
+ * effect the shared loader runs, which no error row catches. The page went
+ * blank instead of saying one sentence. A guard that cannot fail is not a
+ * guard, and the empty branch below is this control's real behaviour rather
+ * than dead code.
+ *
+ * The read is the thing being checked, and the write deliberately is not: the
+ * write goes through the action registry, whose commands are async, so a
+ * binding that is missing there rejects and the refusal is rendered like any
+ * other refused write.
+ */
+function menuService(service: ServiceApi): FinderMenuService | null {
+  const candidate = service as Partial<FinderMenuService>
+  return typeof candidate.FinderMenu === 'function' ? (candidate as FinderMenuService) : null
 }
 
 /**
@@ -272,8 +294,15 @@ export function FinderMenuControl(props: ControlProps): ReactElement {
     >
       {rows.length === 0 ? (
         <EmptyState>
-          The daemon served no menu items. These are the verbs Finder's right-click menu offers;
-          each one can be turned on or off here.
+          {/* "Served no items" and "did not answer" are the same shape on the wire
+              and completely different facts, so they do not get the same sentence.
+              A read that failed has told us nothing about the menu, and claiming
+              it served nothing is the control asserting a finding it did not
+              receive — the same silence-as-answer the readiness checklist beside
+              it on the first-run page refuses to draw. */}
+          {table.error
+            ? "The menu source did not answer, so nothing is shown here. These are the verbs Finder's right-click menu offers; each one can be turned on or off here."
+            : "The daemon served no menu items. These are the verbs Finder's right-click menu offers; each one can be turned on or off here."}
         </EmptyState>
       ) : (
         <ul className="ctl-list">

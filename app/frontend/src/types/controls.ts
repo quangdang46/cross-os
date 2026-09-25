@@ -523,6 +523,21 @@ export interface ServiceApi {
   Profiles(): Promise<ProfileRow[] | null>
   ApplyProfile(profileID: string): Promise<Record<string, unknown> | null>
   Traces(): Promise<TraceRow[] | null>
+  /**
+   * Empties the recorder and answers with the list as it stands afterwards —
+   * the erased one, not a count and not the previous read's rows.
+   *
+   * The reply is the whole point. A verb that answered "done" leaves the page
+   * showing the decisions it just erased until the next poll, which is several
+   * seconds during which the person who pressed the button is reading "cleared"
+   * over rows that are still there. The daemon's own account of what is left is
+   * what the page redraws from.
+   *
+   * A rejection here is a real failure and says so: a clear that could not
+   * reach the recorder, answered as a success, is a keystroke log the person
+   * believes they destroyed and that is still on disk.
+   */
+  TracesClear(): Promise<TraceRow[] | null>
   PluginMeta(): Promise<PluginMetaRow[] | null>
   Apps(): Promise<AppRow[] | null>
   UserRules(): Promise<UserRuleRow[] | null>

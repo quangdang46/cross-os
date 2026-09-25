@@ -194,6 +194,11 @@ type Core interface {
 	// Traces returns the recorded decisions (core.traces) as rows, oldest
 	// first and truncated to the tail the daemon keeps.
 	Traces() ([]TraceRow, error)
+	// TracesClear empties the recorder (core.tracesClear) and returns the list
+	// as it stands afterwards. Returning the list rather than a count is what
+	// lets the page redraw from the daemon's own account of what is left
+	// instead of waiting a poll to discover the erase landed.
+	TracesClear() ([]TraceRow, error)
 	// PluginMeta returns each registered plugin's manifest facts
 	// (core.pluginMeta) — permissions, load state, and the reason a fact is
 	// missing rather than a prettified guess.
@@ -627,6 +632,23 @@ func (a *App) Traces() ([]TraceRow, error) {
 		return nil, err
 	}
 	return sourceList(a, "Traces", rows), nil
+}
+
+// TracesClear empties the recorder and serves what is left.
+//
+// The failure is returned AND logged rather than answered with the rows the
+// last read produced. That distinction is the whole reason this is not the same
+// line as Traces: a clear that could not reach the daemon, answered with the
+// list the shell already had, would look exactly like a clear that worked —
+// and the person pressing it would be told their session's keystroke record is
+// gone while the recorder still holds it.
+func (a *App) TracesClear() ([]TraceRow, error) {
+	rows, err := a.core.TracesClear()
+	if err != nil {
+		a.log.Append("TracesClear: " + err.Error())
+		return nil, err
+	}
+	return sourceList(a, "TracesClear", rows), nil
 }
 
 // PluginMeta serves the plugin manifest facts the Plugins page shows.

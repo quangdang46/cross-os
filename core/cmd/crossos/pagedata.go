@@ -35,6 +35,7 @@ import (
 	"crossos/core/pkg/keyboard"
 	"crossos/core/pkg/pluginapi"
 	"crossos/core/pkg/profiles"
+	"crossos/core/pkg/record"
 	"crossos/core/pkg/safety"
 	"crossos/core/pkg/settings"
 	"crossos/core/pkg/winlayout"
@@ -1159,6 +1160,14 @@ func (c *Core) handleTraces(_ json.RawMessage) (any, *ipc.RPCError) {
 	if len(trs) > traceRowLimit {
 		trs = trs[len(trs)-traceRowLimit:]
 	}
+	return c.tracesAsRows(trs), nil
+}
+
+// tracesAsRows is the ONE place a recorded trace becomes a wire row. The read
+// and the clear both serve it, so a decision the page drew and a decision a
+// copied export names cannot disagree about which app was focused or which rule
+// lost.
+func (c *Core) tracesAsRows(trs []record.Trace) []traceRow {
 	out := make([]traceRow, 0, len(trs))
 	for _, tr := range trs {
 		row := traceRow{
@@ -1188,7 +1197,39 @@ func (c *Core) handleTraces(_ json.RawMessage) (any, *ipc.RPCError) {
 		}
 		out = append(out, row)
 	}
-	return out, nil
+	return out
+}
+
+// --- core.tracesClear ---
+
+// handleTracesClear serves core.tracesClear: it empties the recorder and answers
+// with the list as it stands afterwards, so the page never has to believe its own
+// write the way it would have to if the verb only refused and said "done".
+//
+// Port source: Karabiner-Elements, EventViewer/src/View/InputEventHistoryView.swift:30-35
+// — a clear button beside the copy menu, disabled while the list is empty. The
+// two halves of that are the point: the verb is a real erase of what the
+// recorder kept, and it is offered only when there is something to erase, so it
+// is not a button that can be pressed over an empty list.
+//
+// The answer is the CLEARED list rather than a count, and that is a decision
+// rather than an accident. A count leaves the page to re-read on its next poll
+// to learn what survived, and a poll is seconds away — long enough for the person
+// who pressed the button to read "cleared" over rows that are still on screen.
+// The list comes back so the page redraws from the daemon's own account of what
+// is left, which is the same rule handleSetObserve follows: the recorder is the
+// only thing that gets to say what it kept.
+func (c *Core) handleTracesClear(_ json.RawMessage) (any, *ipc.RPCError) {
+	c.rec.Clear()
+	trs := c.rec.Traces()
+	if len(trs) > traceRowLimit {
+		trs = trs[len(trs)-traceRowLimit:]
+	}
+	// The same rows handleTraces serves, built by the same code, so a decision
+	// cannot be drawn one way on the page and copied out of the export another.
+	// handleTraces' own loop is the one place this shape is written; a second
+	// copy here is a second thing to keep in step with the recorder.
+	return c.tracesAsRows(trs), nil
 }
 
 // --- core.pluginMeta ---

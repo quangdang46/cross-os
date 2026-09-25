@@ -270,6 +270,9 @@ func (s *Service) ApplyProfile(profileID string) (map[string]any, error) {
 // Traces serves the recorded decisions as rows.
 func (s *Service) Traces() ([]TraceRow, error) { return s.app.Traces() }
 
+// TracesClear empties the recorder and serves the list as it stands.
+func (s *Service) TracesClear() ([]TraceRow, error) { return s.app.TracesClear() }
+
 // PluginMeta serves the plugin manifest facts.
 func (s *Service) PluginMeta() ([]PluginMetaRow, error) { return s.app.PluginMeta() }
 

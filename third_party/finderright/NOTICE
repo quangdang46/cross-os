@@ -1,0 +1,11 @@
+No FinderRight source is included. The LICENSE is recorded here for the
+behaviour reference only.
+
+FinderRight is MIT. The project does not have a §9.11 row of its own, so the
+classification is taken from §9.10: "funny-dog/FinderRight | MIT (LICENSE
+verified in clone) | full dev workflow: New File + Copy Path +
+Terminal/Editor + Cut/Paste + Compress | 🟡 behavior" — behaviour and UX only,
+no code, which is the same grade RClick, MoreMenu and mac-finder-menu carry.
+
+The reference clone is at .tmp/research/FinderRight. It is not a dependency, is
+not built, is not vendored, and is not required to build, test or ship CrossOS.

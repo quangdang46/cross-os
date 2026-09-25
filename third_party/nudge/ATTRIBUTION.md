@@ -53,3 +53,13 @@ This also settles a disagreement between two tables in the plan. §9.10 listed
 six files for nudge and added DragSnapManager.swift; §9.11, which is the locked
 gate, lists five. The five-file list is the one that binds, and §9.10 now
 matches it.
+
+Source repository: mikusnuz/nudge
+Source commit: 57d1e6bcfd8acfe489ea84fb35564f49efcd3fef
+Source file: Nudge/UI/PreferencesWindow.swift:53-66 (a permission row whose glyph and whose explanatory text are a function of the state, not one picture for every state)
+Original license: MIT
+Original copyright: Copyright (c) Nudge contributors
+CrossOS destination: app/frontend/src/controls/ChecklistControl.tsx
+Modification: structural port, no code copied. The rule that transfers is that a check which has NOT been performed is not a failed check. The reference gives a permission row a glyph and a sentence that both change with the state, because a row drawn the same whether the answer is yes, no or not-yet tells a person to act on an answer nobody gave. CrossOS's readiness list drew "Not checked" for three genuinely different things — the daemon answered and left this id out, the read is still in flight, and the read FAILED — and on the first-run page, which is where a person decides whether they are finished, that told them to wait for an answer that was not coming.
+Reason for modification: language and medium port — SwiftUI row states become three separately-worded branches in a React renderer. The reference's poll-until-granted loop (AccessibilityHelper.swift:31-39) is NOT ported: it belongs to a process that can watch the permission itself, and the daemon here derives readiness per read, so the honest port is to say which of the three things happened rather than to fake a poll.
+CrossOS license: MIT
