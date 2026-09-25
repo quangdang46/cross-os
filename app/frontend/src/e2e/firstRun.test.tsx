@@ -28,10 +28,27 @@
 // step the shell used to flatten into a label. And finishing records a write:
 // the flag that ends onboarding is latched by CompleteOnboarding and nothing
 // else, so a wizard that merely re-read readiness could never have ended.
+//
+// AND THE WHOLE FLOW NOW RUNS ON THE PAGE IT STARTED ON. It used to walk to
+// Safety to resume the tap and back again to finish, so the one question this
+// file exists to answer — can a person set the machine up without leaving the
+// wizard — was never actually asked. The grant the wizard asks for happens in
+// System Settings, which is another application, so no bound call can make it:
+// the fixture supplies the switch the way it supplies a keypress further down
+// (grantAccessibility, press), and the whole of setup — Welcome through Finish
+// — happens with no nav click in it at all.
+//
+// That is not a cosmetic change to the test, it is what gives the last step
+// something real to wait for. The fixture leaves a read behind the grant, so
+// the FIRST readiness answer after the person comes back is honestly red — a
+// wizard that read once would report "not ready" about a permission they had
+// already given and send them round again. The assertions below are therefore
+// on the wait, not only on its result: the poll count moving, and the daemon's
+// own rows coming back green with nobody clicking a second time.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { failOn, machine, press, reset } from '../test/fixtures'
+import { failOn, grantAccessibility, machine, press, reset } from '../test/fixtures'
 
 // Replaces lib/service, the shell's only module that names the generated
 // bindings. Loaded through the factory rather than a top-level binding so the
@@ -114,17 +131,18 @@ describe('a fresh machine, from the first launch to the last decision', () => {
     expect(within(firstRun).getByText(/no rule or profile capability covers it yet/)).toBeTruthy()
 
     // --- 3. the System Settings step opens the pane, in one write ----------
-    await goTo('Welcome')
+    // The same wizard, re-read: `pane` is a fresh query over the page the
+    // reader is already on, so getting a handle back is not a nav click.
     const wizard = pane('Welcome to CrossOS')
     // A profile has been applied, so the daemon has derived the first THREE
     // steps done — welcome, the pick itself, and the per-extension step the pick
     // performed — and moved its own cursor on to the permission. The reader's
     // cursor is still where they left it: two cursors, two facts, both on screen.
-    expect(within(wizard).getAllByText('Done')).toHaveLength(3)
-    const waiting = within(wizard)
+    await waitFor(() => expect(within(wizard).getAllByText('Done')).toHaveLength(3))
+    const permission = within(wizard)
       .getAllByRole('listitem')
       .find((li) => li.textContent?.includes('Next up'))
-    expect(waiting?.textContent).toContain('Open System Settings')
+    expect(permission?.textContent).toContain('Open System Settings')
     fireEvent.click(within(wizard).getByRole('button', { name: /Open System Settings/ }))
     fireEvent.click(within(wizard).getByRole('button', { name: 'Open Settings' }))
 
@@ -151,18 +169,41 @@ describe('a fresh machine, from the first launch to the last decision', () => {
     fireEvent.click(within(wizard).getByRole('button', { name: 'verify' }))
     expect(await within(wizard).findByText(/0 checks of 4 ready/)).toBeTruthy()
 
-    // --- 4. the person grants the permission, and the tap comes back --------
-    await goTo('Safety')
-    fireEvent.click(await screen.findByRole('button', { name: 'Re-enable interception' }))
-    await waitFor(() => expect(machine.calls).toContain('Resume'))
+    // --- 4. the person grants it, out of this window, and the step waits ----
+    // The switch is in System Settings, so no bound call can throw it — the
+    // fixture supplies the grant exactly as it supplies the keypress in step 9,
+    // and leaves the one readiness read the daemon needs to reinstall its tap.
+    // The flow does not leave this page to make it happen.
+    grantAccessibility()
+    fireEvent.click(within(wizard).getByRole('button', { name: 'Next' }))
 
-    // --- 5. readiness is green, and the flow can finish ---------------------
-    await goTo('Welcome')
-    const finished = pane('Welcome to CrossOS')
-    expect(await within(finished).findByText('Every check is ready.')).toBeTruthy()
+    // The last step WAITS, and the wait is on screen while it runs: the poll
+    // count is the progress, the reference calls i.Progress() on every tick
+    // (task.go:63-76) for exactly that reason. A wizard that read once would
+    // never draw this line — it would have already told the reader the grant
+    // did not land. The wait runs on the shipped 1000ms cadence (await.go:30-56),
+    // which is why these two reads are the only ones in this file with a budget.
+    expect(
+      await within(wizard).findByText(/Waiting for the machine to catch up/, {}, { timeout: 5000 }),
+    ).toBeTruthy()
+    expect(await within(wizard).findByText(/no second click needed/, {}, { timeout: 5000 })).toBeTruthy()
+
+    // --- 5. readiness is green, and the flow can finish --------------------
+    // The verdicts are RE-READ, never re-derived: the wait refreshes and the
+    // daemon's own row moves its cursor to the end, which is the only thing
+    // that offers a finish at all.
+    await waitFor(() => expect(within(wizard).getAllByText('Done')).toHaveLength(5))
+    expect(within(wizard).getByText('Every check is ready.')).toBeTruthy()
     expect(within(pane('Readiness')).getAllByText('Ready')).toHaveLength(4)
 
-    fireEvent.click(within(finished).getByRole('button', { name: 'Finish setup' }))
+    // The page never changed. The nav's own answer to "where am I" is still the
+    // first-run page, which is the claim this flow used to fail: it reached the
+    // same end by walking to Safety and back, so "can a person finish without
+    // leaving the wizard" had never been put to the shell at all.
+    const stillHere = screen.getAllByRole('button').filter((b) => b.getAttribute('aria-current') === 'page')
+    expect(stillHere.map((b) => b.querySelector('.section-label')?.textContent)).toEqual(['Welcome'])
+
+    fireEvent.click(within(wizard).getByRole('button', { name: 'Finish setup' }))
     await waitFor(() => expect(machine.onboarded).toBe(true))
 
     // --- 6. the next load lands on Home -------------------------------------

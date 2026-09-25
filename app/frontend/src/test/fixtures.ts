@@ -374,7 +374,10 @@ export function failOn(method: string, why: string): void {
  * back from System Settings, 0 for a machine that has been sitting long enough
  * that the tap is already up. The default is 1 rather than 0 because a fixture
  * that made the grant instant would let a control that reads ONCE pass a test
- * whose whole claim is that reading once is not enough.
+ * whose whole claim is that reading once is not enough. TWO tests now make that
+ * claim — controls/wizardSettle.test.tsx on the wait itself, and the e2e golden
+ * path on the whole flow through the shell — so the lag is load-bearing off the
+ * wizard page as well as on it.
  */
 export function grantAccessibility(reads = 1): void {
   machine.interception = true
