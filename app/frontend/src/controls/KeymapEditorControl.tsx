@@ -191,6 +191,8 @@ export function KeymapEditorControl(props: ControlProps): ReactElement {
             ctx.note(reason)
           }}
           disabled={busy}
+          service={ctx.service}
+          note={ctx.note}
         />
         <SelectField
           label="Action"

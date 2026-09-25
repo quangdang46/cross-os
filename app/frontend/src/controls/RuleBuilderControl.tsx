@@ -207,6 +207,8 @@ export function RuleBuilderControl(props: ControlProps): ReactElement {
             ctx.note(reason)
           }}
           disabled={busy}
+          service={ctx.service}
+          note={ctx.note}
           label="AND press the shortcut"
         />
         <SelectField

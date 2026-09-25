@@ -30,6 +30,8 @@ import { useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from 'react'
 import type { ChordCapture } from '../types/controls'
 import { formatChord } from '../lib/format'
+import { beginRecording, endRecording } from '../lib/recording'
+import type { ServiceApi } from '../types/controls'
 
 /**
  * Named keys, in the spelling userrules.Keys serves. The DOM's `event.key` is
@@ -154,11 +156,39 @@ export interface ChordRecorderProps {
   onReject?: (reason: string) => void
   disabled?: boolean
   label?: string
+  /**
+   * The bound service, so the machine can be stood down for the duration of the
+   * recording. See lib/recording.ts — a chord pressed to record it would
+   * otherwise RUN the action it is bound to, because the daemon taps the
+   * keyboard below the webview where preventDefault cannot reach.
+   */
+  service?: ServiceApi
+  /** Reports something the person should know, in the shell's own voice. */
+  note?: (message: string) => void
 }
 
 export function ChordRecorder(props: ChordRecorderProps): ReactElement {
   const [recording, setRecording] = useState(false)
+  // Whether the machine was stood down. When it was not, the line under the
+  // button says the chord may also have fired — a recorder that silently cannot
+  // protect the desktop is worse than one that says so.
+  const [suspended, setSuspended] = useState(false)
   const label = props.label ?? 'Record a shortcut'
+
+  async function start(): Promise<void> {
+    // The label changes on the click, not after the round trip: a button that
+    // says "Record a shortcut" for a beat after you pressed it reads as a
+    // button that did not register.
+    setRecording(true)
+    if (props.service === undefined) return
+    const ok = await beginRecording(props.service, props.note ?? (() => {}))
+    setSuspended(ok)
+  }
+
+  async function stop(): Promise<void> {
+    setRecording(false)
+    if (props.service !== undefined) await endRecording(props.service, props.note ?? (() => {}))
+  }
 
   function press(event: ReactKeyboardEvent<HTMLButtonElement>): void {
     if (!recording) return
@@ -192,14 +222,18 @@ export function ChordRecorder(props: ChordRecorderProps): ReactElement {
         className="ctl-input"
         disabled={props.disabled}
         aria-pressed={recording}
-        onClick={() => setRecording(!recording)}
+        onClick={() => void (recording ? stop() : start())}
         onKeyDown={press}
-        onBlur={() => setRecording(false)}
+        onBlur={() => void stop()}
       >
         {recording ? 'Press the shortcut…' : label}
       </button>
       {recording ? (
-        <span className="ctl-value">Recording. Press the keys you want.</span>
+        <span className="ctl-value">
+          {suspended
+            ? 'Recording. CrossOS will show what the shortcut would do rather than doing it, until you stop.'
+            : 'Recording. Press the keys you want.'}
+        </span>
       ) : props.value && props.value.key !== '' ? (
         <span className="ctl-chip">{renderChord(props.value)}</span>
       ) : null}
