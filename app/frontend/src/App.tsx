@@ -62,6 +62,13 @@ interface Page {
   ID: string
   Title: string
   Group: string
+  // Symbol is the mark the daemon chose for the SECTION this page belongs to.
+  // It is a property of the section and not of the page, which is why fourteen
+  // pages in one group all carry the same one — and why the shell keeps no map
+  // from a group name to a picture. The vocabulary is the daemon's, and a shell
+  // that hardcoded it would be a second place a section could be renamed with
+  // the mark left behind.
+  Symbol: string
   Order: number
   FirstRun: boolean
   Schema: unknown
@@ -84,6 +91,11 @@ interface PageSchema {
 // order would be a second answer to the same question.
 interface NavGroup {
   group: string
+  // The mark off the first page of the group. Taken from one page because the
+  // daemon declares it per section and every page in a section carries the same
+  // one; a group whose pages disagreed would be a daemon problem, and this
+  // reads the first rather than inventing a rule for which one wins.
+  symbol: string
   pages: Page[]
 }
 
@@ -92,7 +104,7 @@ function navGroups(pages: Page[]): NavGroup[] {
   for (const page of pages) {
     const open = groups.find((g) => g.group === page.Group)
     if (open) open.pages.push(page)
-    else groups.push({ group: page.Group, pages: [page] })
+    else groups.push({ group: page.Group, symbol: page.Symbol, pages: [page] })
   }
   return groups
 }
@@ -329,7 +341,25 @@ export default function App() {
               {/* A group the daemon left unnamed gets no cap rather than a
                   placeholder word: an empty header is noise, and the pages
                   below it still read as a list. */}
-              {group.group ? <h2 className="nav-group-title">{humanize(group.group)}</h2> : null}
+              {group.group ? (
+                <h2 className="nav-group-title">
+                  {/* Every section is identified by something other than the
+                      word alone. alt-tab-macos draws a symbol beside each of
+                      its four settings sections and leaves none blank
+                      (SettingsWindow.swift:549-554) — a sidebar where one
+                      section has a mark and the next does not reads as
+                      unfinished rather than as a choice. Decoration beside the
+                      word, never the signal: a screen reader gets the word
+                      alone, and the mark is a fixed width so the words line
+                      up down the rail. */}
+                  {group.symbol !== '' ? (
+                    <span className="nav-group-mark" aria-hidden="true">
+                      {group.symbol}
+                    </span>
+                  ) : null}
+                  {humanize(group.group)}
+                </h2>
+              ) : null}
               {group.pages.map((p) => (
                 <button
                   key={p.ID}

@@ -370,3 +370,15 @@ merging them would hide that; the tile grid is split out from both because it is
 the only one of the seven that is about PRESENTATION rather than about which
 window is picked, and it is the one that has to run without a window server. Every
 block above is a structural port. No AltTab source is vendored, for any of them.
+
+Source repository: lwouis/alt-tab-macos
+Source commit: 56891e08861e2d43fafb31d58a4c7fd9ba2289ec
+Source file: src/preferences/settings-window/SettingsWindow.swift:549-554 (sectionDefinitions — four sections, each carrying a title AND a symbol, none blank) and the same file's sidebar list that draws them
+Original license: GPL-3.0
+Original copyright: Copyright (c) lwouis and contributors
+CrossOS destination: core/pkg/pluginapi/api.go (UIContribution.Symbol), app/backend/pages.go (the nav struct and every call site), app/backend/host.go (Page.Symbol), app/frontend/src/App.tsx (the mark beside a section title) and app/frontend/public/style.css (.nav-group-mark)
+Modification: structural port, no code copied. One thing transfers: EVERY section in a settings window is identified by something other than its word. The reference builds a SettingsSectionDefinition per section carrying an id, a title and a symbol, and the sidebar draws that symbol beside the title — four sections, none of them blank. CrossOS's nav had a word and nothing else, which is a sidebar where a reader identifies sections by position and memory. The mark is now declared by the DAEMON rather than mapped in the shell, which is the part the reference's shape actually implies: a shell that hardcoded which word got which picture would be a second place a section could be renamed with the mark left behind, and the section's identity is not the shell's to own. A glyph and not an icon font, because the mark is not the identity and the identity is the section — the particular shape of it is a brand decision this audit is not making.
+
+Three things the reference does that are deliberately NOT ported. Its sections are fixed and listed in code, where CrossOS's are discovered and grouped by the value a page carries. Only ONE of its four sections registers search content, the rest pass nil (:551) — search is per-section and optional there, and CrossOS's search is per-control, so nothing was owed. And its sections are tabs with their own builders; CrossOS's pages are contributions, and a section is a run of pages that share a Group value.
+Reason for modification: language and medium port — AppKit and an NSImage symbol become a glyph string on a served field and one span in a webview. This is the substitute the audit settled on for the Sidebar/Settings IA, because the goal named Raycast, which is closed source and cannot be read at all.
+CrossOS license: MIT

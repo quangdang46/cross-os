@@ -225,6 +225,15 @@ type UIContribution struct {
 	// only thing that tells the nav where a page belongs; an empty group is
 	// a page that sits on its own.
 	Group string
+	// Symbol is the mark the shell draws beside a section title, so every
+	// section is identified by something other than the word alone. It sits
+	// here beside Group rather than in the page Schema because it is a property
+	// of the SECTION: fourteen pages in the "shortcuts" group declare the same
+	// mark, and repeating it per page would be fourteen places to forget.
+	//
+	// Empty is allowed and means no mark, which is how a plugin that has not
+	// chosen one still renders. Core pages all choose one.
+	Symbol string
 	// Order is a page's position in the nav. It is explicit rather than
 	// derived because the order is a product decision — "Home first" is not
 	// something a title comparison can be asked for — and a contribution is

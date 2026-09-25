@@ -166,6 +166,20 @@ body {
   color: var(--text-dim);
 }
 
+/* The mark beside a section title. Decoration beside the word and never the
+   signal — a screen reader gets the word alone, and a person who cannot
+   resolve the glyph still reads the section. It is a fixed width so every
+   title starts at the same column, which is the whole thing a mark earns its
+   place by: it identifies the section without moving the words. */
+.nav-group-mark {
+  display: inline-block;
+  width: 1.1em;
+  margin-right: 0.3em;
+  text-align: center;
+  color: var(--text-dim);
+}
+}
+
 .section {
   appearance: none;
   display: flex;

@@ -51,6 +51,30 @@ function inOrder(seen: string[], wanted: string[]): boolean {
 }
 
 describe('nav', () => {
+  it('marks every section beside its word, and never in place of it', async () => {
+    // alt-tab-macos draws a symbol beside each of its four settings sections
+    // and leaves none blank (SettingsWindow.swift:549-554). The mark is
+    // decoration: the word is what a screen reader gets, and a section the
+    // daemon gave no mark to still gets its heading — no placeholder glyph,
+    // no empty column pretending to be one.
+    serve([
+      page({ id: 'a', title: 'One', group: 'alpha', symbol: '◆' }),
+      page({ id: 'b', title: 'Two', group: 'beta', symbol: '' }),
+    ])
+    const { container } = await mount()
+    await settle()
+
+    const marks = Array.from(container.querySelectorAll('.nav-group-mark')).map((m) => m.textContent)
+    expect(marks, 'a section with a mark draws it').toEqual(['◆'])
+    // The section without one is still a section, titled and reachable.
+    const caps = Array.from(container.querySelectorAll('.nav-group-title')).map((h) => h.textContent)
+    expect(caps.length, 'both sections have headings').toBe(2)
+    // textContent is the raw word; the uppercase is the stylesheet's, which is
+    // why these two assertions are case-insensitive rather than matching caps.
+    expect(caps.join(' ')).toMatch(/alpha/i)
+    expect(caps.join(' ')).toMatch(/beta/i)
+  })
+
   it('groups the served pages under a cap per group, in served order', async () => {
     serve(SERVED)
     const { container } = await mount()

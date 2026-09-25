@@ -53,6 +53,7 @@ export function page(fields: {
   title: string
   group?: string
   order?: number
+  symbol?: string
   firstRun?: boolean
   description?: string
   controls?: unknown[]
@@ -61,6 +62,7 @@ export function page(fields: {
     ID: fields.id,
     Title: fields.title,
     Group: fields.group ?? '',
+    Symbol: fields.symbol ?? '',
     Order: fields.order ?? 0,
     FirstRun: fields.firstRun ?? false,
     Schema: {

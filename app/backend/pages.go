@@ -43,6 +43,19 @@ import (
 type nav struct {
 	group string
 	order int
+	// symbol is the mark the shell draws beside the section title. It lives
+	// here rather than in a map on the frontend because the section's identity
+	// is the daemon's to declare: a shell that hardcoded which word got which
+	// glyph would be a second place a section could be renamed without the
+	// picture following it.
+	//
+	// A glyph and not an icon font, deliberately. The goal's own rule puts
+	// Brand/Theme last — a mark is not the identity, and the identity is the
+	// section. alt-tab-macos draws an SF Symbol beside every one of its four
+	// settings sections (SettingsWindow.swift:549-554) and leaves none blank;
+	// what transfers is that EVERY section is identified, and the particular
+	// shape of the mark is CrossOS's to choose later.
+	symbol string
 }
 
 // contrib is a small builder for settings-page contributions.
@@ -53,6 +66,7 @@ func contrib(id, title string, at nav, schema map[string]any, actions []string, 
 		Location:   pluginapi.UILocationSettingsPage,
 		Title:      title,
 		Group:      at.group,
+		Symbol:     at.symbol,
 		Order:      at.order,
 		Schema:     raw,
 		Visibility: visibility,
@@ -64,7 +78,7 @@ func contrib(id, title string, at nav, schema map[string]any, actions []string, 
 // TRIAL countdown + confirm, ownership audit. Wired to 2ha Core semantics;
 // actions flow through the Capability API like any caller.
 func SafetyPage() pluginapi.UIContribution {
-	return contrib("core.safety", "Safety", nav{group: "advanced", order: 100}, map[string]any{
+	return contrib("core.safety", "Safety", nav{group: "advanced", order: 100, symbol: "⚙"}, map[string]any{
 		"type":             "page",
 		"description":      "Stop everything instantly, reset CrossOS state, review what CrossOS changed.",
 		"trialTimeoutNote": "Countdown uses the Core TRIAL timeout (safety.TRIALTimeout); the page never hardcodes it.",
@@ -81,7 +95,7 @@ func SafetyPage() pluginapi.UIContribution {
 // AboutPage (ymh.4, §7.2 MVP 0): version, MIT license, repository credits
 // generated from third_party ATTRIBUTION.md entries (never hand-maintained).
 func AboutPage() pluginapi.UIContribution {
-	return contrib("core.about", "About", nav{group: "advanced", order: 110}, map[string]any{
+	return contrib("core.about", "About", nav{group: "advanced", order: 110, symbol: "⚙"}, map[string]any{
 		"type":        "page",
 		"description": "CrossOS version, license, and the repositories it builds on.",
 		"controls": []any{
@@ -106,7 +120,7 @@ func AboutPage() pluginapi.UIContribution {
 // gone rather than left on the schema as a promise. installDisk keeps its
 // button and its fail-closed command for the same reason it keeps its place.
 func ExtensionsPage() pluginapi.UIContribution {
-	return contrib("core.extensions", "Extensions", nav{group: "advanced", order: 80}, map[string]any{
+	return contrib("core.extensions", "Extensions", nav{group: "advanced", order: 80, symbol: "⚙"}, map[string]any{
 		"type":          "page",
 		"description":   "Extensions installed on this machine. New installs enter trial; confirm on the Safety page.",
 		"noMarketplace": true,
@@ -123,7 +137,7 @@ func ExtensionsPage() pluginapi.UIContribution {
 // Open System Settings → Verify) + real-time intent trace. Confirm/rollback
 // links to the ymh.3 Safety surface; this page owns no TRIAL UI.
 func ActivityPage() pluginapi.UIContribution {
-	return contrib("core.activity", "Activity", nav{group: "activity", order: 60}, map[string]any{
+	return contrib("core.activity", "Activity", nav{group: "activity", order: 60, symbol: "◷"}, map[string]any{
 		"type":        "page",
 		"description": "What CrossOS did and why — every shortcut, rule, intent, and action.",
 		"controls": []any{
@@ -143,7 +157,7 @@ func ActivityPage() pluginapi.UIContribution {
 // of acting, which is what makes it safe to leave on while someone is
 // learning what their shortcuts do.
 func ObservePage() pluginapi.UIContribution {
-	return contrib("core.observe", "Observe", nav{group: "activity", order: 70}, map[string]any{
+	return contrib("core.observe", "Observe", nav{group: "activity", order: 70, symbol: "◷"}, map[string]any{
 		"type":        "page",
 		"description": "Watch what CrossOS sees. With Observe on, actions are shown instead of performed.",
 		"controls": []any{
@@ -175,7 +189,7 @@ func ObservePage() pluginapi.UIContribution {
 // its own copy of a Shortcuts page, which is exactly how a gap like that stays
 // invisible behind a green suite.
 func MatrixPage() pluginapi.UIContribution {
-	return contrib("core.keyboard", "Keyboard", nav{group: "shortcuts", order: 20}, map[string]any{
+	return contrib("core.keyboard", "Keyboard", nav{group: "shortcuts", order: 20, symbol: "⌘"}, map[string]any{
 		"type":        "page",
 		"description": "Which shortcuts do what, per app. Edits take effect immediately.",
 		"controls": []any{
@@ -202,7 +216,7 @@ func MatrixPage() pluginapi.UIContribution {
 // condition — IF this app — which the reference has no vocabulary for,
 // because its rows are global to a device.
 func RuleBuilderPage() pluginapi.UIContribution {
-	return contrib("core.myRules", "My Rules", nav{group: "shortcuts", order: 25}, map[string]any{
+	return contrib("core.myRules", "My Rules", nav{group: "shortcuts", order: 25, symbol: "⌘"}, map[string]any{
 		"type":        "page",
 		"description": "Rules you wrote. Each one is a chord, an optional app, and what it does.",
 		"controls": []any{
@@ -215,7 +229,7 @@ func RuleBuilderPage() pluginapi.UIContribution {
 // persisted via Config Manager) + snap zone editor. Rectangle is
 // BEHAVIOR-only precedent: zone geometry + defaults inform UX, no code.
 func WindowsPage() pluginapi.UIContribution {
-	return contrib("core.windows", "Windows", nav{group: "shortcuts", order: 30}, map[string]any{
+	return contrib("core.windows", "Windows", nav{group: "shortcuts", order: 30, symbol: "⌘"}, map[string]any{
 		"type":        "page",
 		"description": "Window shortcuts and snap zones. Conflicts resolve like any rule — winner + losers shown.",
 		"controls": []any{
@@ -231,7 +245,7 @@ func WindowsPage() pluginapi.UIContribution {
 // config_schema, writes validate + propagate per §3.8 (never direct file
 // writes from UI), actions permission-checked like any caller.
 func SchemaFormHelp() pluginapi.UIContribution {
-	return contrib("core.schemaHelp", "Plugin Settings", nav{group: "advanced", order: 90}, map[string]any{
+	return contrib("core.schemaHelp", "Plugin Settings", nav{group: "advanced", order: 90, symbol: "⚙"}, map[string]any{
 		"type":        "page",
 		"description": "Settings declared by extensions render here automatically.",
 		"renderer":    map[string]any{"tier": "mvp", "widgets": []string{"checkbox", "select", "slider", "button"}, "acceptance": "New extension with config_schema shows working UI with zero Core UI changes."},
@@ -246,7 +260,7 @@ func SchemaFormHelp() pluginapi.UIContribution {
 // Per-rule content editing stays in owning pages (10s matrix) — linked,
 // never duplicated.
 func CommandsPage() pluginapi.UIContribution {
-	return contrib("core.shortcuts", "Shortcuts", nav{group: "shortcuts", order: 40}, map[string]any{
+	return contrib("core.shortcuts", "Shortcuts", nav{group: "shortcuts", order: 40, symbol: "⌘"}, map[string]any{
 		"type":        "page",
 		"description": "Every shortcut in one place. Edit content on owning pages.",
 		"controls": []any{

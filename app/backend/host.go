@@ -16,10 +16,13 @@ import (
 
 // Page is one discovered settings-page contribution.
 type Page struct {
-	ID       string // "<pluginID>.<contribID>"
-	Title    string
-	Group    string // nav section, from the contribution
-	Order    int    // position in the nav
+	ID    string // "<pluginID>.<contribID>"
+	Title string
+	Group string // nav section, from the contribution
+	// Symbol is the mark the shell draws beside the section title, from the
+	// contribution. Empty means the contribution chose no mark.
+	Symbol   string
+	Order    int // position in the nav
 	Location pluginapi.UILocation
 	// FirstRun marks the page a fresh profile lands on. The nav needs it
 	// before it can choose an opening page, so the Host reads it here
@@ -87,6 +90,7 @@ func (h *Host) Register(reg *pluginapi.Registry) error {
 			ID:         u.ID,
 			Title:      u.Title,
 			Group:      u.Group,
+			Symbol:     u.Symbol,
 			Order:      u.Order,
 			FirstRun:   isFirstRun(u.Schema),
 			Visibility: u.Visibility,
