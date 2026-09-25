@@ -44,7 +44,7 @@
 // the drop is an explicit id list. No Swift was copied. §9.11: newfile is
 // MIT and recorded in third_party/newfile/ATTRIBUTION.md.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { ServiceApi } from '../types/controls'
 import { asList, asText, failedTo } from '../lib/wire'
@@ -289,6 +289,55 @@ export function FileTypeListControl(props: ControlProps): ReactElement {
     setWritten(null)
   }, [catalog.data])
 
+  /**
+   * Persist a typed field off a debounce, not per keystroke.
+   *
+   * Ported from newfile App/PreferencesView.swift:20-28, whose own comment
+   * records the reason this rule exists at all: "every edit used to
+   * JSON-encode the full list into UserDefaults synchronously from the row's
+   * onChange". A person typing a menu label is not asking the daemon to write
+   * once per letter, and a row that round-trips to the server on every
+   * keystroke both reorders under the cursor and races itself.
+   *
+   * Two differences from the reference, both forced by the verb rather than
+   * chosen. The reference debounces the WHOLE list because it persists the
+   * whole list; here SET_FILE_TYPE is a validated read-modify-write of ONE
+   * existing row, so the debounce is per row. And the reference's sink applies
+   * validOnly on the way to the store, which is the other half of its rule and
+   * is enforced here by extensionProblem refusing the write rather than by
+   * filtering the table — the daemon is the boundary that decides what may
+   * exist, and a shell-side filter would be a second opinion.
+   */
+  const pending = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+
+  useEffect(() => {
+    const timers = pending.current
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer)
+      timers.clear()
+    }
+  }, [])
+
+  function scheduleField(
+    row: FileTypeRow,
+    field: 'displayName' | 'baseName',
+    next: string,
+  ): void {
+    const key = `${rowId(row)}.${field}`
+    const arm = (): void => {
+      pending.current.set(
+        key,
+        setTimeout(() => {
+          pending.current.delete(key)
+          void saveField(row, field, next)
+        }, 300),
+      )
+    }
+    const existing = pending.current.get(key)
+    if (existing !== undefined) clearTimeout(existing)
+    arm()
+  }
+
   const rows = written ?? readRows(catalog.data)
   // The "Custom Types" divider goes above the first row the daemon did not
   // write, so the boundary between the two kinds is a line on screen rather
@@ -355,7 +404,14 @@ export function FileTypeListControl(props: ControlProps): ReactElement {
     field: 'displayName' | 'baseName',
     next: string,
   ): Promise<void> {
-    if (busy !== '') return
+    if (busy !== '') {
+      // A write is already in flight, so this one cannot land yet. Re-arm
+      // rather than return: a dropped edit here is a word the person was in
+      // the middle of typing, and the debounce is what makes that window
+      // reachable — typing, pausing 300ms, and clicking a toggle in between.
+      scheduleField(row, field, next)
+      return
+    }
     const name = rowName(row)
     const command = commandFor(SET_FILE_TYPE)
     if (!command) {
@@ -465,7 +521,7 @@ export function FileTypeListControl(props: ControlProps): ReactElement {
                     placeholder={derivedLabel(row.ext)}
                     disabled={busy !== ''}
                     onChange={(event) =>
-                      void saveField(row, 'displayName', event.currentTarget.value)
+                      scheduleField(row, 'displayName', event.currentTarget.value)
                     }
                   />
                   <input
@@ -474,7 +530,7 @@ export function FileTypeListControl(props: ControlProps): ReactElement {
                     value={row.baseName}
                     placeholder={row.ext === '' ? 'filename' : `.${row.ext}`}
                     disabled={busy !== ''}
-                    onChange={(event) => void saveField(row, 'baseName', event.currentTarget.value)}
+                    onChange={(event) => scheduleField(row, 'baseName', event.currentTarget.value)}
                   />
                   <button
                     type="button"

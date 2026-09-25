@@ -29,7 +29,7 @@
 // vocabulary (§3.6c), so a real one in a fixture would put a page id back into
 // src/ — the exact thing test/shell.test.tsx asserts is absent.
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ServiceApi } from '../types/controls'
 import { renderControl, type ControlContext } from './index'
@@ -344,5 +344,37 @@ describe('the file-type library', () => {
 
     expect(container.textContent ?? '').toMatch(/no binding/i)
     expect(container.querySelector('.ctl-error'), 'a refusal is not an error row').toBeNull()
+  })
+
+  it('persists a typed field off a debounce, not once per letter', async () => {
+    // Ported from newfile App/PreferencesView.swift:20-28, whose own comment
+    // records the rule: every edit used to encode and write synchronously from
+    // the row's onChange. A person typing a label is not asking the daemon to
+    // write once per letter.
+    const { act } = await import('@testing-library/react')
+    vi.useFakeTimers()
+    try {
+      const svc = daemon({ rows: [row()] })
+      show(svc)
+      await turn()
+
+      const field = screen.getByLabelText('Menu label for New Markdown')
+      for (const text of ['N', 'Ne', 'New Markdow', 'New Markdown 2']) {
+        fireEvent.change(field, { target: { value: text } })
+      }
+      expect(svc.writes.length, 'no write before the debounce elapses').toBe(0)
+
+      await act(async () => {
+        vi.advanceTimersByTime(300)
+      })
+      await turn()
+      expect(svc.writes.length, 'four keystrokes, one write').toBe(1)
+      expect(
+        (svc.writes[0] as { displayName: string }).displayName,
+        'and the write carries the LAST keystroke, not the first',
+      ).toBe('New Markdown 2')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
