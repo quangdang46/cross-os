@@ -144,7 +144,7 @@ export function ZoneEditorControl(props: ControlProps): ReactElement {
     setError('')
     setOutcome('')
     try {
-      const count = await ctx.service.SetZones(draft)
+      const count = (await ctx.service.SetZones(draft)) ?? draft.length
       setDraft(null)
       const said = `Saved ${plural(count, 'zone')}.`
       setOutcome(said)

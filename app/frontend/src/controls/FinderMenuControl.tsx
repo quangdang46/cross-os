@@ -99,14 +99,12 @@ export interface EditorEntry {
  * serves, because a control that reports "this build cannot" is a defect
  * someone can go and fix, and a control that throws is a blank window.
  */
-export interface FinderMenuService {
-  FinderMenu(): Promise<FinderMenuRow[]>
-}
-
-/** Narrows the seam, or returns null when this build carries no such call. */
-function menuService(service: ServiceApi): FinderMenuService | null {
-  const candidate = service as Partial<FinderMenuService>
-  return typeof candidate.FinderMenu === 'function' ? (candidate as FinderMenuService) : null
+/** The two calls this control needs, off the declared service surface. */
+function menuService(service: ServiceApi): Pick<ServiceApi, 'FinderMenu' | 'SetMenuItemEnabled'> {
+  return {
+    FinderMenu: () => service.FinderMenu(),
+    SetMenuItemEnabled: (id, enabled) => service.SetMenuItemEnabled(id, enabled),
+  }
 }
 
 /**
@@ -270,7 +268,7 @@ export function FinderMenuControl(props: ControlProps): ReactElement {
     <ControlFrame
       label={control.label ?? control.id}
       note={control.note}
-      error={writeError || describeError(table.error)}
+      error={writeError || (table.error ? describeError(table.error) : '')}
     >
       {rows.length === 0 ? (
         <EmptyState>

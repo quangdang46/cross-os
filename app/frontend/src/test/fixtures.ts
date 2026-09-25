@@ -794,6 +794,10 @@ const controlSurface: ServiceApi = {
       else machine.rules.push(stored)
       return stored.id
     }),
+  FinderMenu: () =>
+    answer('FinderMenu', () => [] as Record<string, unknown>[]),
+  SetMenuItemEnabled: (id, enabled) =>
+    answer('SetMenuItemEnabled', () => [] as Record<string, unknown>[]),
   DeleteUserRule: (id) =>
     answer('DeleteUserRule', () => {
       machine.rules = machine.rules.filter((entry) => entry.id !== id)

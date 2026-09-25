@@ -200,6 +200,14 @@ func (s *stubCore) SetShortcuts(shortcuts []map[string]any) (int, error) {
 	return len(shortcuts), nil
 }
 
+func (s *stubCore) FinderMenu() ([]map[string]any, error) {
+	return []map[string]any{}, nil
+}
+
+func (s *stubCore) SetMenuItemEnabled(id string, enabled bool) ([]map[string]any, error) {
+	return []map[string]any{}, nil
+}
+
 // The source stubs below stand in for the DAEMON's side of the two config
 // writers, so they carry the validation the bridge deliberately does not
 // duplicate: an unknown app/rule/zone id is rejected here and the bridge only

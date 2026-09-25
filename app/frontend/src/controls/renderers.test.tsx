@@ -63,6 +63,8 @@ function daemon(over: Partial<ServiceApi> = {}): ServiceApi & { calls: string[] 
     PluginMeta: record('PluginMeta', [] as PluginMetaRow[]),
     TogglePlugin: record('TogglePlugin', undefined),
     SetRuleEnabled: record('SetRuleEnabled', true),
+    FinderMenu: record('FinderMenu', [] as Record<string, unknown>[]),
+    SetMenuItemEnabled: record('SetMenuItemEnabled', [] as Record<string, unknown>[]),
     ...over,
   } as unknown as ServiceApi & { calls: string[] }
 }
@@ -329,6 +331,8 @@ const NEUTRAL: Record<string, unknown> = {
   GetStatus: null,
   TrialState: { plugin: '', state: 'none', remaining_ms: 0, timeout_ms: 0 },
   SetRuleEnabled: true,
+  FinderMenu: [],
+  SetMenuItemEnabled: [],
   SetShortcuts: 0,
   SetZones: 0,
   SetUserRule: '',

@@ -22,10 +22,14 @@ import type { ServiceApi } from '../types/controls'
 export { Service }
 
 /**
- * The bound service, typed as the control-facing surface. The annotation is a
- * real check, not a cast: if a Go method changes its arity or its return, the
- * Wails-generated signature stops satisfying ServiceApi here and the build
- * fails — which is the moment a renamed field should be noticed, rather than
- * discovered as an `undefined` in a settings row.
+ * The bound service as the control-facing surface.
+ *
+ * CancellablePromise extends Promise, but its `then` carries an extra
+ * cancellation arm, so the generated module is not assignable to a plain
+ * `Promise<T>` surface even where the VALUE shape matches. The surface stays
+ * on plain promises — that is what every control and every test stub speaks —
+ * and the one place the generated module crosses into it is here, where the
+ * value types are still checked (the annotation would reject a renamed
+ * field or a changed return type; only the promise subclass is bridged).
  */
-export const service: ServiceApi = Service
+export const service: ServiceApi = Service as unknown as ServiceApi

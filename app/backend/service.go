@@ -201,3 +201,11 @@ func (s *Service) SwitcherWait(timeoutMs int) (SwitcherTrigger, error) {
 
 // SwitcherFocus brings the tile the user pointed at to the front.
 func (s *Service) SwitcherFocus(windowID string) error { return s.app.SwitcherFocus(windowID) }
+
+// FinderMenu serves the Explorer's menu table.
+func (s *Service) FinderMenu() ([]map[string]any, error) { return s.app.FinderMenu() }
+
+// SetMenuItemEnabled toggles one Explorer menu row.
+func (s *Service) SetMenuItemEnabled(id string, enabled bool) ([]map[string]any, error) {
+	return s.app.SetMenuItemEnabled(id, enabled)
+}

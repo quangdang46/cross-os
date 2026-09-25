@@ -745,3 +745,22 @@ func (c *IPCCore) SwitcherFocus(windowID string) error {
 	_, err := c.call("core.switcherFocus", map[string]any{"window_id": windowID})
 	return err
 }
+
+// FinderMenu implements Core via core.finderMenu.
+func (c *IPCCore) FinderMenu() ([]map[string]any, error) {
+	raw, err := c.call("core.finderMenu", nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[map[string]any]("core.finderMenu", raw)
+}
+
+// SetMenuItemEnabled implements Core via core.setMenuItemEnabled. The reply is
+// the whole table, so the caller re-renders rather than patching one row.
+func (c *IPCCore) SetMenuItemEnabled(id string, enabled bool) ([]map[string]any, error) {
+	raw, err := c.call("core.setMenuItemEnabled", map[string]any{"id": id, "enabled": enabled})
+	if err != nil {
+		return nil, err
+	}
+	return decodeList[map[string]any]("core.setMenuItemEnabled", raw)
+}

@@ -77,7 +77,12 @@ function modifierText(row: ShortcutRow): string {
 /** The window table, editable in place. */
 function WindowShortcutTable(props: ControlProps): ReactElement {
   const { ctx } = props
-  const table = useResource(() => ctx.service.Shortcuts(), ctx.refreshToken, [], ctx.note)
+  const table = useResource(
+    async () => readShortcutRows(await ctx.service.Shortcuts()),
+    ctx.refreshToken,
+    [] as ShortcutRow[],
+    ctx.note,
+  )
   const [draft, setDraft] = useState<ShortcutRow[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -311,5 +316,13 @@ export function ShortcutListControl(props: ControlProps): ReactElement {
       ) : null}
       {table === 'all' ? <AllShortcutTable {...props} /> : <WindowShortcutTable {...props} />}
     </ControlFrame>
+  )
+}
+
+/** The wire carries nullable maps; a row is what the editor can render. */
+function readShortcutRows(value: unknown): ShortcutRow[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (row): row is ShortcutRow => row !== null && typeof row === 'object',
   )
 }

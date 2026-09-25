@@ -19,6 +19,7 @@ import { ButtonControl } from './ButtonControl'
 import { ChecklistControl } from './ChecklistControl'
 import { ConflictResolver } from './ConflictResolver'
 import { FileTypeListControl } from './FileTypeListControl'
+import { FinderMenuControl } from './FinderMenuControl'
 import { CreditsControl } from './CreditsControl'
 import { GateBadgeControl } from './GateBadgeControl'
 import { HomeSummaryControl } from './HomeSummaryControl'
@@ -78,6 +79,7 @@ const RENDERERS = new Map<string, ControlRenderer>([
   ['conflictResolver', ConflictResolver],
   ['credits', CreditsControl],
   ['fileTypeList', FileTypeListControl],
+  ['menuList', FinderMenuControl],
   ['gateBadge', GateBadgeControl],
   ['homeSummary', HomeSummaryControl],
   ['keymapEditor', KeymapEditorControl],

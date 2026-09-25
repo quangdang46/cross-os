@@ -104,6 +104,12 @@ type Core interface {
 	// SetShortcuts replaces the shortcut table after validation
 	// (config.setShortcuts): [{action, modifiers, key}].
 	SetShortcuts(shortcuts []map[string]any) (int, error)
+	// FinderMenu returns the Explorer's menu table (core.finderMenu) as the
+	// Finder page renders it.
+	FinderMenu() ([]map[string]any, error)
+	// SetMenuItemEnabled toggles one menu row (core.setMenuItemEnabled) and
+	// answers with the whole table, so the page re-renders from the reply.
+	SetMenuItemEnabled(id string, enabled bool) ([]map[string]any, error)
 	// Matrix returns the behavior-matrix rules (config.getMatrix). The
 	// Keyboard page renders whatever arrives; the shell never derives a row.
 	Matrix() ([]MatrixRow, error)
@@ -628,4 +634,28 @@ func (a *App) SwitcherFocus(windowID string) error {
 		return err
 	}
 	return nil
+}
+
+// FinderMenu serves the Explorer's menu table. Failures land in the UI log so
+// the page says the daemon could not be read rather than showing no rows as
+// if the menu were empty.
+func (a *App) FinderMenu() ([]map[string]any, error) {
+	rows, err := a.core.FinderMenu()
+	if err != nil {
+		a.log.Append("FinderMenu: " + err.Error())
+		return nil, err
+	}
+	return rows, nil
+}
+
+// SetMenuItemEnabled toggles one Explorer menu row. The daemon answers with
+// the whole table so the page re-renders from the reply instead of assuming
+// the write stuck.
+func (a *App) SetMenuItemEnabled(id string, enabled bool) ([]map[string]any, error) {
+	rows, err := a.core.SetMenuItemEnabled(id, enabled)
+	if err != nil {
+		a.log.Append("SetMenuItemEnabled " + id + ": " + err.Error())
+		return nil, err
+	}
+	return rows, nil
 }

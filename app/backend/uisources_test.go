@@ -460,6 +460,8 @@ func TestServiceExposesFrozenSources(t *testing.T) {
 		"UILogs", "CheckForUpdate", "ApplyUpdate", "PanicStop", "Resume",
 		"BeginTrial", "ConfirmTrial", "RollbackTrial", "SetRuleEnabled",
 		"Shortcuts", "SetShortcuts",
+		// The Explorer's menu table and its per-row toggle.
+		"FinderMenu", "SetMenuItemEnabled",
 		// The ten page sources.
 		"GetMatrix", "GetOverrides", "SetOverride", "GetZones", "SetZones",
 		"Commands", "PluginSchemas", "OwnershipAudit", "TrialState", "Readiness",

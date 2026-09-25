@@ -389,7 +389,7 @@ export function WizardControl(props: ControlProps): ReactElement {
   const lastIndex = steps.length - 1
   // Bumped by the verify click, which restarts the wait from a full budget.
   const [armed, setArmed] = useState(0)
-  const readReadiness = useCallback(() => ctx.service.Readiness(), [ctx.service])
+  const readReadiness = useCallback(async () => (await ctx.service.Readiness()) ?? [], [ctx.service])
   const askDaemon = useCallback(() => ctx.refresh(), [ctx.refresh])
   const settle = useSettle(readReadiness, askDaemon, lastIndex > 0 && open === lastIndex, armed)
 

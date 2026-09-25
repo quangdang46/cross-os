@@ -169,7 +169,7 @@ export function RuleBuilderControl(props: ControlProps): ReactElement {
     try {
       // The reply is the table as it now stands, so the list updates from the
       // write rather than from a second read that could disagree with it.
-      const left = await ctx.service.DeleteUserRule(id)
+      const left = (await ctx.service.DeleteUserRule(id)) ?? []
       setDraft(null)
       setChord(null)
       const said = `Removed ${id}. ${left.length} rule${left.length === 1 ? '' : 's'} left.`

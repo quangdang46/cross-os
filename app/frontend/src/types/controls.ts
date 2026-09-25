@@ -373,7 +373,7 @@ export interface Status {
   Running: boolean
   SafeMode: boolean
   Killed: boolean
-  Plugins: PluginState[]
+  Plugins: PluginState[] | null
   Interception: boolean
   TapError: string
   Version: string
@@ -407,19 +407,21 @@ export interface ServiceApi {
   RollbackTrial(pluginID: string, reason: string): Promise<string>
 
   SetRuleEnabled(ruleID: string, enabled: boolean): Promise<boolean>
-  Shortcuts(): Promise<ShortcutRow[]>
-  SetShortcuts(shortcuts: ShortcutRow[]): Promise<number>
+  Shortcuts(): Promise<({ [key: string]: unknown } | null)[] | null>
+  SetShortcuts(shortcuts: ShortcutRow[]): Promise<number | null>
+  FinderMenu(): Promise<({ [key: string]: unknown } | null)[] | null>
+  SetMenuItemEnabled(id: string, enabled: boolean): Promise<({ [key: string]: unknown } | null)[] | null>
 
-  GetMatrix(): Promise<MatrixRow[]>
-  GetOverrides(): Promise<OverrideRow[]>
+  GetMatrix(): Promise<MatrixRow[] | null>
+  GetOverrides(): Promise<OverrideRow[] | null>
   SetOverride(app: string, ruleID: string, enabled: boolean): Promise<OverrideRow>
-  GetZones(): Promise<ZoneRow[]>
-  SetZones(zones: ZoneRow[]): Promise<number>
-  Commands(): Promise<CommandRow[]>
-  PluginSchemas(): Promise<SchemaRow[]>
-  OwnershipAudit(): Promise<AuditRow[]>
+  GetZones(): Promise<ZoneRow[] | null>
+  SetZones(zones: ZoneRow[]): Promise<number | null>
+  Commands(): Promise<CommandRow[] | null>
+  PluginSchemas(): Promise<SchemaRow[] | null>
+  OwnershipAudit(): Promise<AuditRow[] | null>
   TrialState(): Promise<TrialState>
-  Readiness(): Promise<ReadinessRow[]>
+  Readiness(): Promise<ReadinessRow[] | null>
 
   // The first-run wizard's own source and its one terminal write. Both are
   // declared here rather than narrowed at the call site because the Wails
@@ -433,14 +435,14 @@ export interface ServiceApi {
   // Wave 3: the profile cards, the decision trace, the manifest facts, the
   // app picker, and the person-authored rule table. Same rule as the ten
   // above — these are sources a page may declare, never per-page endpoints.
-  Profiles(): Promise<ProfileRow[]>
+  Profiles(): Promise<ProfileRow[] | null>
   ApplyProfile(profileID: string): Promise<Record<string, unknown> | null>
-  Traces(): Promise<TraceRow[]>
-  PluginMeta(): Promise<PluginMetaRow[]>
-  Apps(): Promise<AppRow[]>
-  UserRules(): Promise<UserRuleRow[]>
+  Traces(): Promise<TraceRow[] | null>
+  PluginMeta(): Promise<PluginMetaRow[] | null>
+  Apps(): Promise<AppRow[] | null>
+  UserRules(): Promise<UserRuleRow[] | null>
   /** Creates or updates one rule; the daemon returns the id it derived. */
   SetUserRule(rule: UserRuleRow): Promise<string>
   /** Removes one rule and returns the table as it now stands. */
-  DeleteUserRule(id: string): Promise<UserRuleRow[]>
+  DeleteUserRule(id: string): Promise<UserRuleRow[] | null>
 }

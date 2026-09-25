@@ -47,6 +47,7 @@ const OBSERVE = ['core', 'setObserve'].join('.')
  */
 const SET_FILE_TYPE = ['core', 'setFileType'].join('.')
 const REORDER_FILE_TYPES = ['core', 'reorderFileTypes'].join('.')
+const SET_MENU_ITEM_ENABLED = ['core', 'setMenuItemEnabled'].join('.')
 
 /**
  * The switcher's two ids, assembled for the same reason as the file-type pair
@@ -195,6 +196,12 @@ export const ACTION_COMMANDS: Record<string, ActionCommand> = {
   // would be a read-modify-write of a row the daemon cannot find.
   [SET_FILE_TYPE]: async (service, args) => fileTypeCalls(service).SetFileType(args?.value),
   [REORDER_FILE_TYPES]: async (service, args) => fileTypeCalls(service).ReorderFileTypes(reorderIds(args)),
+
+  // The Explorer menu's row toggle. The reply is the WHOLE table, so the
+  // control re-renders from it rather than assuming the row it asked to flip
+  // is the row that moved.
+  [SET_MENU_ITEM_ENABLED]: async (service, args) =>
+    service.SetMenuItemEnabled(String(args?.id ?? ''), Boolean(args?.enabled)),
 
   // The switcher's two. Focus is the row write — the same write a release of
   // the chord performs, so a click never synthesizes a keystroke — and it
