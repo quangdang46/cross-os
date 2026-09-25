@@ -561,6 +561,14 @@ func (c *IPCCore) CompleteOnboarding() error {
 	return err
 }
 
+// OpenSystemSettings implements Core via permissions.openSettings. The handler
+// answers with {"pane","opened"} and refuses off darwin with a message worth
+// showing, so the error is returned as it came rather than flattened.
+func (c *IPCCore) OpenSystemSettings() error {
+	_, err := c.call("permissions.openSettings", nil)
+	return err
+}
+
 // The Wave 3 accessors below speak the method names core/cmd/crossos serves
 // for the profile cards, the decision trace, the plugin manifest facts, the app
 // list and the person-authored rule table.

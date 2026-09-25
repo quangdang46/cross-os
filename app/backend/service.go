@@ -218,6 +218,21 @@ func (s *Service) CompleteOnboarding() error {
 // decision trace, the plugin manifest facts, the app list the rule builder
 // picks from, and the person-authored rule table.
 
+// OpenSystemSettings opens the System Settings pane the Accessibility grant
+// is made in (permissions.openSettings).
+//
+// This is the first-run flow's one door onto another application. The wizard
+// can already derive whether the permission is granted — the daemon re-derives
+// that on every read — but the grant itself is made by hand, by a person, in a
+// window this app does not own. Without this method the step that names the
+// permission had no way to take the user there, and the step's button refused
+// in words on every build.
+//
+// It opens a window and nothing else. The step's verdict stays the daemon's,
+// so a successful open is never reported as a granted permission — that would
+// be the shell inventing an answer the daemon deliberately did not give.
+func (s *Service) OpenSystemSettings() error { return s.app.OpenSystemSettings() }
+
 // Profiles serves the profile cards.
 func (s *Service) Profiles() ([]ProfileRow, error) { return s.app.Profiles() }
 

@@ -243,19 +243,22 @@ describe('the action registry', () => {
     expect('permissions.openSettings' in ACTION_COMMANDS).toBe(true)
     expect('permissions.openSettings' in UNBOUND_ACTIONS).toBe(false)
 
-    // The write reaches the daemon through the seam. A service that carries the
-    // binding runs it, which is the whole difference between a button and an
-    // apology: the click arrives somewhere.
-    const service = { OpenSystemSettings: () => Promise.resolve({ opened: 'Accessibility' }) }
+    // The write reaches the daemon through the seam. Asserting the service
+    // still HAS the method proves nothing — the test put it there — so the
+    // claim is that the command ARRIVES: a spy, and a call count.
+    let reached = 0
+    const service = { OpenSystemSettings: () => { reached += 1; return Promise.resolve() } }
     await commandFor('permissions.openSettings')?.(service as unknown as ServiceApi)
-    expect(typeof (service as { OpenSystemSettings: unknown }).OpenSystemSettings).toBe('function')
+    expect(reached).toBe(1)
   })
 
   it('refuses the settings write in words when a build has no binding for it', async () => {
-    // The half that used to be the whole story, and is still owed: the Go Service
-    // carries no method for this yet, so a build whose Service does not either
-    // must say WHICH call is missing — not throw, and not report success. Bound
-    // and honest are separate properties; this is the second one.
+    // The half that used to be the whole story, and is still owed. The Go
+    // Service carries the method now, but a checkout whose generated bindings
+    // predate it genuinely lacks the call at runtime, and those are different
+    // files on different clocks. So a build without it must say WHICH call is
+    // missing — not throw, and not report success. Bound and honest are
+    // separate properties; this is the second one.
     const command = commandFor('permissions.openSettings')
     await expect(command?.(daemon())).rejects.toThrow(/OpenSystemSettings/)
   })

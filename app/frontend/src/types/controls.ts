@@ -431,6 +431,17 @@ export interface ServiceApi {
   // control never has to join two sources the daemon already joined.
   OnboardingState(): Promise<OnboardingRow>
   CompleteOnboarding(): Promise<void>
+  /**
+   * Opens the System Settings pane the Accessibility grant is made in
+   * (permissions.openSettings). The grant is made by hand, in another
+   * application, so this is the first-run flow's only door onto it.
+   *
+   * It opens a window and decides nothing: the step's verdict stays the
+   * daemon's re-derived readiness, and a resolved promise is never read as a
+   * granted permission. Off darwin the daemon refuses, and that refusal
+   * arrives here as a rejection carrying its own message.
+   */
+  OpenSystemSettings(): Promise<void>
 
   // Wave 3: the profile cards, the decision trace, the manifest facts, the
   // app picker, and the person-authored rule table. Same rule as the ten

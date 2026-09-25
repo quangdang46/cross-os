@@ -775,6 +775,18 @@ const controlSurface: ServiceApi = {
     answer('CompleteOnboarding', () => {
       machine.onboarded = true
     }),
+  // Opens the Accessibility pane and grants nothing. The grant is made by a
+  // person in another application, which is why the fixture's own comment
+  // called this a write the e2e clicks "to prove the button is a write rather
+  // than a refusal" — but it is a write to nothing the test can observe, and
+  // the step's verdict stays the daemon's re-derivation below. A stub that set
+  // machine.onboarded here would be a shell inventing a granted permission,
+  // which is the one thing this step must never do.
+  //
+  // The Go method answers with an error and nothing else, so the surface does
+  // too: returning the daemon's {opened, pane} would be the shell knowing more
+  // about the call's outcome than the Service publishes.
+  OpenSystemSettings: () => answer('OpenSystemSettings', () => undefined),
 
   Profiles: () => answer('Profiles', profileRows),
   ApplyProfile: (profileID) =>
@@ -871,21 +883,12 @@ const shellSurface = {
 }
 
 /**
- * The System Settings opener. It is NOT in ServiceApi and is not expected to be:
- * the daemon serves permissions.openSettings over IPC and app/backend/service.go
- * carries no method for it, so the Wails Service does not model it yet. The
- * action registry narrows for it and refuses in words when the binding is
- * absent — which is why this call exists here at all. A build that grows the Go
- * method runs the real one instead, and this entry is what the e2e first-run
- * test clicks to prove the button is a write rather than a refusal.
- */
-const onboardingSurface = {
-  OpenSystemSettings: () => answer('OpenSystemSettings', () => ({ opened: 'Accessibility' })),
-}
-
-/**
  * The whole bound surface, over one mutable machine. Stable identity: App.tsx
  * imports this object once, so every call in a test reads the state as it
  * stands at that moment rather than a snapshot taken when the module loaded.
+ *
+ * OpenSystemSettings used to live in a second surface of its own, declared
+ * outside ServiceApi on the grounds that the Wails Service did not model it.
+ * It does now, so it sits in controlSurface where the annotation checks it.
  */
-export const stub = Object.assign(controlSurface, shellSurface, switcherSurface, onboardingSurface)
+export const stub = Object.assign(controlSurface, shellSurface, switcherSurface)

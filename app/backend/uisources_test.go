@@ -275,6 +275,16 @@ func (s *stubCore) CompleteOnboarding() error {
 	return nil
 }
 
+// OpenSystemSettings accepts the call, for the same reason: a stub that refused
+// it would make a test assert a rejection the daemon only performs off darwin,
+// which is the daemon's own rule and not the shell's to invent.
+func (s *stubCore) OpenSystemSettings() error {
+	if s.failSources != nil {
+		return s.failSources
+	}
+	return nil
+}
+
 // sourceReader names one bridge call so the null and failure rules below can
 // be asserted once for every source instead of per method.
 type sourceReader struct {
@@ -469,9 +479,10 @@ func TestServiceExposesFrozenSources(t *testing.T) {
 		// the person-authored rule table.
 		"Profiles", "ApplyProfile", "Traces", "PluginMeta", "Apps",
 		"UserRules", "SetUserRule", "DeleteUserRule",
-		// The first-run wizard: its derived state, and the one write that
-		// latches it.
-		"OnboardingState", "CompleteOnboarding",
+		// The first-run wizard: its derived state, the one write that
+		// latches it, and the one door onto another application — the pane
+		// where the Accessibility grant is actually made.
+		"OnboardingState", "CompleteOnboarding", "OpenSystemSettings",
 		// The switcher: its tiles, the long poll that opens it, and the focus a
 		// click performs.
 		"Windows", "SwitcherWait", "SwitcherFocus",

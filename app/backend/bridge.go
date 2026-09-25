@@ -151,6 +151,15 @@ type Core interface {
 	// this returns only the error because the page re-reads OnboardingState for
 	// the row, and a write that failed is already an error worth surfacing.
 	CompleteOnboarding() error
+	// OpenSystemSettings opens the pane the Accessibility grant is made in
+	// (permissions.openSettings). There is exactly one pane to open, so the
+	// method takes no argument — a caller naming a different one is told so
+	// rather than quietly handed Accessibility, which would send someone to a
+	// screen that cannot fix their problem. The daemon refuses the call off
+	// darwin, and that refusal travels as an error for the wizard to show, so
+	// an unsupported platform says so rather than reporting a success that
+	// opened nothing.
+	OpenSystemSettings() error
 	// Profiles returns the profile cards (core.profiles): each bundle with the
 	// live rollup of its capabilities, so a card can say whether a click landed.
 	Profiles() ([]ProfileRow, error)
@@ -505,6 +514,23 @@ func (a *App) OnboardingState() (OnboardingRow, error) {
 func (a *App) CompleteOnboarding() error {
 	if err := a.core.CompleteOnboarding(); err != nil {
 		a.log.Append("CompleteOnboarding: " + err.Error())
+		return err
+	}
+	return nil
+}
+
+// OpenSystemSettings opens the pane the Accessibility grant is made in. The
+// first-run step that names the permission has nowhere to send the user
+// without it: the wizard can derive the verdict, but the grant itself is made
+// by hand, in another application, by a person.
+//
+// It decides nothing. The step's readiness is the daemon's own re-derivation
+// and stays that way — this call only opens a window, so a page that treated
+// a successful open as a granted permission would be inventing an answer the
+// daemon never gave.
+func (a *App) OpenSystemSettings() error {
+	if err := a.core.OpenSystemSettings(); err != nil {
+		a.log.Append("OpenSystemSettings: " + err.Error())
 		return err
 	}
 	return nil
