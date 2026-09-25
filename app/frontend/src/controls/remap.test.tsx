@@ -592,6 +592,32 @@ describe('the conflict resolver', () => {
 // --- the Explorer controls --------------------------------------------------
 
 describe('the Explorer controls', () => {
+  it('names the manifest it loaded, and says so when it loaded none', async () => {
+    // The metadata line and its EMPTY state, both ported from Windhawk's
+    // ModCard: the facts go on one line (ModMetadataLine singleLine) and the
+    // slot says NO DESCRIPTION in italics rather than sitting blank (:344-357).
+    // The empty half is the one that matters here, because the daemon really
+    // does have nothing for most of these rows — and a blank slot reads as a
+    // card that has nothing to say rather than one nobody has said anything to.
+    const svc = daemon({
+      PluginMeta: () =>
+        Promise.resolve([
+          { id: 'window-keys', name: 'Windows Keyboard', version: '1.2.0', permissions: [], loaded: true },
+        ]),
+    })
+    const status = {
+      Plugins: [
+        { ID: 'window-keys', Enabled: true, Healthy: 'healthy', Origin: 'builtin' },
+        { ID: 'finder-actions', Enabled: false, Healthy: 'disabled', Origin: 'builtin' },
+      ],
+      Interception: false,
+    } as unknown as Status
+    show({ kind: 'pluginList', id: 'plugins', label: 'Extensions' }, svc, status)
+    expect(await screen.findByText('Windows Keyboard 1.2.0 — loaded')).toBeTruthy()
+    // The row the daemon said nothing about says so, in its own words.
+    expect(screen.getByText('No manifest has been loaded for this one.')).toBeTruthy()
+  })
+
   it('registers all three kinds, so the page stops rendering placeholders', () => {
     const kinds = rendererKinds()
     for (const kind of ['packList', 'actionSettings', 'gateBadge']) {

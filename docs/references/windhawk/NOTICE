@@ -1,0 +1,19 @@
+No Windhawk source is included in this repository, and none is vendored. This
+directory records a LEARN-ONLY decision and the evidence behind it.
+
+Windhawk is GPL-3.0, so the §9.11 merge gate could never pass it twice over: it
+requires a LICENSE file in every directory it scans, and copying a GPL licence
+text into an MIT tree is the very thing that gate exists to prevent; and it
+rejects an `Original license:` line that names GPL, which is the accurate thing
+to write about this project. It therefore cannot sit under third_party/ at all.
+
+This directory lives here rather than under third_party/ for the same reason
+docs/references/alt-tab-macos does: the gate's model is "this directory holds
+something we copied or adapted", and a decision not to copy is a different
+kind of thing entirely.
+
+The reference clone is at .tmp/research/windhawk, is not a dependency, is not
+built, and is not required to build, test or ship CrossOS. It is the
+substitute this audit settled on for the Extensions Manager: the goal named
+Raycast, which is closed source and cannot be read at all, and Windhawk's
+panel is the closest extension manager in the tree that is.

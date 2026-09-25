@@ -17,8 +17,9 @@
 // row it belonged to is gone with it.
 
 import { useState } from 'react'
+import { useResource } from '../lib/useResource'
 import type { ReactElement } from 'react'
-import type { Control, PluginState } from '../types/controls'
+import type { Control, PluginMetaRow, PluginState } from '../types/controls'
 import { failedTo } from '../lib/wire'
 import { humanize } from '../lib/format'
 import { ControlFrame, EmptyState, Toggle } from './common'
@@ -48,6 +49,23 @@ function groupBy(plugins: PluginState[]): { origin: string; label: string; rows:
     label: ORIGIN_WORDS[origin] ?? `From ${origin}.`,
     rows: byOrigin.get(origin)!,
   }))
+}
+
+/**
+ * One line of facts, or the sentence that there are none.
+ *
+ * The facts are whatever the daemon loaded: a name and version when a manifest
+ * was read, and the reason it gave when one was not. The reason is quoted
+ * rather than prettified, because it is the daemon's own account of why a row
+ * is the shape it is.
+ */
+function metaLine(row: PluginMetaRow | undefined): string {
+  if (row === undefined) return 'No manifest has been loaded for this one.'
+  const named = [row.name, row.version].filter((part) => part !== '').join(' ')
+  if (named !== '') return `${named} — ${row.loaded ? 'loaded' : 'not loaded'}`
+  return row.reason !== undefined && row.reason !== ''
+    ? row.reason
+    : 'No manifest has been loaded for this one.'
 }
 
 export function PluginListControl(props: ControlProps): ReactElement {
@@ -91,14 +109,33 @@ export function PluginListControl(props: ControlProps): ReactElement {
   // from this list rather than restated: a registry that repeats a claim it
   // cannot verify is decoration, and the Enabled word beside the toggle is the
   // fact a person can act on.
+  // One line of facts per row, and a line that says so when there are none.
+  //
+  // Ported from Windhawk's ModCard, which draws its facts on a
+  // ModMetadataLine with singleLine set (:344-350) and falls back to an
+  // explicit italic "no description" rather than leaving the slot blank
+  // (:357). Both halves matter here, because the daemon genuinely has nothing
+  // to say for most of these rows today: the plugin-meta source loads no manifest, so
+  // name and version come back empty. A card that quietly carried no facts
+  // read as a card with none to carry, which is the same class of thing as the
+  // health chip — an empty slot is read as a fact.
+  const meta = useResource(() => ctx.service.PluginMeta(), ctx.refreshToken, [], ctx.note)
   const groups = groupBy(plugins)
+  const metaFor = (id: string): PluginMetaRow | undefined =>
+    (meta.data ?? []).find((row) => row.id === id)
 
   const detail: Control | null = focused
     ? { kind: 'pluginDetail', id: focused, label: `${humanize(focused)} — what it may do`, plugin: focused }
     : null
 
   return (
-    <ControlFrame label={control.label ?? control.id} note={control.note} error={error}>
+    <ControlFrame
+        label={control.label ?? control.id}
+        note={control.note}
+        // Both reads are named on the frame: a source that failed has to say so
+        // rather than leaving the row looking like it simply has no facts.
+        error={error || meta.error}
+      >
       {plugins.length === 0 ? (
         <EmptyState>No plugins are installed yet.</EmptyState>
       ) : (
@@ -118,6 +155,7 @@ export function PluginListControl(props: ControlProps): ReactElement {
                       {humanize(plugin.ID)}
                     </button>
                     <span className="ctl-value">{plugin.Enabled ? 'Enabled' : 'Disabled'}</span>
+                    <span className="ctl-value">{metaLine(metaFor(plugin.ID))}</span>
                     <Toggle
                       name={`${plugin.Enabled ? 'Disable' : 'Enable'} ${plugin.ID}`}
                       checked={plugin.Enabled}
