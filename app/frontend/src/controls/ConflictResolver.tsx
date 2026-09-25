@@ -1,4 +1,4 @@
-// Resolving a chord two rules both claim (bead w7-frontend-remap).
+// Resolving a chord two rules both claim (bead w7-frontend-remap, cross-os-1uu).
 //
 // A DUPLICATE CHORD IS A STATE, NOT AN ERROR. The rule engine already has an
 // answer for a chord two rules claim: rule.Resolve ranks the candidates and
@@ -14,14 +14,22 @@
 // in a resolver, you change which rule is eligible and the ranking does the
 // rest.
 //
-// Reading the verdict from the decision trace is deliberate. Traces() is the
-// bound surface, and each row carries the winner and the losers exactly as the
-// router recorded them — the same rule.Resolve call the conflicts source serves
-// for the live table. Where the trace has not seen the chord yet there is no
-// verdict to show, and the control says exactly that rather than picking a
-// winner itself; a resolver that invented its own ranking would be a second,
-// stale copy of the decision path, which is the failure this whole design
-// exists to prevent.
+// This used to read the verdict out of the decision trace, because the daemon's
+// own conflict source had no bridge. That was a workaround with two costs
+// worth naming, both now gone. It could only find a collision the person had
+// ALREADY pressed, because a trace row only exists after a decision — and the
+// collision worth warning about is the one that has not fired yet. And it could
+// only see the last 200 decisions, so a busy session lost the older ones. The
+// daemon has served Conflicts() the whole time: it compiles the candidate
+// group into a real event.Router and calls Decide in each declared app context
+// (core/cmd/crossos/pagedata.go, handleConflicts), so its winner is exactly what
+// the keyboard will pick, and it answers for a chord nobody has pressed. User-
+// authored rules participate, so a collision created in the rule editor above is
+// reported here too.
+//
+// It also carries what the trace path threw away: which plugin each claimant
+// belongs to, and its action in the same human words the matrix above uses. A
+// row here and a row there now call the same rule the same thing.
 //
 // No port is claimed for this control. The ranked-conflict idea is the daemon's
 // own, and the reference apps that were checked for it (Karabiner-Elements'
@@ -30,45 +38,38 @@
 
 import { useState } from 'react'
 import type { ReactElement } from 'react'
-import type { ChordContest, TraceRow } from '../types/controls'
+import type { ConflictRow } from '../types/controls'
 import { failedTo } from '../lib/wire'
 import { useResource } from '../lib/useResource'
 import { ControlFrame, EmptyState } from './common'
 import type { ControlProps } from './common'
 
 /**
- * The verdict for one chord, read out of the recorded decisions. The newest row
- * wins because a chord's ranking can change — a rule switched on, a scope
- * narrowed — and the most recent decision is the one the router would make now.
+ * One claimant in the words the matrix above already uses: its plugin, its
+ * action, and the rule id — so a person reading a collision here and the row
+ * for the same rule three controls up is reading the same words both times.
+ * The daemon supplies all three; the trace path this replaced carried the id
+ * alone, which is how "won by windows-keyboard.ctrl-c-copy" ended up being the
+ * whole sentence.
  */
-function verdictFor(traces: TraceRow[], keys: string): ChordContest | null {
-  const seen = traces.filter((trace) => trace.event.keys === keys && trace.winner !== '')
-  const latest = seen[seen.length - 1]
-  if (!latest) return null
-  return { keys, winner: latest.winner, losers: latest.losers }
+function claimText(row: ConflictRow, ruleID: string): string {
+  const claim = row.rules.find((r) => r.rule_id === ruleID)
+  if (!claim) return ruleID
+  return `${claim.action} (${claim.rule_id}, ${claim.plugin})`
 }
 
 export function ConflictResolver(props: ControlProps): ReactElement {
   const { control, ctx } = props
-  // The same bound source the pipeline control reads, through the shared hook,
-  // so this control adds no call of its own and a page showing both draws one
-  // set of decisions on one refresh cadence.
-  const decisions = useResource(() => ctx.service.Traces(), ctx.refreshToken, [], ctx.note)
+  // The daemon's own verdict, through the shared hook so this control opens no
+  // timer of its own and a page showing both draws on one refresh cadence.
+  const conflicts = useResource(() => ctx.service.Conflicts(), ctx.refreshToken, [], ctx.note)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
-  const traces = decisions.data ?? []
-
-  // One row per contested chord. The recorder serves oldest-first, so the first
-  // row for a chord decides where it sits in this list, while verdictFor reads
-  // the LAST row for it — the ranking a chord's verdict can change as rules
-  // are switched on and off, and the one the router would reach now.
-  const contested: ChordContest[] = []
-  for (const trace of traces) {
-    if (trace.losers.length === 0) continue
-    if (contested.some((row) => row.keys === trace.event.keys)) continue
-    const verdict = verdictFor(traces, trace.event.keys)
-    if (verdict) contested.push(verdict)
-  }
+  // One row per contested chord, already ranked: the source is the decision
+  // path's answer for each one, so there is nothing to re-derive and nothing
+  // to sort. A chord nobody has pressed is in here too — which is the whole
+  // reason the trace path was given up.
+  const contested: ConflictRow[] = conflicts.data ?? []
 
   async function switchOff(ruleID: string, keys: string): Promise<void> {
     setBusy(ruleID)
@@ -76,7 +77,7 @@ export function ConflictResolver(props: ControlProps): ReactElement {
     try {
       await ctx.service.SetRuleEnabled(ruleID, false)
       ctx.note(`${ruleID} is off, so ${keys} resolves to the rule that outranks it.`)
-      decisions.reload()
+      conflicts.reload()
       ctx.refresh()
     } catch (reason) {
       const message = failedTo(`Turning off ${ruleID}`, reason)
@@ -91,10 +92,26 @@ export function ConflictResolver(props: ControlProps): ReactElement {
     <ControlFrame
       label={control.label ?? control.id}
       note={control.note}
-      error={error || decisions.error}
+      error={error || conflicts.error}
     >
       {contested.length === 0 ? (
-        <EmptyState>No shortcut is claimed by two rules. Nothing to resolve.</EmptyState>
+        conflicts.error !== '' ? (
+          // "Nothing is contested" and "the daemon would not say" are different
+          // answers, and only the first one is good news. An empty list drawn
+          // over a failed read tells a person their collisions are resolved
+          // when nobody checked — so the refusal is the whole body here, and
+          // the error above it says which source.
+          <EmptyState>
+            The daemon did not answer, so this page cannot say whether anything is contested. Nothing
+            has been changed.
+          </EmptyState>
+        ) : (
+          <EmptyState>
+            No chord is claimed by two rules that are both still on. A rule you switch off stops
+            contesting anything, which is why this list can be empty while the matrix above still
+            shows a row.
+          </EmptyState>
+        )
       ) : (
         <>
           <p className="ctl-value">
@@ -105,8 +122,12 @@ export function ConflictResolver(props: ControlProps): ReactElement {
             {contested.map((row) => (
               <li className="ctl-item" key={row.keys}>
                 <span className="ctl-chip">{row.keys}</span>
-                <span className="ctl-label">won by {row.winner}</span>
-                <span className="ctl-value">lost to it: {row.losers.join(', ')}</span>
+                <span className="ctl-label">{claimText(row, row.winner)}</span>
+                <span className="ctl-value">
+                  {row.losers.length === 1
+                    ? `loses to it: ${claimText(row, row.losers[0])}`
+                    : `loses to it: ${row.losers.map((id) => claimText(row, id)).join(', ')}`}
+                </span>
                 <div className="ctl-actions">
                   {row.losers.map((loser) => (
                     // A button, not a switch. The action this view offers is

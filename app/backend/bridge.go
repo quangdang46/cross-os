@@ -171,6 +171,11 @@ type Core interface {
 	// whole point — a page that learns the state only from its own write can
 	// only ever label the belief.
 	ObserveState() (ObserveStateRow, error)
+	// Conflicts returns every chord two still-firing rules claim
+	// (core.conflicts), with the winner and the losers as the decision path
+	// itself resolves them. The user-authored table participates, so a
+	// collision created in the rule editor is reported here too.
+	Conflicts() ([]ConflictRow, error)
 	// Profiles returns the profile cards (core.profiles): each bundle with the
 	// live rollup of its capabilities, so a card can say whether a click landed.
 	Profiles() ([]ProfileRow, error)
@@ -570,6 +575,18 @@ func (a *App) ObserveState() (ObserveStateRow, error) {
 		return ObserveStateRow{}, err
 	}
 	return state, nil
+}
+
+// Conflicts serves the contested chords. An unreachable daemon leaves the editor
+// with nothing to show, which is the honest answer: a conflict list derived
+// anywhere else would be a second opinion about which rule wins.
+func (a *App) Conflicts() ([]ConflictRow, error) {
+	rows, err := a.core.Conflicts()
+	if err != nil {
+		a.log.Append("Conflicts: " + err.Error())
+		return nil, err
+	}
+	return rows, nil
 }
 
 // Profiles serves the profile cards. An unavailable capability keeps its

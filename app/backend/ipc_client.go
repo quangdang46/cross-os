@@ -574,6 +574,22 @@ func (c *IPCCore) SetObserve(on bool) error {
 	return err
 }
 
+// Conflicts implements Core via core.conflicts.
+func (c *IPCCore) Conflicts() ([]ConflictRow, error) {
+	raw, err := c.call("core.conflicts", nil)
+	if err != nil {
+		return nil, err
+	}
+	var out *[]ConflictRow
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("shell: ipc decode core.conflicts: %w", err)
+	}
+	if out == nil {
+		return nil, fmt.Errorf("shell: ipc core.conflicts: null result, want the contested chords")
+	}
+	return *out, nil
+}
+
 // ObserveState implements Core via core.observeState.
 func (c *IPCCore) ObserveState() (ObserveStateRow, error) {
 	raw, err := c.call("core.observeState", nil)

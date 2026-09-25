@@ -143,6 +143,8 @@ type stubCore struct {
 	// observing is the recorder's dry-run flag, held so ObserveState can read
 	// back what SetObserve wrote rather than echoing the argument at it.
 	observing bool
+	// conflicts is what the stub reports for core.conflicts.
+	conflicts []ConflictRow
 }
 
 func (s *stubCore) IsRunning() bool    { return s.running }

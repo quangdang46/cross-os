@@ -182,6 +182,35 @@ export const OBSERVE_MODES: Record<string, string> = {
   off: 'Off — nothing is recorded.',
 }
 
+/**
+ * One rule claiming a contested chord, in rank order (winner first).
+ *
+ * The action is the human name the same rule table renders elsewhere, so a
+ * row here and a row in the matrix call the same rule the same thing. The
+ * trace path this replaced carried the rule id alone, which is how
+ * "won by windows-keyboard.ctrl-c-copy" ended up being the whole sentence.
+ */
+export interface ConflictClaim {
+  rule_id: string
+  plugin: string
+  action: string
+}
+
+/**
+ * One chord two still-firing rules both claim (the conflicts source).
+ *
+ * Winner and Losers are the decision path's own verdict rather than
+ * something the shell worked out, so the editor cannot offer to keep a rule
+ * that actually wins — and the source answers for a chord nobody has
+ * pressed, which is the collision worth warning about.
+ */
+export interface ConflictRow {
+  keys: string
+  winner: string
+  losers: string[]
+  rules: ConflictClaim[]
+}
+
 export interface OnboardingRow {
   completed: boolean
   current_step: string
@@ -478,6 +507,13 @@ export interface ServiceApi {
    * ever label the belief.
    */
   ObserveState(): Promise<ObserveStateRow | null>
+  /**
+   * Every chord two still-firing rules both claim (the conflicts source), with the
+   * decision path's own winner and losers. Read rather than derived: it
+   * answers for a chord nobody has pressed yet, and the ranking it reports is
+   * the one the router will use.
+   */
+  Conflicts(): Promise<ConflictRow[] | null>
 
   // Wave 3: the profile cards, the decision trace, the manifest facts, the
   // app picker, and the person-authored rule table. Same rule as the ten

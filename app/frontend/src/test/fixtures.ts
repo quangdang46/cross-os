@@ -30,6 +30,7 @@ import type {
   AppRow,
   AuditRow,
   CommandRow,
+  ConflictRow,
   Control,
   MatrixRow,
   OnboardingRow,
@@ -300,6 +301,13 @@ interface Machine {
   observing: boolean
   recordMode: string
   /**
+   * Chords two rules both claim, as the decision path ranks them. Held as
+   * state so a test can put a collision here that nobody has pressed — which
+   * is the case a trace-derived path could not produce at all, and the one
+   * worth warning a person about.
+   */
+  conflicts: ConflictRow[]
+  /**
    * Readiness reads still to answer "the tap is not back" AFTER a grant landed.
    *
    * This is the gap the wizard's settle exists for, modelled rather than
@@ -352,6 +360,7 @@ function fresh(): Machine {
     interception: false,
     observing: false,
     recordMode: 'metadata-only',
+    conflicts: [],
     tapReinstallsIn: 0,
     extensions: { 'window-keys': false, 'finder-actions': false },
     rules: [],
@@ -651,6 +660,36 @@ export function press(chord: string, front = 'com.apple.finder'): void {
     { stage: 'action', detail: ranked[0]?.capability ?? bundled[0]?.action ?? 'no action' },
   ]
   machine.decisions = machine.decisions.filter((row) => row.event.keys !== chord)
+  // The router just resolved this chord, so the contest is a fact about the
+  // machine and not only about this decision. The daemon's own conflict source
+  // compiles the rule table independently of whether anyone has pressed
+  // anything — but a test that only ever presses would otherwise never see a
+  // chord reported, and the resolver is exactly the surface that must not wait
+  // for a keystroke.
+  if (losers.length > 0) {
+    machine.conflicts = [
+      ...machine.conflicts.filter((row) => row.keys !== chord),
+      {
+        keys: chord,
+        winner,
+        losers,
+        rules: [winner, ...losers].map((rule_id) => {
+          // A rule a person wrote belongs to no plugin, and saying so is the
+          // honest reading — the daemon's own claim carries the owning plugin
+          // for a builtin rule and nothing for a user-authored one, so the
+          // fixture resolves it the same way: a builtin's plugin when the
+          // matrix table names one, and 'yours' when the rule is not in it.
+          const written = machine.rules.find((r) => r.id === rule_id)
+          const builtin = bundled.find((r) => r.rule_id === rule_id) ?? matrixRows().find((r) => r.rule_id === rule_id)
+          return {
+            rule_id,
+            plugin: builtin?.plugin ?? 'yours',
+            action: written?.capability ?? builtin?.action ?? rule_id,
+          }
+        }),
+      },
+    ]
+  }
   machine.decisions.push({
     at: new Date().toISOString(),
     decision: winner === '' ? 'pass' : 'replace',
@@ -808,6 +847,12 @@ const controlSurface: ServiceApi = {
     }),
   ObserveState: () =>
     answer('ObserveState', () => ({ observe: machine.observing, mode: machine.recordMode })),
+
+  // A READ, never a derivation: the daemon compiles the contested rules into a
+  // real router and answers with what it would pick, so the editor is shown the
+  // ranking rather than making one. The fixture holds the answer so a test can
+  // place a collision nobody pressed.
+  Conflicts: () => answer('Conflicts', () => machine.conflicts),
 
   Profiles: () => answer('Profiles', profileRows),
   ApplyProfile: (profileID) =>

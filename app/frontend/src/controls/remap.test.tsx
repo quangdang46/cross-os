@@ -35,6 +35,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type {
+  ConflictRow,
   AppRow,
   MatrixRow,
   PluginMetaRow,
@@ -58,6 +59,7 @@ function daemon(over: Partial<ServiceApi> = {}): ServiceApi & { calls: string[] 
     GetStatus: null,
     GetMatrix: [] as MatrixRow[],
     Traces: [] as TraceRow[],
+    Conflicts: [] as ConflictRow[],
     PluginMeta: [] as PluginMetaRow[],
     Apps: [] as AppRow[],
     UserRules: [] as UserRuleRow[],
@@ -525,32 +527,44 @@ describe('the rule builder', () => {
 describe('the conflict resolver', () => {
   const RESOLVER: Control = { kind: 'conflictResolver', id: 'conflicts', source: 'core:conflicts' }
 
-  it('names the winner and the losers the router decided', async () => {
-    show(
-      RESOLVER,
-      daemon({
-        Traces: () =>
-          Promise.resolve([
-            trace({
-              event: { keys: 'Win+Left', source: 'keyboard', key_code: 0x25 },
-              winner: 'window.left',
-              losers: ['app.left'],
-            }),
-          ]),
-      }),
-    )
+  // One contested chord, as the daemon's own source serves it: the chord, the
+  // verdict, and every claimant with the plugin and human action the matrix
+  // above renders for the same rule. The resolver re-derives none of it.
+  function contest(over: Partial<ConflictRow> = {}): ConflictRow {
+    return {
+      keys: 'Win+Left',
+      winner: 'window.left',
+      losers: ['app.left'],
+      rules: [
+        { rule_id: 'window.left', plugin: 'win-wm', action: 'Left half' },
+        { rule_id: 'app.left', plugin: 'win-kb', action: 'Copy' },
+      ],
+      ...over,
+    }
+  }
+
+  it('names the winner and the losers in the words the matrix uses', async () => {
+    show(RESOLVER, daemon({ Conflicts: () => Promise.resolve([contest()]) }))
     expect(await screen.findByText('Win+Left')).toBeTruthy()
-    expect(screen.getByText('won by window.left')).toBeTruthy()
-    expect(screen.getByText('lost to it: app.left')).toBeTruthy()
+    // The plugin and the action travel with the row, so a person reading a
+    // collision here and the same rule three controls up is reading the same
+    // words both times. The trace path this replaced carried the id alone.
+    expect(screen.getByText('Left half (window.left, win-wm)')).toBeTruthy()
+    expect(screen.getByText('loses to it: Copy (app.left, win-kb)')).toBeTruthy()
+  })
+
+  it('reports a chord nobody has pressed, which a trace could not', async () => {
+    // The whole reason the verdict stopped coming from the recorder: a trace
+    // row only exists after a decision, so the collision worth warning about —
+    // the one that has not fired — was invisible.
+    const service = daemon({ Conflicts: () => Promise.resolve([contest()]) })
+    show(RESOLVER, service)
+    expect(await screen.findByText('Win+Left')).toBeTruthy()
+    expect(service.calls).not.toContain('Traces')
   })
 
   it('resolves a contest by switching the losing rule off, not by refusing', async () => {
-    const service = daemon({
-      Traces: () =>
-        Promise.resolve([
-          trace({ winner: 'window.left', losers: ['app.left'] }),
-        ]),
-    })
+    const service = daemon({ Conflicts: () => Promise.resolve([contest()]) })
     show(RESOLVER, service)
     fireEvent.click(
       await screen.findByRole('button', { name: 'Turn off app.left so Win+Left resolves to window.left' }),
@@ -558,14 +572,20 @@ describe('the conflict resolver', () => {
     await waitFor(() => expect(service.calls).toContain('SetRuleEnabled'))
   })
 
-  it('says so when nothing is contested, and when nothing is recorded', async () => {
+  it('says so when nothing is contested', async () => {
     show(RESOLVER, daemon())
-    expect(await screen.findByText(/No shortcut is claimed by two rules/)).toBeTruthy()
+    expect(await screen.findByText(/No chord is claimed by two rules/)).toBeTruthy()
+  })
 
-    cleanup()
-    // A trace with no losers is a decision, not a contest.
-    show(RESOLVER, daemon({ Traces: () => Promise.resolve([trace()]) }))
-    expect(await screen.findByText(/No shortcut is claimed by two rules/)).toBeTruthy()
+  it('names a refused source rather than calling it empty', async () => {
+    // "Nothing is contested" and "the daemon would not say" are different
+    // answers, and on this page the second one matters: a resolver that draws
+    // an empty list when the source failed is telling a person their
+    // collisions are resolved when nobody checked.
+    const service = daemon({ Conflicts: () => Promise.reject(new Error('the daemon refused')) })
+    show(RESOLVER, service)
+    expect(await screen.findByText(/the daemon refused/)).toBeTruthy()
+    expect(screen.queryByText(/No chord is claimed by two rules/)).toBeNull()
   })
 })
 

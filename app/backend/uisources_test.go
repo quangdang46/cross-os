@@ -297,6 +297,16 @@ func (s *stubCore) ObserveState() (ObserveStateRow, error) {
 	return ObserveStateRow{Observe: s.observing, Mode: "metadata-only"}, nil
 }
 
+// Conflicts answers with an empty table, which is what an honest stub says
+// when nothing contests anything — and the shape is the point, so a test can
+// hand one in that does.
+func (s *stubCore) Conflicts() ([]ConflictRow, error) {
+	if s.failSources != nil {
+		return nil, s.failSources
+	}
+	return s.conflicts, nil
+}
+
 // OpenSystemSettings accepts the call, for the same reason: a stub that refused
 // it would make a test assert a rejection the daemon only performs off darwin,
 // which is the daemon's own rule and not the shell's to invent.
@@ -504,7 +514,7 @@ func TestServiceExposesFrozenSources(t *testing.T) {
 		// The first-run wizard: its derived state, the one write that
 		// latches it, and the one door onto another application — the pane
 		// where the Accessibility grant is actually made.
-		"OnboardingState", "CompleteOnboarding", "OpenSystemSettings",
+		"OnboardingState", "CompleteOnboarding", "OpenSystemSettings", "Conflicts",
 		// Observe mode: the write that turns it on, and the read that says
 		// where it actually stands. Both, because a toggle that can only be
 		// written labels itself from the click instead of the state.

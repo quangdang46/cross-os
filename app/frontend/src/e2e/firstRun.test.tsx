@@ -290,7 +290,14 @@ describe('a fresh machine, from the first launch to the last decision', () => {
     // --- 10. and the contest is a state, not a save-time error --------------
     await goTo('Shortcuts')
     const conflicts = pane('Conflicts')
-    expect(await within(conflicts).findByText(/won by user\.2/)).toBeTruthy()
+    // The winner is now named the way the matrix names it — action, rule id,
+    // plugin — rather than as a bare id, because the resolver reads the
+    // daemon's conflict source instead of re-deriving one from the trace. The
+    // plugin is "yours" in the fixture: a person-authored rule belongs to no
+    // plugin, and saying so is better than inventing an owner for it.
+    await waitFor(() =>
+      expect(conflicts.textContent ?? '').toContain('(user.2, yours)'),
+    )
     expect(
       within(conflicts).getByRole('button', { name: 'Turn off user.1 so Ctrl+Tab resolves to user.2' }),
     ).toBeTruthy()

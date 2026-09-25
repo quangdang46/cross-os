@@ -127,6 +127,31 @@ type OnboardingRow struct {
 	Total       int              `json:"total"`
 }
 
+// ConflictRow is one contested chord: two rules that still fire both
+// claim it (core.conflicts).
+//
+// Winner and Losers are rule.Resolve's OWN verdict, compiled from the rules
+// the user has left enabled, so the editor cannot offer to keep a rule that
+// actually wins. That is the whole reason this is a read of the decision path
+// rather than a comparison of chords the shell can see: a collision a person
+// has not triggered yet is the one worth warning about, and reverse-deriving
+// from the trace only ever finds the ones already pressed.
+type ConflictRow struct {
+	Keys   string          `json:"keys"`
+	Winner string          `json:"winner"`
+	Losers []string        `json:"losers"`
+	Rules  []ConflictClaim `json:"rules"`
+}
+
+// ConflictClaim is one rule claiming the chord, in rank order (winner first).
+// The action is the human name the same rule table renders elsewhere, so a row
+// here and a row in the matrix call the same rule the same thing.
+type ConflictClaim struct {
+	RuleID string `json:"rule_id"`
+	Plugin string `json:"plugin"`
+	Action string `json:"action"`
+}
+
 // ObserveStateRow is what the recorder is ACTUALLY doing, read back from it
 // (core.observeState). It is a read of the recorder and not an echo of the
 // last write: a toggle that can only be written reports the click it just

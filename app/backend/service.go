@@ -251,6 +251,14 @@ func (s *Service) SetObserve(on bool) error { return s.app.SetObserve(on) }
 // only be written would label itself from the click that produced it.
 func (s *Service) ObserveState() (ObserveStateRow, error) { return s.app.ObserveState() }
 
+// Conflicts serves the chords two rules both claim (core.conflicts).
+//
+// A rule editor that cannot see its own collisions is a person saving a rule
+// that quietly does nothing. The winner and the losers here are the decision
+// path's own verdict, so "turn this one off" is advice about the rule that
+// actually loses, not a guess from comparing two strings.
+func (s *Service) Conflicts() ([]ConflictRow, error) { return s.app.Conflicts() }
+
 // Profiles serves the profile cards.
 func (s *Service) Profiles() ([]ProfileRow, error) { return s.app.Profiles() }
 
