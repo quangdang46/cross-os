@@ -337,9 +337,9 @@ func TestPageControlKinds(t *testing.T) {
 	for _, p := range CorePages() {
 		schemas[p.ID] = string(p.Schema)
 	}
-	// nir.4 Activity: enableFlow with the 4 steps + traceList with trialLink.
-	if s := schemas["core.activity"]; !strings.Contains(s, `"kind":"enableFlow"`) || !strings.Contains(s, "trialLink") {
-		t.Fatalf("activity missing enableFlow/trialLink: %s", s)
+	// nir.4 Activity: wizard with the 4 steps + pipelineTrace with trialLink.
+	if s := schemas["core.activity"]; !strings.Contains(s, `"kind":"wizard"`) || !strings.Contains(s, "trialLink") {
+		t.Fatalf("activity missing wizard/trialLink: %s", s)
 	}
 	// 10s Keyboard: matrix immediate + overrides.
 	if s := schemas["core.keyboard"]; !strings.Contains(s, `"kind":"matrix"`) || !strings.Contains(s, `"immediate":true`) || !strings.Contains(s, `"kind":"overrides"`) {
@@ -364,8 +364,8 @@ func TestPageControlKinds(t *testing.T) {
 	// Home: the landing card over sources the daemon already serves, plus the
 	// readiness checklist. No source of its own — a landing card that fetched
 	// something separate could disagree with the masthead above it.
-	if s := schemas["core.home"]; !strings.Contains(s, `"kind":"statusCard"`) || !strings.Contains(s, "core:profiles") || !strings.Contains(s, `"kind":"checklist"`) {
-		t.Fatalf("home missing statusCard/profiles/checklist: %s", s)
+	if s := schemas["core.home"]; !strings.Contains(s, `"kind":"homeSummary"`) || !strings.Contains(s, "core:profiles") || !strings.Contains(s, `"kind":"checklist"`) {
+		t.Fatalf("home missing homeSummary/profiles/checklist: %s", s)
 	}
 	// Profiles: cards that apply in one step, and a note that keeps the
 	// per-capability switches on their owning pages.
@@ -378,8 +378,8 @@ func TestPageControlKinds(t *testing.T) {
 	// the page no longer carries an `action` field on it. The id is still
 	// declared, in the page's action list, and the registry test that reads
 	// these declarations off disk is what checks it resolves to a command.
-	if s := schemas["core.observe"]; !strings.Contains(s, `"kind":"observeToggle"`) || !strings.Contains(s, `"kind":"traceList"`) {
-		t.Fatalf("observe missing observeToggle/traceList: %s", s)
+	if s := schemas["core.observe"]; !strings.Contains(s, `"kind":"observeToggle"`) || !strings.Contains(s, `"kind":"pipelineTrace"`) {
+		t.Fatalf("observe missing observeToggle/pipelineTrace: %s", s)
 	}
 	// Observe is a page of its own, not a second control on Activity: §5
 	// (conflicts) and §6 (observe) are separate questions.
@@ -390,10 +390,10 @@ func TestPageControlKinds(t *testing.T) {
 	if s := schemas["core.shortcuts"]; !strings.Contains(s, `"kind":"palette"`) || !strings.Contains(s, `"kind":"shortcutList"`) {
 		t.Fatalf("shortcuts missing palette/shortcutList: %s", s)
 	}
-	// qhp.2 Onboarding: single enableFlow + readiness checklist, linked to
+	// qhp.2 Onboarding: single wizard + readiness checklist, linked to
 	// About (credits) and Safety (trial), docs-linked.
-	if s := schemas["core.onboarding"]; !strings.Contains(s, `"kind":"enableFlow"`) || !strings.Contains(s, `"kind":"checklist"`) || !strings.Contains(s, "core.about") || !strings.Contains(s, "core.safety") {
-		t.Fatalf("onboarding missing enableFlow/checklist/about/safety links: %s", s)
+	if s := schemas["core.onboarding"]; !strings.Contains(s, `"kind":"wizard"`) || !strings.Contains(s, `"kind":"checklist"`) || !strings.Contains(s, "core.about") || !strings.Contains(s, "core.safety") {
+		t.Fatalf("onboarding missing wizard/checklist/about/safety links: %s", s)
 	}
 	// vbl.6 Finder: the two lists the daemon serves — the right-click menu and
 	// the file types it offers — boundary kept (no plugin-lifecycle

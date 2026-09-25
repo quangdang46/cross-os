@@ -13,7 +13,6 @@
 
 import type { ReactElement } from 'react'
 import type { Control, ServiceApi, Status } from '../types/controls'
-import { ActionSettingsControl } from './ActionSettingsControl'
 import { AuditListControl } from './AuditListControl'
 import { ButtonControl } from './ButtonControl'
 import { ChecklistControl } from './ChecklistControl'
@@ -21,7 +20,6 @@ import { ConflictResolver } from './ConflictResolver'
 import { FileTypeListControl } from './FileTypeListControl'
 import { FinderMenuControl } from './FinderMenuControl'
 import { CreditsControl } from './CreditsControl'
-import { GateBadgeControl } from './GateBadgeControl'
 import { HomeSummaryControl } from './HomeSummaryControl'
 import { KeymapEditorControl } from './KeymapEditorControl'
 import { LicenseControl } from './LicenseControl'
@@ -29,7 +27,6 @@ import { MatrixControl } from './MatrixControl'
 import { NoteControl } from './NoteControl'
 import { ObserveToggleControl } from './ObserveToggleControl'
 import { OverridesControl } from './OverridesControl'
-import { PackListControl } from './PackListControl'
 import { PaletteControl } from './PaletteControl'
 import { PipelineTraceControl } from './PipelineTraceControl'
 import { PluginDetailControl } from './PluginDetailControl'
@@ -73,7 +70,7 @@ type ControlRenderer = (props: ControlProps) => ReactElement
  * and renderControl would then try to draw it.
  */
 const RENDERERS = new Map<string, ControlRenderer>([
-  ['actionSettings', ActionSettingsControl],
+  
   ['auditList', AuditListControl],
   ['button', ButtonControl],
   ['checklist', ChecklistControl],
@@ -81,7 +78,7 @@ const RENDERERS = new Map<string, ControlRenderer>([
   ['credits', CreditsControl],
   ['fileTypeList', FileTypeListControl],
   ['menuList', FinderMenuControl],
-  ['gateBadge', GateBadgeControl],
+  
   ['homeSummary', HomeSummaryControl],
   ['keymapEditor', KeymapEditorControl],
   ['license', LicenseControl],
@@ -89,7 +86,7 @@ const RENDERERS = new Map<string, ControlRenderer>([
   ['note', NoteControl],
   ['observeToggle', ObserveToggleControl],
   ['overrides', OverridesControl],
-  ['packList', PackListControl],
+  
   ['palette', PaletteControl],
   ['pipelineTrace', PipelineTraceControl],
   ['pluginDetail', PluginDetailControl],
@@ -104,30 +101,47 @@ const RENDERERS = new Map<string, ControlRenderer>([
   ['wizard', WizardControl],
   ['zoneEditor', ZoneEditorControl],
 
-  // The three spellings earlier pages declared, each mapping to the renderer
-  // that replaced it. They are kinds, like every other key here, so nothing
-  // about them is a page id — and keeping them costs nothing while a daemon
-  // and a shell are free to ship separately: a page that declared `traceList`
-  // draws the pipeline renderer rather than landing in UnsupportedControl. The
-  // Go side retires them by renaming the `kind` field; the aliases are the
-  // grace period, not a second implementation.
-  ['enableFlow', WizardControl],
-  ['statusCard', HomeSummaryControl],
-  ['traceList', PipelineTraceControl],
 ])
 
 /**
- * The registered kinds, in served order. Exported for the coverage test in
- * renderers.test.tsx, which asserts that no key here is a page id: page ids in
- * this codebase are namespaced and dotted, so a dotted key would be a registry
- * that had started naming screens instead of kinds.
+ * The three spellings earlier pages declared, each mapping to the renderer
+ * that replaced it. They are kinds, like every other key above, so nothing
+ * about them is a page id — and keeping them costs nothing while a daemon and
+ * a shell are free to ship separately: a page that declared `traceList` draws
+ * the pipeline renderer rather than landing in UnsupportedControl. The Go
+ * side retires them by renaming the `kind` field; the aliases are the grace
+ * period, not a second implementation.
+ *
+ * A NAMED export rather than three more entries in the map above, because a
+ * key here that no page declares is not a mistake the registry can express —
+ * it is the honest case of an alias, and the Go coverage guard
+ * (TestEveryRegisteredKindIsReachable, app/backend) has to be able to tell the
+ * two apart. A guard that cannot is a guard that either fails on the aliases or
+ * has to be switched off, and a gate that gets switched off is not a gate.
+ */
+export const RENDERER_ALIASES: Record<string, ControlRenderer> = {
+  enableFlow: WizardControl,
+  statusCard: HomeSummaryControl,
+  traceList: PipelineTraceControl,
+}
+
+const ALL_KINDS = new Map<string, ControlRenderer>([
+  ...RENDERERS,
+  ...Object.entries(RENDERER_ALIASES),
+])
+
+/**
+ * The registered kinds, aliases included, in served order. Exported for the
+ * coverage test in renderers.test.tsx, which asserts that no key here is a page
+ * id: page ids in this codebase are namespaced and dotted, so a dotted key
+ * would be a registry that had started naming screens instead of kinds.
  */
 export function rendererKinds(): string[] {
-  return [...RENDERERS.keys()]
+  return [...ALL_KINDS.keys()]
 }
 
 export function renderControl(control: Control, ctx: ControlContext): ReactElement {
-  const Renderer = RENDERERS.get(control.kind)
+  const Renderer = ALL_KINDS.get(control.kind)
   // An unknown kind is named rather than skipped. Rendering nothing would leave
   // a hole in the page and no way to tell whether the page or the shell is at
   // fault; naming it makes the gap self-describing.

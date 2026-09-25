@@ -22,7 +22,7 @@ func HomePage() pluginapi.UIContribution {
 		"type":        "page",
 		"description": "What CrossOS is doing right now — what is on, what is ready, and which profile is active.",
 		"controls": []any{
-			map[string]any{"kind": "statusCard", "id": "status", "profile": "core:profiles", "onboarding": "core:onboardingState", "note": "Running, interception, and the active profile in one card."},
+			map[string]any{"kind": "homeSummary", "id": "status", "profile": "core:profiles", "onboarding": "core:onboardingState", "note": "Running, interception, and the active profile in one card."},
 			map[string]any{"kind": "checklist", "id": "readiness", "source": "core:readiness", "items": []string{"keyboard", "windows", "finder"}, "note": "Each line says what to do when it is not ready."},
 		},
 	}, nil, "true")

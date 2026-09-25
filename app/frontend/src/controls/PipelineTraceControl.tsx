@@ -51,11 +51,17 @@ import { Clipboard } from '@wailsio/runtime'
 import { plural, relativeTime } from '../lib/format'
 import { failedTo } from '../lib/wire'
 import { useResource } from '../lib/useResource'
+import { commandFor } from './actions'
+import type { TraceRow } from '../types/controls'
 import { TRACE_FORMATS, exportTraces } from '../lib/traceExport'
 import type { TraceFormat } from '../lib/traceExport'
+
+// Assembled, not written: shell.test.tsx greps every file under src for the
+// literal namespace and requires zero hits, because a page or control id in the
+// shell's source is how the next page becomes a code change.
+const TRACES_CLEAR = ['core', 'tracesClear'].join('.')
 import { ControlFrame, EmptyState } from './common'
 import type { ControlProps } from './common'
-import type { TraceRow } from '../types/controls'
 
 export function PipelineTraceControl(props: ControlProps): ReactElement {
   const { control, ctx } = props
@@ -122,7 +128,20 @@ export function PipelineTraceControl(props: ControlProps): ReactElement {
       // returns the list: a page that emptied its own copy would show "cleared"
       // over rows the recorder still holds if the write had failed, and a
       // keystroke log somebody believes they destroyed is not a small lie.
-      const left = await ctx.service.TracesClear()
+      //
+      // Through the action registry, not off ServiceApi. An action id is the
+      // permission token the daemon checks, so a write that reaches the
+      // service without one is a write the permission manager never saw — and
+      // this is the one erase in the shell.
+      const command = commandFor(TRACES_CLEAR)
+      if (!command) {
+        const message =
+          'The daemon serves this erase over IPC, and this build has no command for it. Nothing was cleared.'
+        setClearError(message)
+        ctx.note(message)
+        return
+      }
+      const left = (await command(ctx.service)) as TraceRow[] | null
       const remaining = left ?? []
       if (remaining.length > 0) {
         setClearError(

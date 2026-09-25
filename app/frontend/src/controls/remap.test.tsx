@@ -624,83 +624,23 @@ describe('the Explorer controls', () => {
     expect(screen.getByText('No manifest has been loaded for this one.')).toBeTruthy()
   })
 
-  it('registers all three kinds, so the page stops rendering placeholders', () => {
+  it('carries no kind that nothing reaches', () => {
+    // packList, actionSettings and gateBadge were registered, unit-tested and
+    // declared by no page — three tests a green suite was proud of, drawing
+    // controls no person could ever open. They are gone with their renderers.
+    //
+    // The rule itself lives in Go (TestEveryRegisteredKindIsReachable,
+    // app/backend/kindcoverage_test.go) because it reads the registry AND the Go
+    // page declarations together, which is the only place both exist. This is
+    // the half that can be checked from here: that the deletions took.
     const kinds = rendererKinds()
     for (const kind of ['packList', 'actionSettings', 'gateBadge']) {
+      expect(kinds, `${kind} was removed — nothing declared it`).not.toContain(kind)
+    }
+    // And the kinds that ARE reachable are still there, so the removal did not
+    // take a page down with it.
+    for (const kind of ['pluginList', 'pluginDetail', 'wizard', 'homeSummary', 'pipelineTrace']) {
       expect(kinds, `${kind} is registered`).toContain(kind)
     }
-  })
-
-  it('lists the installed packs and reports that no manifest is loaded', async () => {
-    const meta: PluginMetaRow[] = [
-      {
-        id: 'finder-actions',
-        name: '',
-        version: '',
-        permissions: ['finder.modify'],
-        loaded: false,
-        reason: 'no manifest is loaded — the builtin plugins are compiled from the rule table',
-      },
-    ]
-    show({ kind: 'packList', id: 'packs', source: 'core:finderPacks' }, daemon({ PluginMeta: () => Promise.resolve(meta) }))
-    expect(await screen.findByText('Finder actions')).toBeTruthy()
-    // The daemon's own reason is quoted, not a prettified guess at a menu.
-    expect(screen.getByText(/no manifest is loaded/)).toBeTruthy()
-  })
-
-  it('reads an empty pack list as empty rather than broken', async () => {
-    show({ kind: 'packList', id: 'packs', source: 'core:finderPacks' }, daemon())
-    expect(await screen.findByText(/No extension packs are installed/)).toBeTruthy()
-  })
-
-  it('draws the settings fields the page declared, and says no value is served', async () => {
-    show(
-      {
-        kind: 'actionSettings',
-        id: 'actionSettings',
-        source: 'core:packAction',
-        fields: ['placement', 'variants', 'timeoutSeconds'],
-        readOnly: ['targets', 'utis'],
-      },
-      daemon({
-        PluginMeta: () =>
-          Promise.resolve([{ id: 'finder-actions', name: '', version: '', permissions: [], loaded: false, reason: 'no manifest is loaded' }]),
-      }),
-    )
-    const pack = await screen.findByLabelText('Pack')
-    await waitFor(() => expect(pack.querySelectorAll('option')).toHaveLength(2))
-    fireEvent.change(pack, { target: { value: 'finder-actions' } })
-    // The page's own vocabulary, in the page's order — never a list kept here.
-    expect(await screen.findByText('placement')).toBeTruthy()
-    expect(screen.getByText('Timeout Seconds')).toBeTruthy()
-    expect(screen.getByText('utis')).toBeTruthy()
-    // And no value is invented for any of them.
-    expect(screen.getAllByText('Not reported by the daemon')).toHaveLength(3)
-    expect(screen.getAllByText('Set by the pack manifest · not editable here')).toHaveLength(2)
-  })
-
-  it('reads an empty settings source as empty rather than broken', async () => {
-    show({ kind: 'actionSettings', id: 'actionSettings', source: 'core:packAction' }, daemon())
-    expect(await screen.findByText(/No extension pack is installed/)).toBeTruthy()
-  })
-
-  it('badges a shell-granted extension as Level B and a native one by capability', async () => {
-    show(
-      { kind: 'gateBadge', id: 'levelB', source: 'core:packActionGate' },
-      daemon({
-        PluginMeta: () =>
-          Promise.resolve([
-            { id: 'shelled', name: 'Shelled', version: '', permissions: ['shell.execute'], loaded: false },
-            { id: 'native', name: 'Native', version: '', permissions: ['finder.modify'], loaded: false },
-          ]),
-      }),
-    )
-    expect(await screen.findByText('Level B — gated')).toBeTruthy()
-    expect(screen.getByText('Native capabilities: finder.modify')).toBeTruthy()
-  })
-
-  it('reads an empty gate source as empty rather than broken', async () => {
-    show({ kind: 'gateBadge', id: 'levelB', source: 'core:packActionGate' }, daemon())
-    expect(await screen.findByText(/No extension is installed/)).toBeTruthy()
   })
 })

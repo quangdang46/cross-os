@@ -22,9 +22,9 @@ func TestOnboardingFlow(t *testing.T) {
 			t.Fatalf("onboarding schema missing %q", want)
 		}
 	}
-	// No parallel Enable path: exactly one enableFlow control.
-	if n := strings.Count(s, "enableFlow"); n != 1 {
-		t.Fatalf("enableFlow count=%d, want 1 (reuse nir.4, no parallel path)", n)
+	// No parallel Enable path: exactly one wizard control.
+	if n := strings.Count(s, "wizard"); n != 1 {
+		t.Fatalf("wizard count=%d, want 1 (reuse nir.4, no parallel path)", n)
 	}
 	// Non-tech copy: no jargon in user-facing strings.
 	for _, banned := range []string{"CGEventTap", "AXUIElement", "CGEvent", "WH_KEYBOARD", "syscall"} {

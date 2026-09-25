@@ -141,10 +141,10 @@ func ActivityPage() pluginapi.UIContribution {
 		"type":        "page",
 		"description": "What CrossOS did and why — every shortcut, rule, intent, and action.",
 		"controls": []any{
-			map[string]any{"kind": "enableFlow", "id": "enable", "label": "Enable CrossOS", "steps": []string{"Welcome", "Enable per plugin", "Open System Settings", "Verify ready"}, "note": "Nothing is enabled until you explicitly enable it."},
-			map[string]any{"kind": "traceList", "id": "trace", "source": "core:eventLogs", "format": "Physical → Context → Rule → Intent → Action → result", "trialLink": "core.safety"},
+			map[string]any{"kind": "wizard", "id": "enable", "label": "Enable CrossOS", "steps": []string{"Welcome", "Enable per plugin", "Open System Settings", "Verify ready"}, "note": "Nothing is enabled until you explicitly enable it."},
+			map[string]any{"kind": "pipelineTrace", "id": "trace", "source": "core:eventLogs", "format": "Physical → Context → Rule → Intent → Action → result", "trialLink": "core.safety"},
 		},
-	}, []string{"plugin.enable", "permissions.openSettings", "permissions.verify"}, "true")
+	}, []string{"plugin.enable", "permissions.openSettings", "permissions.verify", "core.tracesClear"}, "true")
 }
 
 // ObservePage (spec §6): the event inspector, kept off Activity on purpose.
@@ -172,9 +172,9 @@ func ObservePage() pluginapi.UIContribution {
 			// App.tsx:273). A page that names itself live and is polled teaches
 			// the reader to trust a freshness it does not have — on the one
 			// surface whose whole job is telling them what their rules did.
-			map[string]any{"kind": "traceList", "id": "events", "source": "core:traces", "format": "Key → App → Rule → Intent → Action", "note": "The last 200 decisions, newest first, re-read every few seconds — polled, not pushed. A decision that falls off the end is gone."},
+			map[string]any{"kind": "pipelineTrace", "id": "events", "source": "core:traces", "format": "Key → App → Rule → Intent → Action", "note": "The last 200 decisions, newest first, re-read every few seconds — polled, not pushed. A decision that falls off the end is gone."},
 		},
-	}, []string{"core.setObserve"}, "true")
+	}, []string{"core.setObserve", "core.tracesClear"}, "true")
 }
 
 // MatrixPage (10s, §7.2 Keyboard MVP 0): behavior-matrix content editing +

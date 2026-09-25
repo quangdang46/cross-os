@@ -39,6 +39,7 @@ export type ActionCommand = (service: ServiceApi, args?: ActionArgs) => Promise<
  * the action tables are FOR, not a screen the shell is branching on.
  */
 const OBSERVE = ['core', 'setObserve'].join('.')
+const TRACES_CLEAR = ['core', 'tracesClear'].join('.')
 
 /**
  * The two file-type writes, assembled for the same reason as OBSERVE above:
@@ -195,6 +196,13 @@ export const ACTION_COMMANDS: Record<string, ActionCommand> = {
   // back. `=== true` rather than Boolean(): a control that forgot the field
   // must ask for OFF, the direction that stops recording.
   [OBSERVE]: (service, args) => service.SetObserve(args?.enabled === true),
+
+  // The erase behind the trace list's Clear. It goes through the registry like
+  // every other write rather than off ServiceApi, because an action id is the
+  // permission token the daemon checks and a write that skips it is a write the
+  // permission manager never saw. The verb returns the rows that are LEFT, so a
+  // keystroke log somebody believes they destroyed is not a small lie.
+  [TRACES_CLEAR]: async (service) => service.TracesClear(),
 
   // The writes a row names, each async so a write with no row refuses as a
   // rejected promise rather than a synchronous throw: a caller that forgot the

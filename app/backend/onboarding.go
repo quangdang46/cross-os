@@ -26,7 +26,7 @@ func OnboardingFlow() pluginapi.UIContribution {
 		"description": "Get CrossOS working in four steps.",
 		"firstRun":    true,
 		"controls": []any{
-			map[string]any{"kind": "enableFlow", "id": "onboard", "label": "Welcome to CrossOS", "steps": []string{"Welcome", "Enable per plugin", "Open System Settings", "Verify ready"}, "aboutLink": "core.about", "trialLink": "core.safety"},
+			map[string]any{"kind": "wizard", "id": "onboard", "label": "Welcome to CrossOS", "steps": []string{"Welcome", "Enable per plugin", "Open System Settings", "Verify ready"}, "aboutLink": "core.about", "trialLink": "core.safety"},
 			map[string]any{"kind": "checklist", "id": "readiness", "source": "core:readiness", "items": []string{"keyboard", "windows", "finder"}, "docsLink": "docs/install.md"},
 		},
 	}, []string{"plugin.enable", "permissions.openSettings", "permissions.verify"}, "firstRun")
