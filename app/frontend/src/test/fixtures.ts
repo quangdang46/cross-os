@@ -664,6 +664,22 @@ export function press(chord: string, front = 'com.apple.finder'): void {
  * host's answer and a fixture that did not sort would be testing a shell
  * behaviour the shell does not have.
  */
+/**
+ * The nav order, mirrored from app/backend/host.go's sort. This is DELIBERATE
+ * and is not a second implementation of it to be tidied away.
+ *
+ * App.tsx resolves the landing page as pages[0] and does no ordering of its
+ * own, so the served order IS the product contract under test. productPages()
+ * lists welcome first, and the id tiebreak below is what puts the first-run
+ * page in front while the profile is fresh. Serving declaration order instead
+ * would make firstRun.test.tsx's landing assertion unpassable — and that
+ * assertion is about the wizard stopping leading, which is the bug this whole
+ * file exists to help catch.
+ *
+ * The Go Host owns this ordering for real (cross-os-tsd, whose seed reads the
+ * daemon's own answer at startup). If the two ever disagree, the Go side is
+ * right and this mirror is the thing that drifted.
+ */
 function servedInOrder(pages: unknown[]): unknown[] {
   const rank = (page: Record<string, unknown>): [number, number, string] => [
     page.Order as number,

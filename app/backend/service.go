@@ -7,17 +7,63 @@
 // Pages() serves whatever the Host discovered, never a hardcoded list.
 package shell
 
+import "sync"
+
 // Service is the Wails-bound service: bridge calls + page discovery.
 type Service struct {
 	app  *App
 	host *Host
+	// seedMu guards the one-shot read of the daemon's first-run flag, and
+	// seeded records that the read SUCCEEDED. A sync.Once would be the wrong
+	// shape here: it burns on the first ATTEMPT, and a returning user's
+	// daemon is not down at every call — it is down, or not yet answering, at
+	// the one call that happens to land during a slow start. That would
+	// strand them on the welcome wizard for the life of the process, which is
+	// the exact symptom this exists to remove. On an error the memo stays
+	// unset and the next Pages() retries.
+	seedMu sync.Mutex
+	seeded bool
 }
 
 // NewService binds the bridge App and the discovery Host.
 func NewService(app *App, host *Host) *Service { return &Service{app: app, host: host} }
 
 // Pages serves the Host-discovered pages (§7.2: rendered by discovery).
-func (s *Service) Pages() []Page { return s.host.Pages() }
+func (s *Service) Pages() []Page {
+	s.seedFirstRun()
+	return s.host.Pages()
+}
+
+// seedFirstRun reads the daemon's own first-run flag into the Host once, and
+// re-sorts the nav from it.
+//
+// Both halves of the gate used to be open. The write never reached the Host,
+// and the READ never came from the daemon at all: Host.onboarded was a
+// process-local bool that NewHost always built false, while the daemon
+// persisted the same fact and served it. So a user who finished the wizard
+// was sent back to it on every launch, no matter how many times they clicked
+// finish. One call from the daemon into the Host closes the read side.
+//
+// It fails CLOSED, and the direction is the whole decision. Until a read has
+// succeeded, onboarded stays false and the first-run page keeps leading. A
+// returning user whose daemon is down would otherwise land on Home and find
+// every control on it refusing, which reads as a broken app; a first-run user
+// with an unreachable daemon lands in the wizard, which is told what is
+// wrong. The unreachable case is also almost exactly the fresh-profile case,
+// which is the one the previous behaviour already handled by accident.
+func (s *Service) seedFirstRun() {
+	s.seedMu.Lock()
+	defer s.seedMu.Unlock()
+	if s.seeded {
+		return
+	}
+	state, err := s.app.OnboardingState()
+	if err != nil {
+		return // fail closed, memo NOT consumed, the next call tries again
+	}
+	s.host.OnboardingComplete(state.Completed)
+	s.seeded = true
+}
 
 // GetStatus serves the Dashboard page.
 func (s *Service) GetStatus() *Status { return s.app.GetStatus() }
@@ -149,7 +195,24 @@ func (s *Service) OnboardingState() (OnboardingRow, error) {
 }
 
 // CompleteOnboarding dismisses the first-run wizard for good.
-func (s *Service) CompleteOnboarding() error { return s.app.CompleteOnboarding() }
+//
+// The daemon write and the Host write are two different stores: the first
+// survives a restart, the second is what the nav reads right now. Only the
+// daemon's half was wired, so finishing the wizard changed nothing until the
+// app was relaunched — and the relaunch then started a fresh Host that had
+// never been told. Telling the Host here is what makes the landing page move
+// in the session the user is actually in.
+//
+// The Host is told only after the daemon accepted the write. On a refusal the
+// flow is not finished, and a nav that stopped leading would be a second
+// lie on top of the first.
+func (s *Service) CompleteOnboarding() error {
+	if err := s.app.CompleteOnboarding(); err != nil {
+		return err
+	}
+	s.host.OnboardingComplete(true)
+	return nil
+}
 
 // The Wave 3 source bindings (bead w3-shell-bridge): the profile cards, the
 // decision trace, the plugin manifest facts, the app list the rule builder
