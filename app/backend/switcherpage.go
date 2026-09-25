@@ -29,7 +29,7 @@ import (
 // window the switcher can raise is a shortcut the user reaches by key, not a
 // setting in its own right — the same reason the Explorer page sits there.
 func SwitcherPage() pluginapi.UIContribution {
-	return contrib("core.switcher", "Switcher", nav{group: "shortcuts", order: 35}, map[string]any{
+	return contrib("core.switcher", "Switcher", nav{group: "shortcuts", order: 35, symbol: "⌘"}, map[string]any{
 		"type":        "page",
 		"description": "The windows the switcher can raise, in the order it will raise them. The highlighted row is the one the chord lands on.",
 		"controls": []any{

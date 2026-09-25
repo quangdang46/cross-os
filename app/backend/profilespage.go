@@ -18,7 +18,7 @@ import (
 
 // ProfilesPage returns the core.profiles settings-page contribution.
 func ProfilesPage() pluginapi.UIContribution {
-	return contrib("core.profiles", "Profiles", nav{group: "home", order: 10}, map[string]any{
+	return contrib("core.profiles", "Profiles", nav{group: "home", order: 10, symbol: "⌂"}, map[string]any{
 		"type":        "page",
 		"description": "Start from a setup rather than a list of switches. A profile turns on everything one kind of computer wants.",
 		"controls": []any{

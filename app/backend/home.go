@@ -18,7 +18,7 @@ import (
 
 // HomePage returns the core.home settings-page contribution.
 func HomePage() pluginapi.UIContribution {
-	return contrib("core.home", "Home", nav{group: "home"}, map[string]any{
+	return contrib("core.home", "Home", nav{group: "home", symbol: "⌂"}, map[string]any{
 		"type":        "page",
 		"description": "What CrossOS is doing right now — what is on, what is ready, and which profile is active.",
 		"controls": []any{

@@ -21,7 +21,7 @@ import (
 // OnboardingFlow is the in-app first-run contribution: a settings-page that
 // hosts the 4-step flow and the readiness checklist.
 func OnboardingFlow() pluginapi.UIContribution {
-	return contrib("core.onboarding", "Welcome", nav{group: "home"}, map[string]any{
+	return contrib("core.onboarding", "Welcome", nav{group: "home", symbol: "⌂"}, map[string]any{
 		"type":        "page",
 		"description": "Get CrossOS working in four steps.",
 		"firstRun":    true,

@@ -28,7 +28,7 @@ import (
 // "Explorer" — the constructor keeps its name because the page is still a
 // Finder surface underneath.
 func FinderPage() pluginapi.UIContribution {
-	return contrib("core.finder", "Explorer", nav{group: "shortcuts", order: 50}, map[string]any{
+	return contrib("core.finder", "Explorer", nav{group: "shortcuts", order: 50, symbol: "⌘"}, map[string]any{
 		"type":        "page",
 		"description": "The right-click menu in Finder, and the file types it offers. Enable an item and Finder updates without a restart.",
 		"boundary":    "The Finder menu only — generic extension lifecycle lives on the Extensions page.",
