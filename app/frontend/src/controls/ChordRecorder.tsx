@@ -31,6 +31,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from 'react'
 import type { ChordCapture } from '../types/controls'
 import { formatChord } from '../lib/format'
 import { beginRecording, endRecording } from '../lib/recording'
+import type { ConflictRow } from '../types/controls'
 import type { ServiceApi } from '../types/controls'
 
 /**
@@ -165,6 +166,12 @@ export interface ChordRecorderProps {
   service?: ServiceApi
   /** Reports something the person should know, in the shell's own voice. */
   note?: (message: string) => void
+  /**
+   * Asked to bring the rows claiming this chord into view. The prop lives on
+   * the recorder because that is where the question gets asked; the control
+   * that owns the list wires it.
+   */
+  onShowConflicts?: (chord: string) => void
 }
 
 export function ChordRecorder(props: ChordRecorderProps): ReactElement {
@@ -173,6 +180,38 @@ export function ChordRecorder(props: ChordRecorderProps): ReactElement {
   // button says the chord may also have fired — a recorder that silently cannot
   // protect the desktop is worse than one that says so.
   const [suspended, setSuspended] = useState(false)
+  // How many rules already claim the chord just captured.
+  //
+  // Ported from VS Code, which prints the count ON THE RECORDER as the chord
+  // completes and before anything is saved: its define-keybinding widget calls
+  // printExisting(model.fetch(`"${keybindingStr}"`).length) on every change
+  // (keybindingsEditor.ts:353). That is the whole point of a recorder that
+  // presses keys rather than typing them — the moment a person can see "this
+  // is already taken" is the moment they can do something about it. A conflict
+  // list on another part of the page answers one step too late.
+  //
+  // The number is the daemon's own Conflicts() and is never worked out here by
+  // comparing chords: that verdict is compiled from the rules still enabled, by
+  // a real router, and a shell-side count would be a second, stale opinion
+  // about which rules still fire.
+  const [taken, setTaken] = useState<ConflictRow[] | null>(null)
+
+  async function countClaims(capture: ChordCapture): Promise<void> {
+    if (props.service === undefined) {
+      setTaken(null)
+      return
+    }
+    const chord = chordKey(capture)
+    try {
+      const rows = await props.service.Conflicts()
+      setTaken((rows ?? []).filter((row) => row.keys === chord))
+    } catch {
+      // Nothing is said. A count that could not be read is not a count of
+      // zero, and a line reading "no rule claims that" when the daemon would
+      // not answer is the exact lie this addition exists to prevent.
+      setTaken(null)
+    }
+  }
   const label = props.label ?? 'Record a shortcut'
 
   async function start(): Promise<void> {
@@ -180,6 +219,7 @@ export function ChordRecorder(props: ChordRecorderProps): ReactElement {
     // says "Record a shortcut" for a beat after you pressed it reads as a
     // button that did not register.
     setRecording(true)
+    setTaken(null)
     if (props.service === undefined) return
     const ok = await beginRecording(props.service, props.note ?? (() => {}))
     setSuspended(ok)
@@ -211,8 +251,10 @@ export function ChordRecorder(props: ChordRecorderProps): ReactElement {
     if (event.shiftKey) modifiers.push('Shift')
     if (event.altKey) modifiers.push('Alt')
     if (event.metaKey) modifiers.push('Win')
-    setRecording(false)
-    props.onCapture({ key, modifiers })
+    void stop()
+    const capture: ChordCapture = { key, modifiers }
+    props.onCapture(capture)
+    void countClaims(capture)
   }
 
   return (
@@ -235,7 +277,35 @@ export function ChordRecorder(props: ChordRecorderProps): ReactElement {
             : 'Recording. Press the keys you want.'}
         </span>
       ) : props.value && props.value.key !== '' ? (
-        <span className="ctl-chip">{renderChord(props.value)}</span>
+        <>
+          <span className="ctl-chip">{renderChord(props.value)}</span>
+          {taken === null ? null : taken.length === 0 ? (
+            <span className="ctl-value">No rule claims that chord yet.</span>
+          ) : (
+            <span className="ctl-value">
+              {taken.length === 1
+                ? 'One rule already claims it'
+                : `${taken.length} rules already claim it`}
+              {': '}
+              {taken[0].winner}
+              {taken[0].losers.length > 0
+                ? ` beats ${taken[0].losers.join(', ')}`
+                : ''}
+              {props.onShowConflicts === undefined ? null : (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    className="ctl-link"
+                    onClick={() => props.onShowConflicts?.(chordKey(props.value))}
+                  >
+                    Show them
+                  </button>
+                </>
+              )}
+            </span>
+          )}
+        </>
       ) : null}
     </span>
   )

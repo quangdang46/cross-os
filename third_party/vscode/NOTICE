@@ -1,0 +1,8 @@
+No VS Code source is included; the LICENSE is recorded here for the
+keyboard-editor reference only. The project is MIT, which passes the §9.11
+gate.
+
+The reference clone is at .tmp/research/vscode, a sparse checkout of
+src/vs/workbench/contrib/preferences and src/vs/platform/keybinding. It is
+not a dependency, is not built, is not vendored, and is not required to build,
+test or ship CrossOS.

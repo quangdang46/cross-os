@@ -193,6 +193,11 @@ export function KeymapEditorControl(props: ControlProps): ReactElement {
           disabled={busy}
           service={ctx.service}
           note={ctx.note}
+          // VS Code's show-existing-keybindings action sets the search to the
+          // chord (keybindingsEditor.ts:329-333), which is what makes the
+          // recorder's count a lead rather than a dead end: "this is taken,
+          // here is where".
+          onShowConflicts={(chord) => setQuery(chord)}
         />
         <SelectField
           label="Action"
