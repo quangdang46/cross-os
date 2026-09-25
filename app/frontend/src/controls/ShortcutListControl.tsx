@@ -270,7 +270,13 @@ function AllShortcutTable(props: ControlProps): ReactElement {
     <>
       <ul className="ctl-list">
         {rows.map((row) => (
-          <li className="ctl-item" key={row.rule_id}>
+          // Karabiner's row says the off state in a WORD beside the toggle and
+          // shows it in the INK at the same time
+          // (ComplexModificationsView.swift:175-182). Both halves, and they
+          // agree: a row that is only greyed says nothing to a colour-blind
+          // reader or to a screen reader, and a toggle that is only greyed says
+          // nothing about what the rule is doing.
+          <li className={row.enabled ? 'ctl-item' : 'ctl-item ctl-off'} key={row.rule_id}>
             <span className="ctl-chip">{humanize(row.plugin)}</span>
             <span className="ctl-label" title={row.keys}>
               {formatChord(row.keys) || row.rule_id}
@@ -281,6 +287,7 @@ function AllShortcutTable(props: ControlProps): ReactElement {
             ) : (
               <span className="ctl-value">everywhere</span>
             )}
+            <span className="ctl-value">{row.enabled ? 'on' : 'off'}</span>
             <Toggle
               name={`${row.enabled ? 'Turn off' : 'Turn on'} ${row.action || row.rule_id}`}
               checked={row.enabled}

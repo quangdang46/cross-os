@@ -295,7 +295,14 @@ export default function App() {
   // disagree about how much history exists is the one thing a log view must
   // never do. The test is on the control KIND: naming a page id here would be
   // the hardcoding the file header rules out.
-  const ownsTrace = controls.some((ctl) => ctl.kind === 'traceList')
+  // BOTH spellings, not the legacy one. `traceList` is the grace-period alias
+  // (controls/index.tsx) and `pipelineTrace` is the current kind; a page
+  // migrated to the current spelling would otherwise pass this line and draw
+  // the same decisions a second time under the shell's own cap — the exact
+  // failure the comment above exists to prevent.
+  const ownsTrace = controls.some(
+    (ctl) => ctl.kind === 'traceList' || ctl.kind === 'pipelineTrace',
+  )
   const problems = Object.values(faults)
 
   // note is the reporter, not the text: App owns the note line and renders it

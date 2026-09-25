@@ -60,8 +60,12 @@ export function OverridesControl(props: ControlProps): ReactElement {
             const key = rowKey(row.app, row.rule_id)
             const enabled = confirmed[key] ?? row.enabled
             const chord = formatChord(row.keys)
+            // The same greying as the matrix beside it, and from the same
+            // reference (ComplexModificationsView.swift:175-177). `enabled` is
+            // the daemon's echoed verdict, so this row, its word and its
+            // toggle cannot disagree.
             return (
-              <li className="ctl-item" key={key}>
+              <li className={enabled ? 'ctl-item' : 'ctl-item ctl-off'} key={key}>
                 <span className="ctl-chip">{humanize(row.app)}</span>
                 <span className="ctl-label" title={row.keys}>
                   {chord || row.rule_id}

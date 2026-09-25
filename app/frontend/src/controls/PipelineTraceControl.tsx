@@ -50,9 +50,19 @@ export function PipelineTraceControl(props: ControlProps): ReactElement {
   return (
     <ControlFrame
       label={control.label ?? control.id}
-      // format is the page's own pipeline caption ("Key → App → Rule → …"), so
-      // the page still owns the words; note stays the control's own hint.
-      note={typeof control.format === 'string' ? control.format : control.note}
+      // BOTH, never one instead of the other. `format` is the page's one-line
+      // caption for the pipeline ("Key → App → Rule → …") and `note` is the
+      // page's own disclosure about it — that this is the last 200 decisions,
+      // re-read on a poll, and a decision that falls off the end is gone.
+      //
+      // Choosing between them dropped the disclosure on BOTH pages, because both
+      // declare a `format`. The sentence that tells a reader this list is
+      // capped and how fresh it is was being discarded in favour of a caption
+      // that says neither, on the one screen whose whole job is saying what
+      // their rules did.
+      note={[control.format, control.note]
+        .filter((part): part is string => typeof part === 'string' && part !== '')
+        .join(' — ')}
       error={traces.error}
     >
       {newestFirst.length === 0 ? (

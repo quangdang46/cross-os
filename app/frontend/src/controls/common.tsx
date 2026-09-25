@@ -3,7 +3,7 @@
 // The class names used here are the entire styling vocabulary the shell
 // stylesheet defines: ctl, ctl-head, ctl-label, ctl-value, ctl-input,
 // ctl-select, ctl-slider, ctl-toggle, ctl-list, ctl-item, ctl-chip, ctl-empty,
-// ctl-error, ctl-actions, ctl-countdown. A control that needs a look it cannot
+// ctl-error, ctl-off, ctl-actions, ctl-countdown. A control that needs a look it cannot
 // get from these is a control whose design has not been decided yet, and
 // inventing a class name is how the stylesheet and the renderers drift apart.
 

@@ -58,8 +58,13 @@ export function MatrixControl(props: ControlProps): ReactElement {
             const enabled = confirmed[row.rule_id] ?? row.enabled
             const chord = formatChord(row.keys)
             const contexts = Array.isArray(row.contexts) ? row.contexts : []
+            // The greying follows `enabled`, which is the daemon's own echoed
+            // verdict, so the row can never be greyed while the word beside it
+            // says on. Karabiner greys a disabled rule's description block for
+            // the same reason (ComplexModificationsView.swift:175-177): the
+            // state is worth saying twice, in ink and in words.
             return (
-              <li className="ctl-item" key={row.rule_id}>
+              <li className={enabled ? 'ctl-item' : 'ctl-item ctl-off'} key={row.rule_id}>
                 <span className="ctl-label" title={row.keys}>
                   {chord || row.rule_id}
                 </span>

@@ -428,6 +428,17 @@ body {
   border-bottom: 0;
 }
 
+/* A rule the person has switched off. The state WORD beside the toggle is the
+   signal; this is the second one, and it is deliberately not the first — a row
+   that is only greyed says nothing to a colour-blind reader or to a screen
+   reader. Ported from Karabiner-Elements' ComplexModificationsView.swift:175-177,
+   which greys a disabled rule's description block, and :179-182, which prints
+   the caption beside it in the same grey. The two halves agree; a row that had
+   one without the other would be the worse of both. */
+.ctl-item.ctl-off {
+  color: var(--text-dim);
+}
+
 .ctl-chip {
   display: inline-block;
   padding: 1px 8px;
