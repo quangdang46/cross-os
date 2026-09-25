@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"crossos/core/pkg/ipc"
@@ -106,6 +107,73 @@ func TestFinderMenuEntries(t *testing.T) {
 		map[string]any{"dir": t.TempDir(), "ext": menu.FileTypes[0].Ext})
 	if rerr != nil {
 		t.Fatalf("a type the menu serves must be one createFile accepts: %+v", rerr)
+	}
+}
+
+// TestAbsoluteSlash: every path a menu verb is handed goes through this guard,
+// and the guard itself had no test — the six Windows failures it caused were
+// found by the verbs' own tests, not by a check of the check. The two
+// platforms disagree about which spelling of absolute is correct, so both are
+// pinned here rather than one being assumed.
+//
+// The dot cases are the load-bearing half. A naive substring test for ".."
+// would refuse "notes..bak", which is a filename a user may well have, and a
+// naive segment test that cleaned first would miss "/tmp/../etc" entirely,
+// because path.Clean of that is "/etc" with nothing left to find.
+func TestAbsoluteSlash(t *testing.T) {
+	// Accepted everywhere. path.IsAbs does not care what platform it is
+	// running on, so a slash path stays legal on a Windows build too — which
+	// is the half the old guard got right and kept.
+	for _, p := range []string{
+		"/tmp/x",
+		"/Users/someone/Desktop/notes.txt",
+		"/tmp/notes..bak",
+		"/tmp/dir.with.dots/notes.txt",
+	} {
+		if err := absoluteSlash(p); err != nil {
+			t.Errorf("absoluteSlash(%q) = %v, want accepted", p, err)
+		}
+	}
+	// Refused everywhere.
+	for _, p := range []string{
+		"",
+		"/",
+		".",
+		"..",
+		"relative/path",
+		"notes.txt",
+		"../escape",
+		"../../etc/passwd",
+		"/tmp/../etc",
+		"/tmp/a/../../b",
+		"./notes.txt",
+	} {
+		if err := absoluteSlash(p); err == nil {
+			t.Errorf("absoluteSlash(%q) = nil, want refused", p)
+		}
+	}
+	// The platform-specific half. filepath.IsAbs only knows about drive letters
+	// and UNC roots on Windows, so these rows are asserted where they mean
+	// something and must be refused everywhere else.
+	if runtime.GOOS == "windows" {
+		for _, p := range []string{`C:\Users\x\notes.txt`, `C:/Users/x/notes.txt`} {
+			if err := absoluteSlash(p); err != nil {
+				t.Errorf("absoluteSlash(%q) = %v, want accepted on windows", p, err)
+			}
+		}
+		// The traversal spelling a slash-only segment scan would walk straight
+		// past, which is the whole reason the scan is separator-aware now.
+		for _, p := range []string{`C:\a\..\b`, `C:\..\b`, `..\escape`} {
+			if err := absoluteSlash(p); err == nil {
+				t.Errorf("absoluteSlash(%q) = nil, want refused on windows", p)
+			}
+		}
+	} else {
+		// A backslash path is not an absolute path on this platform, and the
+		// widening above must not have made it one.
+		if err := absoluteSlash(`C:\Users\x\notes.txt`); err == nil {
+			t.Error(`absoluteSlash("C:\\Users\\x\\notes.txt") = nil, want refused off windows`)
+		}
 	}
 }
 
@@ -439,8 +507,15 @@ func TestDuplicateClearsAStaleStagingFile(t *testing.T) {
 	if rerr != nil {
 		t.Fatalf("duplicateWithName: %+v", rerr)
 	}
-	if dst := res.(map[string]any)["paths"].([]string)[0]; dst != filepath.Join(dir, "notes 2.txt") {
-		t.Fatalf("duplicate landed on %q", dst)
+	// Compared as paths, not as strings: the verb joins with a slash because
+	// Finder paths are slash-separated, and on Windows that leaves the returned
+	// name carrying a "/" where filepath.Join would have written a "\". The
+	// question this test asks is WHERE the duplicate landed, so Clean is the
+	// comparison, and the raw string stays in the failure message where a
+	// separator leak would still be visible.
+	dst := res.(map[string]any)["paths"].([]string)[0]
+	if got, want := filepath.Clean(dst), filepath.Join(dir, "notes 2.txt"); got != want {
+		t.Fatalf("duplicate landed on %q, want %q", dst, want)
 	}
 	assertNoStaging(t, dir)
 }

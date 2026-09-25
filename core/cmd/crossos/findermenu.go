@@ -413,20 +413,33 @@ func finderLocation(raw json.RawMessage, name string) (string, *ipc.RPCError) {
 // The traversal check runs on the RAW path, segment by segment. Cleaning first
 // would defeat it — path.Clean("/tmp/../etc") is "/etc", with nothing left to
 // find — and a substring test would refuse "notes..bak", a filename a user may
-// well have. Slash-domain on purpose: Finder paths are slash-separated, and
-// filepath.IsAbs("/tmp/x") is false on Windows, which would reject every path
-// this daemon is given when the tests build there.
+// well have. Splitting on os.IsPathSeparator rather than on "/" alone is what
+// keeps that check true for a backslash path: on macOS it splits exactly where
+// it always did, and on Windows it also catches the "..\" spelling.
+//
+// Both absolute-path conventions are accepted, and the reason is that neither
+// test is right on both platforms. filepath.IsAbs alone is false for "/tmp/x"
+// on Windows, so using it alone would refuse every path the daemon is given
+// when the tests build there — which is what the old comment was guarding
+// against. path.IsAbs alone is false for "C:\...", which is the other half of
+// the same problem. So the check is "absolute under either" rather than a coin
+// toss between two functions that are each correct at home.
+//
+// The product domain is unchanged: on macOS neither test accepts a backslash
+// path, and Finder hands out slash paths. A "C:\..." string is only ever
+// accepted on a Windows build, and only ever arrives here from a test's
+// TempDir.
 func absoluteSlash(p string) error {
 	if p == "" || p == "/" {
 		return fmt.Errorf("core: %q is not a location the menu can act on", p)
 	}
-	for _, segment := range strings.Split(p, "/") {
+	for _, segment := range strings.FieldsFunc(p, func(r rune) bool { return os.IsPathSeparator(uint8(r)) }) {
 		if segment == ".." {
 			return fmt.Errorf("core: %q leaves the folder it is relative to", p)
 		}
 	}
 	clean := path.Clean(p)
-	if clean == "." || clean == "/" || !path.IsAbs(clean) {
+	if clean == "." || clean == "/" || (!path.IsAbs(clean) && !filepath.IsAbs(p)) {
 		return fmt.Errorf("core: %q is relative, and the menu only acts on absolute paths", p)
 	}
 	return nil

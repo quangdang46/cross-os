@@ -13,6 +13,7 @@ package main
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -289,9 +290,10 @@ func TestUserRulesPathSitsBesideTheSettings(t *testing.T) {
 	if got := userRulesPath(""); got != "" {
 		t.Fatalf("userRulesPath(\"\") = %q, want no path", got)
 	}
-	got := userRulesPath("/tmp/crossos-test/config.json")
-	if !strings.HasSuffix(got, "user-rules.json") || !strings.HasPrefix(got, "/tmp/crossos-test/") {
-		t.Fatalf("userRulesPath = %q, want a sibling of the settings file", got)
+	dir := t.TempDir()
+	got := userRulesPath(filepath.Join(dir, "config.json"))
+	if got != filepath.Join(dir, "user-rules.json") {
+		t.Fatalf("userRulesPath = %q, want a sibling of the settings file in %q", got, dir)
 	}
 }
 
