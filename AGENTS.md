@@ -126,6 +126,36 @@ br sync --flush-only             # Sync changes to issues.jsonl
 ```
 <!-- end-bv-agent-instructions -->
 
+## The shell is Swift, not React
+
+`macos/` is the UI. `core/` is the daemon. The two talk **JSON-RPC 2.0 over a
+Unix domain socket, NDJSON-framed** — `core/pkg/ipc`, and the shell's client in
+`macos/Sources/CrossOSCore/`. There is no bridge between them, and there is no
+Wails. That is not a preference: `app/backend/` (7,735 lines, now deleted) was
+already Wails-free and was a typed mirror of that same protocol, so the port
+deleted it rather than rewriting it.
+
+```
+./scripts/run.sh              # build the daemon and the app, start both
+cd macos && swift run CoreTests   # the shell's suite (111 checks)
+cd macos && ./.build/debug/CrossOS --describe   # print the live view tree
+cd macos && ./.build/debug/CrossOS --geometry   # print the switcher's arithmetic
+cd macos && ./.build/debug/crossos-probe pages  # the 15 pages the daemon serves
+```
+
+The test suite is an **executable, not a `.testTarget`**, and that is an
+environment fact rather than a preference: neither XCTest nor swift-testing is
+importable from the Command Line Tools toolchain. The assertions live in
+`macos/Tests/Harness/Sources/CoreTests/Harness.swift`, and the same source runs
+under `swift test` on a machine with the full Xcode.
+
+**A control kind this shell cannot draw must not be registered.** The registry's
+keys are KINDS, never page ids, so a plugin shipping a page gets working UI with
+no shell change. A registered kind nothing reaches is dead weight that nobody
+will ever test against a real page — which is what the Go guard
+`TestEveryRegisteredKindIsReachable` exists to prevent on the page side, and
+`Renderers.kinds` is the shell-side equivalent.
+
 ## Housekeeping
 
 **Do not delete `tmp/research/`.** It is 667M of reference repos (Karabiner-
