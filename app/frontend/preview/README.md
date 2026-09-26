@@ -17,6 +17,31 @@ The pages served are the fixture's, so they exercise every control kind.
 The hook is `enforce: 'pre'` and matches the specifier `lib/service`, so it
 intercepts exactly that seam. A fixture cannot quietly become the app's backend.
 
+## The second document
+
+`src/switcher.html` is the app's OTHER window — the overlay that appears when
+the switcher chord is pressed. It is a separate entry, not a route, and nothing
+in the repo had ever rendered it: the unit tests drive `SwitcherPanelControl`
+directly, so they cover the panel but not the document around it.
+
+```bash
+open http://127.0.0.1:5299/preview/switcher.html?summon=1
+```
+
+`?summon=1` answers `SwitcherWait` with a trigger. Without it the overlay sits
+on *"Waiting for the switcher chord."* forever, which is the honest answer —
+nothing can synthesise the chord, and that absence is the point.
+
+Two seams are swapped to get there, both in `preview/vite.config.ts`:
+`src/lib/service` for the fixture, and `@wailsio/runtime` for `preview/wails-stub.ts`.
+The second is not optional — the overlay awaits `Window.Show()` on every trigger,
+a browser rejects it, the rejection becomes a fault, and a fault replaces the
+panel. The one screen the overlay exists to show was the one screen the preview
+could not show.
+
+`preview/switcher.tsx` has no `createRoot`: `src/switcher.tsx` renders itself at
+module scope, which is how the real document works, so importing it is the job.
+
 ## Query parameters
 
 | Param | What it does |

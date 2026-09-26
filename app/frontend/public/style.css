@@ -2137,20 +2137,28 @@ body {
   cursor: default;
 }
 
-.ctl-tile-name {
-  min-width: 0;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
+/* A window's title and the app it belongs to get the SAME treatment, and it
+   is a truncation rather than a break. The name had `overflow-wrap: anywhere`
+   on its own, so a title longer than the tile broke mid-word — "com.apple.
+   Safar" / "i" — while the app line beside it ellipsised correctly, and the
+   same string was drawn two different ways a few pixels apart. A name is
+   truncated; it is not re-flowed into a column. */
+.ctl-tile-name,
 .ctl-tile-app {
   min-width: 0;
-  color: var(--fg-secondary);
-  font-size: 12px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 100%;
+}
+
+.ctl-tile-name {
+  font-weight: 600;
+}
+
+.ctl-tile-app {
+  color: var(--fg-secondary);
+  font-size: 12px;
 }
 
 /* The overlay document (src/switcher.html). It is a window over everything, so
