@@ -23,7 +23,7 @@ REBUILD=0
 for arg in "$@"; do
   case "$arg" in
     --no-open) OPEN_APP=0 ;;
-    --rebuild-frontend) REBUILD=1 ;;
+    --rebuild-frontend) REBUILD=1 ;;  # accepted; SwiftPM always rebuilds what is stale
     -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
     *) die "unknown option $arg (try --help)" ;;
   esac
@@ -32,16 +32,19 @@ done
 BIN="$ROOT/.crossos"
 SOCKET="$HOME/Library/Application Support/CrossOS/crossos.sock"
 DAEMON="$BIN/crossos"
-SHELL_APP="$ROOT/app/bin/crossos-shell.app"
+SHELL_BIN="$ROOT/macos/.build/release/CrossOS"
 
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not on PATH ($2)"; }
 
 need go "install Go from https://go.dev"
 need node "install Node.js 18+"
 need npm "ships with Node.js"
-# wails3 generates frontend/bindings, which are gitignored: without them
-# `npm run build` cannot typecheck the shell at all.
-need wails3 "install with: go install github.com/wailsapp/wails/v3/cmd/wails3@latest"
+# The shell is Swift now. The client speaks the daemon's JSON-RPC directly,
+# so there is nothing to generate and nothing to install but a toolchain —
+# which is the whole reason the 7,735-line Wails bridge could be deleted
+# rather than ported: it was a typed mirror of a wire protocol that already
+# existed underneath it.
+need swift "install the Xcode command line tools: xcode-select --install"
 
 mkdir -p "$BIN"
 
@@ -50,36 +53,25 @@ say "Building the daemon"
 go -C core build -o "$DAEMON" ./cmd/crossos/
 
 # --- shell ------------------------------------------------------------------
-# The shell embeds frontend/dist, so the bundle is only rebuilt when the
-# frontend sources are newer than what is already built. Skipping the rebuild
-# keeps the common case (re-run after a daemon-only change) fast.
-frontend_stale() {
-  local newest
-  newest=$(find app/frontend/src app/frontend/index.html -newer app/frontend/dist/index.html 2>/dev/null | head -n 1)
-  [[ -n "$newest" ]]
-}
+# The shell is a Swift package now, and SwiftPM's own staleness rules are the
+# ones that apply: it rebuilds what changed and nothing else, so there is no
+# "is the frontend newer than the bundle" question to answer here any more. The
+# webview version needed one because the bundle was an embed; this one is a
+# binary SwiftPM produces, and the incremental decision belongs to the tool
+# that knows how to make it.
+#
+# --rebuild-frontend keeps its name, because it is in the help text and because
+# "frontend" still describes what it rebuilds: the part of the app the daemon
+# does not own.
+# SwiftPM decides what is stale, so there is no branch here: the flag is
+# accepted and the build runs either way. It stays in the interface because it
+# is in --help and because "rebuild the shell" is the thing somebody reaches
+# for when a change does not show up, and a flag that silently does nothing
+# is worse than one that always rebuilds.
+[[ "$REBUILD" == "1" ]] && say "Building the shell (--rebuild-frontend)"
+swift build --package-path "$ROOT/macos" -c release --product CrossOS
 
-# A fresh clone has neither node_modules nor a bundle. Rebuild whenever the
-# bundle is missing, the sources moved, or the caller insists — reusing a
-# bundle that was never built left a new user with a "run some task
-# command you have not heard of" dead end.
-if [[ "$REBUILD" == "1" ]] || [[ ! -d "$SHELL_APP" ]] || frontend_stale; then
-  if [[ ! -d app/frontend/node_modules ]]; then
-    say "Installing frontend dependencies (first run)"
-    npm --prefix app/frontend ci >/dev/null
-  fi
-  say "Building the shell bundle"
-  if [[ ! -d app/frontend/bindings ]]; then
-    say "Generating the Wails bindings"
-    (cd app && wails3 generate bindings -f "" -clean=true -ts -i ./... >/dev/null)
-  fi
-  npm --prefix app/frontend run build >/dev/null
-  task --taskfile app/Taskfile.yml darwin:package >/dev/null
-else
-  say "Reusing the existing shell bundle (--rebuild-frontend forces a rebuild)"
-fi
-
-[[ -d "$SHELL_APP" ]] || die "the shell bundle is still missing at $SHELL_APP — the build output above is where to look"
+[[ -x "$SHELL_BIN" ]] || die "the shell binary is still missing at $SHELL_BIN — the build output above is where to look"
 
 # --- daemon lifecycle -------------------------------------------------------
 # A second daemon must NOT be started: it would unlink the running daemon's
@@ -172,9 +164,9 @@ EOF
 
 if [[ "$OPEN_APP" == "1" ]]; then
   say "Opening the shell"
-  open "$SHELL_APP"
+  open "$SHELL_BIN"
 else
-  say "Not opening the window (--no-open); launch it with: open \"$SHELL_APP\""
+  say "Not opening the window (--no-open); launch it with: $SHELL_BIN"
 fi
 
 printf '\n'

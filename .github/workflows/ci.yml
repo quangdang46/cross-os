@@ -70,45 +70,31 @@ jobs:
   # node_modules/.package-lock.json agrees with itself rather than with
   # package.json. An install-based job can therefore be green on a tree that
   # cannot run the suite at all.
-  frontend:
-    strategy:
-      matrix:
-        os: [macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+  shell:
+    # macOS only, and that is the product: the shell is an AppKit window and
+    # AppKit does not exist on Windows. The daemon below still builds for
+    # both, which is what keeps the core cross-platform while the UI is not.
+    runs-on: macos-latest
     defaults:
       run:
-        working-directory: app/frontend
+        working-directory: macos
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: app/frontend/package-lock.json
-      - name: Install (npm ci, not npm install)
-        run: npm ci
-      - name: Frontend suite (vitest)
-        run: npm test
-      # The typecheck half. app/frontend/bindings/ is gitignored
-      # (.gitignore:34) and src/lib/service.ts:19 imports it, so 'npx tsc
-      # --noEmit' emits TS2307 on a clean checkout. Generate the bindings
-      # first, then typecheck — a typecheck that cannot resolve its imports
-      # checks nothing while reporting green. 'npm test' above needs no
-      # bindings (src/test/harness.tsx:48 mocks the import), which is why the
-      # test half looks fine and the typecheck half is the trap. The
-      # ServiceApi / controlSurface contracts ride on this run and nothing
-      # else.
-      # The generator takes the app/ Go module root ('./'), pinned to the CLI
-      # version the bindings + typecheck were validated against; 'go run'
-      # avoids PATH juggling and behaves identically under bash and pwsh.
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
-      - name: Generate Wails bindings (gitignored; tsc input)
-        working-directory: app
-        run: go run github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.119 generate bindings ./
-      - name: Typecheck (npx tsc --noEmit)
-        run: npx tsc --noEmit
+      - name: Build (SwiftPM)
+        run: swift build -c release
+      # The suite is an EXECUTABLE, not a `.testTarget`, and that is not a
+      # preference: neither XCTest nor swift-testing is importable from the
+      # Command Line Tools toolchain, so a `.testTarget` is dead on arrival
+      # there and `swift test` reports a failure that is about the machine
+      # rather than the code. The assertions live in
+      # `Tests/Harness/Sources/CoreTests/Harness.swift` and the same source
+      # runs under `swift test` on a machine with the full Xcode.
+      - name: Shell suite
+        run: swift run CoreTests
+      # The wire is a TRANSCRIPTION of the Go client, so the numbers this
+      # port is judged against are the ones in docs/baseline/.
+      - name: Switcher geometry probe
+        run: ./.build/release/CrossOS --geometry
 
   build:
     strategy:
