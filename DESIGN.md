@@ -1380,7 +1380,7 @@ gets its own step. The changes:
     --bg-pressed:  rgba(255, 255, 255, .10);
 
     --fg-primary:   #f5f5f7;
-    --fg-secondary: #a1a1a6;     /* light #6e6e73 is 3.9:1 on #1e1e1e */
+    --fg-secondary: #a1a1a6;     /* the light #6e6e73 would be 3.29:1 here */
     --fg-tertiary:  #8a8a8f;     /* 4.6:1 — timestamps and caps only     */
 
     /* 33% is the 3:1 point on #1e1e1e, so --line-strong clears it with room */
