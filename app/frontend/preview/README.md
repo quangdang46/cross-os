@@ -52,12 +52,29 @@ module scope, which is how the real document works, so importing it is the job.
 | `?state=partial` | Profile applied, one extension off — the wizard mid-flight. |
 | `?measure=1` | Writes every `.ctl` row's height, resolved grid columns and each child's offset into a `<pre id="measure">`. Read it back with `--dump-dom`. |
 | `?audit=1` | Writes the palette actually in force — every distinct background, ink, radius, font size and weight on the page, with the selector that produced each — into `<pre id="audit">`. |
-| `?flat=1` | Drops the `@supports (color: AccentColor)` block, so the designed hex palette is visible. Chrome reports `AccentColor` as supported while resolving none of its keywords, which collapses the whole palette to the initial value. |
-| `?dark=1` | Forces the dark media query to match, so both appearances can be compared from one machine set to light. |
-| `?comfortable=1` | Applies `[data-density='comfortable']`, the roomier row rhythm. |
-| `?contrast=1` | Forces `prefers-contrast: more`. |
+| `?flat=1` | Drops the `@supports (color: AccentColor)` block, so the designed hex palette is visible. Chrome reports `AccentColor` as supported while resolving none of its keywords, which collapses the whole palette to the initial value. **Pair this with `--dark`** — see below. |
+| `?comfortable=1` | Sets `[data-density='comfortable']` on `:root`, which is the attribute the daemon writes and the stylesheet reads. |
 | `?measure=1&kind=<sel>` | As `?measure=1`, plus one line per element matching `<sel>` with its box, computed line-height and margins. This is how the trial timer was found carrying the UA's `1em 0`. |
 | `?focus=<selector>` | Focuses one element. Note this does **not** engage `:focus-visible` on a `<button>` — a programmatic `.focus()` is not a keyboard interaction, so the shot shows no ring and proves nothing. Use `tabshot.sh`. |
+
+Dark and high contrast are not query parameters. They are media queries, and
+`shots.sh` emulates them properly over CDP:
+
+```bash
+./preview/shots.sh home "state=ready&page=Home" --dark
+./preview/shots.sh keys "state=ready&page=Keyboard&flat=1" --dark --contrast
+```
+
+**`--dark` alone will not look dark in a browser, and that is not a bug in the
+app.** The `@supports (color: AccentColor)` block is last on purpose — the OS
+must get the last word on appearance and accent — and Chrome claims to support
+`AccentColor` while resolving none of its keywords, so the block wins and hands
+the page a light palette in dark mode. That is Chrome's broken, not the
+cascade's. Add `flat=1` to drop the block and see the dark theme the stylesheet
+actually specifies, under a real emulated `prefers-color-scheme: dark`.
+
+macOS is WebKit, and WebKit resolves the keywords; that is the only place the
+bridge is meant to apply.
 
 ## Focus, honestly
 

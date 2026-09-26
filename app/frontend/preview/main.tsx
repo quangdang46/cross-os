@@ -10,7 +10,7 @@ import { grantAccessibility, machine, press, reset } from '../src/test/fixtures'
 // ?dark=1 forces the dark media query to match, so the two appearances can be
 // compared from one machine that is set to light.
 const q = new URLSearchParams(location.search)
-if (q.get('flat') || q.get('dark')) {
+if (q.get('flat') || q.get('dark') || q.get('contrast') || q.get('comfortable')) {
   let css = await fetch('/style.css').then((r) => r.text())
   if (q.get('flat')) {
     css = css.replace(/@supports \(color: AccentColor\)/g, '@supports (color: NoSuchKeyword)')
@@ -18,16 +18,21 @@ if (q.get('flat') || q.get('dark')) {
   if (q.get('dark')) {
     css = css.replace(/@media \(prefers-color-scheme: dark\)/g, '@media (min-width: 1px)')
   }
-  if (q.get('comfortable')) {
-    css += '\n:root { }\n:root, :root[data-density] { }\n'
-    css = css.replace(':root[data-density=\'comfortable\']', ':root')
-  }
   if (q.get('contrast')) {
     css = css.replace(/@media \(prefers-contrast: more\)/g, '@media (min-width: 1px)')
   }
   const tag = document.createElement('style')
   tag.textContent = css
   document.head.appendChild(tag)
+}
+
+// The density is an ATTRIBUTE the daemon writes, and setting it is the whole
+// contract — the stylesheet reads `[data-density='comfortable']`, not a
+// question the page asks. It was a selector rewrite here, which meant the
+// preview exercised a copy of the rule rather than the rule, and would have
+// kept working if the daemon stopped writing the attribute at all.
+if (q.get('comfortable')) {
+  document.documentElement.dataset.density = 'comfortable'
 }
 
 // ?state=ready  a fully set-up machine (daemon ok, tap in, no callout)
