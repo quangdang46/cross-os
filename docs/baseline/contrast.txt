@@ -1,0 +1,21 @@
+{
+  "input.border": {
+    "raw": "color(srgb 0.113725 0.113725 0.121569 / 0.5)",
+    "composited": "rgb(128, 128, 128)",
+    "surfaceBehind": "rgb(255, 255, 255)",
+    "ratio": 3.97
+  },
+  "select.border": {
+    "raw": "color(srgb 0.113725 0.113725 0.121569 / 0.5)",
+    "composited": "rgb(128, 128, 128)",
+    "surfaceBehind": "rgb(255, 255, 255)",
+    "ratio": 3.97
+  },
+  "toggle.border": "(no such element)",
+  "button.border": {
+    "raw": "color(srgb 0.113725 0.113725 0.121569 / 0.5)",
+    "composited": "rgb(128, 128, 128)",
+    "surfaceBehind": "rgb(255, 255, 255)",
+    "ratio": 3.97
+  }
+}

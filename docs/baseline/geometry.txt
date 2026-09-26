@@ -1,0 +1,13 @@
+VIEWPORT innerWidth=756 innerHeight=469 rootFont=13px narrow=false 40em=520px
+row h=251.2 cols=429px 0px | What is on | ctl-head@16w429  ctl-facts@16w445  ctl-facts-foot@16w445
+row h=169.8 cols=429px 0px | Readiness | ctl-head@16w429  ctl-list@16w445
+VIEWPORT innerWidth=756 innerHeight=469 rootFont=13px narrow=false 40em=520px
+row h=474 cols=429px 0px | Profiles | ctl-head@16w429  ctl-value@16w429  ctl-cards@16w445
+row h=55.7 cols=429px 0px | profileNote | ctl-head@16w429  ctl-value@16w429
+VIEWPORT innerWidth=756 innerHeight=469 rootFont=13px narrow=false 40em=520px
+row h=191.5 cols=429px 0px | Behavior matrix | ctl-head@16w429  ctl-list@16w445
+row h=55.7 cols=429px 0px | App overrides | ctl-head@16w429  ctl-empty@16w429
+VIEWPORT innerWidth=756 innerHeight=469 rootFont=13px narrow=false 40em=520px
+row h=250.4 cols=429px 0px | Record a shortcut | ctl-head@16w429  ctl-actions@16w445  ctl-list@16w445  ctl-actions@16w445
+row h=94.4 cols=429px 0px | Conflicts | ctl-head@16w429  ctl-empty@16w429
+row h=215.8 cols=429px 0px | Rule builder | ctl-head@16w429  ctl-actions@16w445  ctl-clause@16w445  ctl-actions@16w445  ctl-empty@16w429

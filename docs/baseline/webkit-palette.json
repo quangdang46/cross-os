@@ -1,0 +1,29 @@
+{
+  "appearance": "light",
+  "resolved": {
+    "--bg-window": "color(srgb 0.96 0.96 0.96)",
+    "--bg-sidebar": "color(srgb 0.94 0.94 0.94)",
+    "--bg-raised": "rgb(255, 255, 255)",
+    "--bg-sunken": "color(srgb 0.93 0.93 0.93)",
+    "--fg-primary": "rgb(0, 0, 0)",
+    "--fg-secondary": "rgba(0, 0, 0, 0.247)",
+    "--fg-tertiary": "color(srgb 0 0 0 / 0.45)",
+    "--fg-onaccent": "rgb(255, 255, 255)",
+    "--accent": "rgb(0, 122, 255)",
+    "--sel-bg": "rgb(0, 122, 255)",
+    "--line-strong": "color(srgb 0 0 0 / 0.5)",
+    "--line-default": "color(srgb 0 0 0 / 0.38)",
+    "--line-hairline": "color(srgb 0 0 0 / 0.14)",
+    "--ok": "rgb(21, 128, 61)",
+    "--warn": "rgb(146, 64, 14)",
+    "--danger": "rgb(185, 28, 28)",
+    "--live": "rgb(22, 101, 52)"
+  },
+  "painted": {
+    "cardBg": "rgb(255, 255, 255)",
+    "railBg": "color(srgb 0.94 0.94 0.94)",
+    "listBg": "rgba(0, 0, 0, 0)",
+    "pageInk": "rgb(0, 0, 0)",
+    "capInk": "color(srgb 0 0 0 / 0.45)"
+  }
+}
