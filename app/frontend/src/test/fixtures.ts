@@ -448,6 +448,31 @@ function answer<T>(name: string, value: () => T): Promise<T> {
 
 // --- the rows ----------------------------------------------------------------
 
+/**
+ * The three reasons this machine's readiness rows carry, spelled the way the
+ * DAEMON spells them, at the lines that write them.
+ *
+ * This used to be a set of strings the daemon never sends — "grant Accessibility
+ * in System Settings", "window-keys is switched off" — and that was worse than
+ * an invented fixture value, because it was an invented fixture value dressed as
+ * a nicer one. The checklist rendered whatever it was handed, so the first-run
+ * test passed against a phrase no build has ever produced, and the control's real
+ * behaviour on a real refusal ("adapter: tap refused (input-monitoring consent
+ * missing?)", a Go error with a package prefix) was never exercised by anything.
+ * A fixture that is kinder than the product teaches a reader the product is kind.
+ *
+ * The three here are the whole set a fresh machine can produce:
+ *   TAP_ERROR     core/internal/adapter/tap_cgo.go:43, errTapDenied, stored
+ *                 verbatim by c.tapError (core/cmd/crossos/main.go:1124) and
+ *                 read back as the keyboard row's detail (pagedata.go:611, :642)
+ *   WINDOWS_OFF   core/cmd/crossos/pagedata.go:706, surfaceRow's `p + " is not
+ *                 switched on"` — the plugin id spliced in by the daemon
+ *   FINDER_OFF    the same line, for the Finder surface's plugin
+ */
+const TAP_ERROR = 'adapter: tap refused (input-monitoring consent missing?)'
+const WINDOWS_OFF = 'window-keys is not switched on'
+const FINDER_OFF = 'finder-actions is not switched on'
+
 /** The behaviour matrix the daemon serves, before anyone edits it. */
 function matrixRows(): MatrixRow[] {
   return [
@@ -468,14 +493,13 @@ function readinessRows(): ReadinessRow[] {
   const tap = machine.interception && !reinstalling
   const keys = machine.extensions['window-keys']
   const finder = machine.extensions['finder-actions']
-  const tapError = 'grant Accessibility in System Settings'
   return [
     // The daemon row a page did not ask for: the served list is always longer
     // than the declared one, and the checklist says so rather than dropping it.
-    { id: 'daemon', label: 'CrossOS daemon', ready: tap, detail: tap ? '' : tapError },
-    { id: 'keyboard', label: 'Keyboard interception', ready: tap && keys, detail: tap && keys ? '' : tap ? 'window-keys is switched off' : tapError },
-    { id: 'windows', label: 'Windows shortcuts', ready: tap && keys, detail: tap && keys ? '' : tap ? 'window-keys is switched off' : tapError },
-    { id: 'finder', label: 'Finder shortcuts', ready: tap && finder, detail: tap && finder ? '' : tap ? 'finder-actions is switched off' : tapError },
+    { id: 'daemon', label: 'CrossOS daemon', ready: tap, detail: tap ? '' : TAP_ERROR },
+    { id: 'keyboard', label: 'Keyboard interception', ready: tap && keys, detail: tap && keys ? '' : tap ? WINDOWS_OFF : TAP_ERROR },
+    { id: 'windows', label: 'Windows shortcuts', ready: tap && keys, detail: tap && keys ? '' : tap ? WINDOWS_OFF : TAP_ERROR },
+    { id: 'finder', label: 'Finder shortcuts', ready: tap && finder, detail: tap && finder ? '' : tap ? FINDER_OFF : TAP_ERROR },
   ]
 }
 
@@ -595,7 +619,7 @@ function statusPayload(): Status {
     Killed: false,
     Plugins: pluginStates(),
     Interception: machine.interception,
-    TapError: machine.interception ? '' : 'grant Accessibility in System Settings',
+    TapError: machine.interception ? '' : TAP_ERROR,
     Version: '0.4.0',
   }
 }

@@ -85,6 +85,70 @@
 // list of named steps, one open at a time, each with its own body, each with its
 // own verdict, a bounded wait, and a hand-off instead of a finish line. Tracked
 // in third_party/pcfy-my-mac/ATTRIBUTION.md.
+//
+// THE CHROME IS A SECOND PORT, of menumate's review list — the review gate on the
+// pack import sheet, which is the closest thing in that repository to a wizard's
+// step list: a list of things a person has to get through, each row carrying a
+// mark, the open row filled, and one line under the whole thing saying how much
+// is left. The three things that transfer are the MARK, the ROLLUP, and the CARD
+// the list sits in; the steps, their order and their wording are the Go flow's
+// and are not touched by this port.
+//
+//   App/UI/PackImportSheet.swift:230-277  reviewList
+//     :236-245   a row draws checkmark.circle.fill once its id is in the review
+//                set and a 14x14 stroked Circle (1.3pt, label4) until then —
+//                so progress is something you SEE down the left edge rather than
+//                a word you have to read on each row
+//     :239       the mark is WHITE on the selected row and green off it, so the
+//                selected row keeps its own ink
+//     :253-254   the row's own padding, 10 horizontal and 7 vertical
+//     :257       the separator is an overlay on the TOP of every row after the
+//                first, so the first row has no rule above it
+//     :263-269   the container: MMColor.card inside a RoundedRectangle(8,
+//                .continuous) with a 0.5pt MMColor.hairline stroke
+//     :271-275   the rollup, UNDER the list: 11pt, label3, leading-aligned,
+//                8pt above the card
+//   App/UI/Localizable.xcstrings:3268     the rollup's English value,
+//                "Viewed %lld / %lld · view all to continue". The "n of m"
+//                half is the shape and is kept; the "view all to continue" half
+//                is that screen's GATE, and the wizard's Next is not gated on
+//                being looked at, so the clause has no honest translation here
+//                and is not printed.
+//   App/UI/PacksScreen.swift:342-345        the same 8pt-continuous card on a
+//                second list in the same app, which is why the radius below is a
+//                value of its own and not one of the MMRadius scale constants
+//   App/UI/DesignSystem.swift:36, :58     MMColor.green (a semantic colour, not a
+//                literal) and MMColor.hairline (separatorColor at 0.7 opacity)
+//
+// TWO THINGS ARE DELIBERATELY NOT THE REFERENCE'S, and both are because the
+// daemon owns every verdict on this page (see the header above):
+//
+//   - The mark here is the DAEMON's `done`, not a set the reader builds by
+//     looking. The reference's row inserts its id into `viewed` on tap
+//     (:260-263), so its mark is an acknowledgement; a mark this shell wrote on
+//     click would be the shell inventing a verdict, which is the one thing this
+//     control exists not to do. So the tap still only SELECTS, and the mark
+//     changes when the daemon's next read says it changed.
+//   - The mark therefore does not replace the step NUMBER. The reference's list
+//     is a flat set of actions and its order is the order they appear in; a
+//     wizard is navigated by position ("Step 1 of 4" below, and the Back/Next
+//     pair), so the ordinal stays and the mark is added beside it. What the port
+//     replaces is the STATUS WORD as the primary signal — a reader can now see
+//     how far along they are without reading four chips.
+//
+// The rollup counts the MARKS in the list above it, which is the reference's
+// relationship, and which is why the readiness sentence this file used to print
+// is gone. "1 check of 8 ready" and the daemon's own "7 of 8 checks are not
+// ready" on the Verify step are one fact said twice in two places, and the
+// daemon's copy is the one this shell does not own. The names that sentence
+// carried ("Still to do: …") are not lost: every failing row is drawn with its
+// reason by the checklist control below this one, and the last step's hand-off
+// draws them again when the wait runs out.
+//
+// No code was copied from menumate either: the reference is SwiftUI and this is
+// React over a declared schema, so the row, the mark and the card transfer as
+// STRUCTURE and as a set of measurements, and the drawing does not. Tracked in
+// third_party/menumate/ATTRIBUTION.md.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
@@ -95,6 +159,7 @@ import { useResource } from '../lib/useResource'
 import { commandFor } from './actions'
 import { ProfileListControl } from './ProfileListControl'
 import { ReadinessLine } from './ChecklistControl'
+import { explainReadiness } from '../lib/readinessReasons'
 import { ControlFrame, EmptyState } from './common'
 import type { ControlProps } from './common'
 
@@ -151,6 +216,47 @@ const NO_STATE: OnboardingRow = {
  */
 const STEP_BODIES: Record<string, (props: ControlProps) => ReactElement> = {
   profileList: ProfileListControl,
+}
+
+/**
+ * A step's own reason, in the same words the checklist row beside it uses.
+ *
+ * The daemon derives both from one function — handleOnboardingState calls
+ * readinessRows() and copies the keyboard row's `Detail` into the permission
+ * step's own (core/cmd/crossos/pagedata.go:1598-1618, `keyboardDetail` at
+ * :1613) — so the same string reaches two screens. Printing it raw on one and
+ * paraphrased on the other is the disagreement ReadinessLine's own header says
+ * this control exists to prevent, one screen further out. So both go through
+ * lib/readinessReasons.ts, and the two-line shape is the reference's row: the
+ * state, then the action, then the daemon's own words underneath in the dimmer
+ * voice (OnboardingView.swift:198-213 and :259-286; DeclutterSheet.swift:104-109
+ * for the sub-line).
+ *
+ * The step detail is a `<p>` and not a `<li>` because it is not a row: there is
+ * no chip and no id to key it by, and the two lines are one reason, not a list
+ * entry pretending to be one.
+ */
+function StepReason(props: { detail: string }): ReactElement {
+  const reason = explainReadiness(props.detail)
+  if (!reason) {
+    // Unmapped, and said to be unmapped. This slot used to be `ctl-empty`
+    // unconditionally, which put the daemon's own line in the dimmer voice AND
+    // said nothing about it being untranslated — a reader could not tell a
+    // deliberate aside from a log line nobody had rewritten.
+    return (
+      <>
+        <p className="ctl-value">{props.detail}</p>
+        <p className="ctl-empty">This build has no plainer wording for that yet.</p>
+      </>
+    )
+  }
+  return (
+    <>
+      <p className="ctl-value">{reason.what}</p>
+      {reason.next ? <p className="ctl-value">{reason.next}</p> : null}
+      <p className="ctl-empty">{props.detail}</p>
+    </>
+  )
 }
 
 /**
@@ -396,12 +502,14 @@ export function WizardControl(props: ControlProps): ReactElement {
   const row = state.data
   const byId = new Map(row.steps.map((step) => [step.id, step]))
   const checks = row.readiness
-  // The daemon ships the count beside the rows; counting the rows it sent is
-  // the same number and cannot disagree with the list printed under it. Neither
-  // is a verdict — what is left to DO lives on the steps — so this is a rollup
-  // for the reader, not the shell deciding anything.
-  const ready = checks.filter((check) => check.ready).length
-  const failing = checks.filter((check) => !check.ready)
+  // The rollup the reference prints under its list, counting the marks above it
+  // and nothing else (PackImportSheet.swift:271-275, viewed.count of
+  // actions.count). Every count here is a step the DAEMON has derived as done, so
+  // a step the daemon has not answered for is counted as not done — which is
+  // the same neutral the mark beside it draws, and neither is a verdict the
+  // shell took. It is stated once, here, rather than once per row and once again
+  // in a sentence further down the page.
+  const doneSteps = steps.filter((step, index) => verdict(step, index, byId, row.steps)?.done).length
   // The daemon's own answer to "is anything left to do", not a count the shell
   // took. Its cursor names the first step it has not derived as done and reads
   // "done" once it has none, so a flow finished by the person saying so — the
@@ -523,6 +631,7 @@ export function WizardControl(props: ControlProps): ReactElement {
                 aria-current={index === current ? 'step' : undefined}
                 onClick={() => setOpen(index)}
               >
+                <span className="ctl-step-mark" data-done={mark?.done ? 'true' : 'false'} aria-hidden="true" />
                 <span className="ctl-step-index" aria-hidden="true">
                   {index + 1}
                 </span>
@@ -536,19 +645,42 @@ export function WizardControl(props: ControlProps): ReactElement {
                   not. All three are chips rather than step classes because
                   ctl-chip is the whole vocabulary the stylesheet offers for a
                   mark like this, and a renderer that invented a class name for
-                  the verdict would be styling a state nothing draws. */}
+                  the verdict would be styling a state nothing draws.
+
+                  The MARK on the left of the button is a fourth thing and is the
+                  only one you can take in without reading: a filled circle for a
+                  step the daemon has derived as done and a stroked ring for one
+                  it has not (PackImportSheet.swift:236-245). It is decorative
+                  beside the "Done" chip rather than a fourth source of truth —
+                  a step the daemon says is done is drawn done whichever way the
+                  mark failed to render, which is the rule this stylesheet
+                  already applies to every other tick it draws. */}
               {index === current ? <span className="ctl-chip">Current step</span> : null}
               {index === waiting ? <span className="ctl-chip">Next up</span> : null}
               {mark?.done ? <span className="ctl-chip">Done</span> : null}
               {/* The step's OWN body: the reason it is not done, which is the
                   daemon's sentence and not a count of anything. A done step
                   carries none — the daemon omits the field — so the slot is left
-                  out rather than filled with a blank line. */}
-              {mark?.detail ? <p className="ctl-value">{mark.detail}</p> : null}
+                  out rather than filled with a blank line. The SENTENCE is the
+                  readiness table's (lib/readinessReasons.ts), the same one the
+                  checklist row beside it uses, because the daemon derives both
+                  from readinessRows() and a step that said the reason one way
+                  and the row another would be this file's own two-answers bug
+                  with the rows a screen apart. */}
+              {mark?.detail ? <StepReason detail={mark.detail} /> : null}
             </li>
           )
         })}
       </ol>
+
+      {/* THE ROLLUP, in the reference's position: one line, under the list it
+          counts, saying how much is left. It is the only place on the page that
+          counts the step marks — the readiness number this file used to print
+          here is the same fact as the daemon's own sentence on the Verify step,
+          and saying it twice is how two of them came to disagree. */}
+      <p className="ctl-rollup">
+        {state.loading ? 'Checking…' : `${doneSteps} of ${steps.length} steps done.`}
+      </p>
 
       <p className="ctl-value">
         Step {current + 1} of {steps.length}: {shown.label}
@@ -557,17 +689,8 @@ export function WizardControl(props: ControlProps): ReactElement {
         <p className="ctl-value">Checking what is ready…</p>
       ) : checks.length === 0 ? (
         <EmptyState>The daemon reported no readiness checks, so this step has nothing to verify yet.</EmptyState>
-      ) : (
-        <p className="ctl-value">
-          {ready === checks.length
-            ? 'Every check is ready.'
-            : `${plural(ready, 'check')} of ${checks.length} ready.`}
-          {failing.length > 0
-            ? ` Still to do: ${failing.map((check) => check.label || humanize(check.id)).join(', ')}.`
-            : ''}
-        </p>
-      )}
-      {shownVerdict?.detail ? <p className="ctl-empty">{shownVerdict.detail}</p> : null}
+      ) : null}
+      {shownVerdict?.detail ? <StepReason detail={shownVerdict.detail} /> : null}
       {row.completed ? <p className="ctl-value">Setup is recorded as finished.</p> : null}
 
       {/* THE WAIT, and the hand-off it ends in. Both are drawn only on the last

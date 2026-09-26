@@ -3,8 +3,12 @@
 // The class names used here are the entire styling vocabulary the shell
 // stylesheet defines: ctl, ctl-head, ctl-label, ctl-value, ctl-input,
 // ctl-select, ctl-slider, ctl-toggle, ctl-list, ctl-item, ctl-chip, ctl-empty,
-// ctl-error, ctl-off, ctl-actions, ctl-countdown. A control that needs a look it cannot
-// get from these is a control whose design has not been decided yet, and
+// ctl-error, ctl-off, ctl-actions, ctl-countdown, ctl-steps, ctl-step,
+// ctl-step-button, ctl-step-mark, ctl-step-index, ctl-step-label, ctl-rollup,
+// and — for the detail pane
+// below — ctl-facts, ctl-fact, ctl-fact-key, ctl-fact-body, ctl-fact-value,
+// ctl-fact-lock, ctl-fact-hint, ctl-facts-foot. A control that needs a look it
+// cannot get from these is a control whose design has not been decided yet, and
 // inventing a class name is how the stylesheet and the renderers drift apart.
 
 import type { ReactElement, ReactNode } from 'react'
@@ -55,6 +59,94 @@ export function ControlFrame(props: {
       ) : null}
     </section>
   )
+}
+
+/**
+ * FactList / FactRow are a DETAIL PANE, ported from menumate's pack detail
+ * (App/UI/MenuHubPanels.swift). The reference is the one file in that tree
+ * whose layout is a set of stated facts about a thing rather than a form for
+ * changing it, which is what a summary screen and an extension detail both
+ * are:
+ *
+ *   MenuHubPanels.swift:620-633  lockRow — the row. A LABEL in a fixed 70pt
+ *     column, right-aligned, beside a value drawn as a read-only field, with a
+ *     lock glyph after it and the whole row at opacity 0.7.
+ *   MenuHubPanels.swift:27-45  PvField — the same 70pt right-aligned label
+ *     column, and the row's optional `hint`: a second, subordinate line under
+ *     the value at 11pt in the third text tone, 3pt below it.
+ *   DesignSystem.swift:451-482  MMField — what the value is drawn as. A sunken
+ *     field background, 9x4 padding, the control corner radius and a hairline
+ *     stroke; 13pt, and `.monospaced` design when the value is a token.
+ *   DesignSystem.swift:519-537  Badge — the small semibold capsule a state
+ *     word is drawn in, beside what it qualifies at 7pt spacing (the shape the
+ *     panel's own header uses at :641-645).
+ *   MenuHubPanels.swift:637,657 the two spacings, and why they differ: 13
+ *     between the pane's LEVELS (title, description, rows) and 10 between the
+ *     ROWS inside the level. One uniform gap everywhere is what makes a pane
+ *     read as a wall.
+ *   DesignSystem.swift:576-582  the footer: one 11.5pt line under the rows.
+ *
+ * The one thing the port has to be faithful about is `mono`. lockRow takes it
+ * as a flag and the caller sets it per row, and the caller sets it for exactly
+ * one reason: whether the value is an identifier. The UTI row is monospaced
+ * because "public.image" is a token; the target row is not, because "files
+ * only" is words. That is a rule about legibility — a reader can tell from the
+ * face alone that a value is machine vocabulary rather than something a person
+ * chose to name something — and it is why `mono` here is not a style option a
+ * caller passes to taste. A human name never gets it.
+ *
+ * No code was copied: the reference is SwiftUI and this is React over a
+ * declared schema. The row shape, the two spacings, the label alignment and
+ * the mono rule transfer; the drawing does not. Tracked in
+ * third_party/menumate/ATTRIBUTION.md.
+ */
+
+/** The lock glyph, standing in for the SF Symbol `lock.fill` the reference
+ *  draws at the end of every fact row. U+FE0E forces text presentation so a
+ *  webview renders it monochrome instead of as a colour emoji, which is the
+ *  same substitution the capture control already documents for its glyphs. */
+const LOCK = '\u{1F512}︎'
+
+export function FactList(props: { children: ReactNode }): ReactElement {
+  return <div className="ctl-facts">{props.children}</div>
+}
+
+export function FactRow(props: {
+  /** The row's key. It names the fact, so a reader never has to know the value
+   *  to know what is being read. */
+  label: string
+  /** True only when `children` is an identifier — an id, a path, a version. */
+  mono?: boolean
+  /** The row's state word, drawn as a badge beside what it qualifies. */
+  badge?: string
+  /** A subordinate line under the value: the consequence, the reason, the
+   *  permission to grant. Never a second value. */
+  hint?: ReactNode
+  children: ReactNode
+}): ReactElement {
+  return (
+    <div className="ctl-fact">
+      <span className="ctl-fact-key">{props.label}</span>
+      <div className="ctl-fact-body">
+        {props.badge ? <span className="ctl-chip">{props.badge}</span> : null}
+        <span className={props.mono ? 'ctl-fact-value is-mono' : 'ctl-fact-value'}>
+          {props.children}
+        </span>
+        {/* The lock is what says these are stated facts, so a reader can tell
+            a fact from a control without trying. Decoration, never the signal:
+            the state word beside it is the signal. */}
+        <span className="ctl-fact-lock" aria-hidden="true">
+          {LOCK}
+        </span>
+      </div>
+      {props.hint ? <span className="ctl-fact-hint">{props.hint}</span> : null}
+    </div>
+  )
+}
+
+/** The one line under a pane's rows, in the reference's footer register. */
+export function FactFoot(props: { children: ReactNode }): ReactElement {
+  return <div className="ctl-facts-foot">{props.children}</div>
 }
 
 /**

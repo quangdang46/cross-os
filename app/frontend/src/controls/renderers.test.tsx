@@ -614,11 +614,37 @@ describe('the wizard', () => {
     expect(waitingRow?.textContent).toContain('Open System Settings')
   })
 
-  it('says what the daemon reports is ready, and what is left', async () => {
+  it('rolls the step marks up once, under the list, and leaves the rest to the daemon', async () => {
+    // The reference states the count ONCE, under the list it counts
+    // (PackImportSheet.swift:271-275). This file used to state it twice: once
+    // here as "1 check of 3 ready. Still to do: …" and once more as the
+    // daemon's own "2 of 3 checks are not ready" on the Verify step, and two
+    // copies of one number is how two of them come to disagree. The shell's
+    // copy is the one it owns, so it is the one that goes; the daemon's stays.
     show(WIZARD, wizardDaemon())
-    expect(await screen.findByText(/1 check of 3 ready/)).toBeTruthy()
-    // The failing rows are named, so "not ready" is never a bare verdict.
-    expect(screen.getByText(/Windows shortcuts, Finder shortcuts/)).toBeTruthy()
+    expect(await screen.findByText('2 of 4 steps done.')).toBeTruthy()
+    expect(screen.queryByText(/1 check of 3 ready/)).toBeNull()
+    // What is left is still named, by the daemon, on the step that is not done.
+    expect(screen.getByText('2 of 3 checks are not ready')).toBeTruthy()
+  })
+
+  it('marks a done step with a filled circle and an undone one with a ring', async () => {
+    // The mark is the reference's :236-245 and it is the reason the list can be
+    // taken in without being read. The SHAPE carries it — filled against ring —
+    // because a mark that only differs by colour would say nothing to a
+    // colour-blind reader, and the "Done" chip beside it says the same thing in
+    // words either way.
+    show(WIZARD, wizardDaemon())
+    await screen.findByText('2 of 4 steps done.')
+
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('.ctl-step'))
+    expect(rows).toHaveLength(4)
+    expect(rows.map((row) => row.querySelector('.ctl-step-mark')?.getAttribute('data-done'))).toEqual([
+      'true',
+      'true',
+      'false',
+      'false',
+    ])
   })
 
   it('moves the open step with Next and Back', async () => {

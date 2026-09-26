@@ -16,20 +16,189 @@
  * Nothing in this file knows a page id, a control id or a plugin id.
  */
 
+/* --- tokens ----------------------------------------------------------------
+ *
+ * The token block is the whole visual contract. Every rule below reads a token
+ * and never a hex, and the values here are the ones DESIGN.md specifies, with
+ * the measured contrast ratio recorded beside each because the numbers are not
+ * what you would guess: the three line tokens are 14 / 38 / 50 per cent ink and
+ * not 18-30, because 50 per cent is the first value that reaches the 3:1 a
+ * control boundary owes (WCAG 1.4.11). The old --line was #d2d2d7, which is
+ * 1.51:1 on white and was the border of every resting input, select and switch,
+ * so a control's own extent sat below the floor. That is why there are three
+ * line tokens and not one, and why only ONE of them is a control boundary.
+ *
+ * Semantic tokens only, and the tiers are obligations, not decoration:
+ *   surfaces  back to front, so a card reads as nearer than the plane
+ *   ink       four tones; tertiary is timestamps, caps and disabled ink ONLY
+ *   lines     hairline (decorative) / default (dividers) / strong (boundaries)
+ *   accent    one colour, spent once: it marks THE CURRENT THING
+ *   state     each state is an INK for text, a FILL for marks, a WASH for faces
+ */
+
 :root {
-  --text: #1d1d1f;
-  --text-dim: #6e6e73;
-  --line: #d2d2d7;
-  --bg: #ffffff;
-  --bg-sunken: #f5f5f7;
-  --accent: #0a66ff;
-  --danger: #c8102e;
-  /* "This machine is recording you right now." Deliberately not --accent: the
-     accent marks selection, and a selected row that happens to be on the
-     Observe page would read as live. 7.0:1 on --bg, so the 11px label clears
-     4.5:1 (Karabiner's capture label is .green for the same reason). */
+  /* ---- surfaces, back to front ---- */
+  --bg-window:    #ffffff;   /* the content plane                     */
+  --bg-sidebar:   #f5f5f7;   /* nav rail, footer, wells               */
+  --bg-raised:    #ffffff;   /* cards sitting on the content plane    */
+  --bg-sunken:    #f5f5f7;   /* read-only fields, list cards           */
+  --bg-hover:     rgba(0, 0, 0, .05);
+  --bg-pressed:   rgba(0, 0, 0, .09);
+  --bg-selected:  color-mix(in srgb, var(--accent) 12%, transparent);
+
+  /* ---- ink: four tones, no more ---- */
+  --fg-primary:   #1d1d1f;   /* row labels, values, page title  16.83:1 */
+  --fg-secondary: #6e6e73;   /* descriptions, hints, placeholders  5.07:1 */
+  --fg-tertiary:  #86868b;   /* timestamps, caps, disabled ONLY  3.62:1 */
+  --fg-onaccent:  #ffffff;
+  --fg-link:      #0a66ff;   /* 4.82:1, and it is not --accent reused as decoration */
+
+  /* ---- lines ----
+     Alphas are ink over white and the three carry THREE different obligations,
+     so the measured ratios are recorded next to them. 14% -> #dfdfe0 is 1.33:1,
+     38% -> #a9a9aa is 2.35:1, 50% -> #8e8e8f is 3.27:1. */
+  --line-hairline: color-mix(in srgb, var(--fg-primary) 14%, transparent);  /* 1.33:1 — card outlines   */
+  --line-default:  color-mix(in srgb, var(--fg-primary) 38%, transparent);  /* 2.35:1 — internal dividers */
+  --line-strong:   color-mix(in srgb, var(--fg-primary) 50%, transparent);  /* 3.27:1 — control boundaries */
+
+  /* ---- accent (bridged to the OS accent colour where supported) ----
+     Declared after the surface tokens that reference it; a custom property is
+     resolved when it is USED, not where it is declared, so the order here is
+     the reading order of the spec rather than a dependency. */
+  --accent:       #0a66ff;
+  --accent-hover: color-mix(in srgb, var(--accent) 85%, #000);
+  --accent-tint:  color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-ring:  color-mix(in srgb, var(--accent) 45%, transparent);
+
+  /* ---- state: an INK for text, a FILL for marks, a WASH for surfaces ----
+     Four states, twelve tokens, one rule of thumb: if it is a word it is an
+     ink, if it is a shape it is a fill, if it is a background it is a wash.
+     All four inks clear 4.5:1 on --bg-window and on --bg-sunken. */
+  --ok:     #15803d;  --ok-fill:     #15803d;  --ok-wash:     rgba(21,128,61,.10);
+  --warn:   #92400e;  --warn-fill:   #b45309;  --warn-wash:   rgba(180,83,9,.10);
+  --danger: #b91c1c;  --danger-fill: #c8102e;  --danger-wash: rgba(200,16,46,.09);
+  --live:   #166534;  --live-fill:   #16a34a;  --live-wash:   rgba(22,163,74,.12);
+
+  /* --live is #166534 and not --accent, and not --ok, and that is the whole
+     point of it. "This machine is recording you right now" is not a selection.
+     A selected row that happened to sit on the Observe page would read as live,
+     and "recording" is the one word in this app that must never be ambiguous.
+     Deliberately not the #15803d the state family above uses: this token predates
+     the family, is measured at 7.13:1 on --bg-window and 6.55:1 on
+     --bg-sunken, and is documented as one to leave alone. */
   --live: #166534;
-  --sel-bg: #0a66ff; /* the active nav item: white on it clears 4.5:1 */
+
+  --focus-ring: var(--accent);
+  --focus-width: 2px;
+  --focus-offset: 2px;
+
+  /* ---- space: a 4px scale, and the ONLY values allowed (3.3) ----
+     Sixteen distinct px paddings on a 4px grid is what the eye reads as noise
+     rather than rhythm, so the scale is named here and the rest of the file
+     migrates onto it one rule at a time. */
+  --sp-0: 0;    --sp-1: 2px;   --sp-2: 4px;   --sp-3: 8px;   --sp-4: 12px;
+  --sp-5: 16px; --sp-6: 20px;  --sp-7: 24px;  --sp-8: 32px;  --sp-9: 40px;
+  --sp-10: 56px;
+
+  /* Two composite rhythms carry the layout. A gap INSIDE one kind of thing is
+     always smaller than the gap BETWEEN two kinds of thing, and that single
+     ratio is what stops a form reading as a wall.
+     The level rhythm is the three numbers 3.3 names: a card title to its rows,
+     a card to the next card, a page title to its first card. 6 and 28 are
+     deliberately off the 4px grid — they are the two the spec fixes by name —
+     and 14 is the row's inline padding, also fixed by name. A migration that
+     "corrects" any of these to the nearest rung has changed the rhythm, not
+     tidied it. */
+  --row-pad-block: var(--sp-3);   /* 8px compact / 12px comfortable, see 7.3 */
+  --row-pad-inline: 14px;
+  --level-title: 6px;             /* card title to its rows                 */
+  --level-card: var(--sp-6);      /* 20px between cards                     */
+  --level-page: 28px;             /* page title to first card               */
+
+  /* ---- density (7.3). COMPACT IS THE DEFAULT: a window-management utility is
+     used for long stretches, and 44px rows over 40 rows is 1,760px of scroll.
+     The attribute is written by the daemon; the shell has no storage of its
+     own, and Service is its only persistence seam. */
+  --row-min-height: 34px;
+  --control-height: 24px;
+  --nav-min-height: 26px;
+  --page-pad-x: var(--sp-5);     /* 16px compact / 24px comfortable */
+
+  /* ---- type (3.2) ----
+     Nine sizes, declared in rem against the `html { font-size: 13px }` root
+     below, because 3.2 retires the 9.5px uppercase cap and because §9 wants
+     text scaling to reach the shell at all: WKWebView only honours NSFont
+     through RELATIVE units, and a file written entirely in px cannot scale.
+     Each token records the px it resolves to at the 13px root, so the table in
+     3.2 stays auditable against the declaration that implements it.
+
+     13px is the macOS control size and it is the ROOT, not the body size
+     alone, which is why the ratios below are not round numbers in the obvious
+     way: 11px is 0.846rem, not 0.75rem.
+
+     NOTHING in this file reads these tokens yet — the rules still carry their
+     own px font-size, and moving them is the mechanical part that belongs to
+     the phase introducing the new class names. What lands here is the scale
+     and the root it resolves against, so that migration has somewhere to go. */
+  --fs-cap:         0.846rem;   /* 11px   / 600  / .05em  / uppercase       */
+  --fs-meta:         0.885rem;   /* 11.5px / 400  — hints, timestamps, log  */
+  --fs-small:        0.923rem;   /* 12px   / 400  — chips, badges, buttons */
+  --fs-body:         1rem;       /* 13px   / 400  — labels, values, inputs */
+  --fs-body-strong:  1rem;       /* 13px   / 590  — a changed/dangerous row  */
+  --fs-card:         1.154rem;   /* 15px   / 600  / -.01em — card title      */
+  --fs-page:         1.538rem;   /* 20px   / 600  / -.02em — page title      */
+  --fs-display:      2.154rem;   /* 28px   / 600  / -.02em — wizard, About  */
+  --fs-mono:         0.923rem;   /* 12px   / 400  — .kbd, log lines, facts  */
+  --lh-body:         1.45;
+  --lh-tight:        1.2;        /* headings */
+
+  /* ---- the stack (3.2) ----
+     §5.1 writes the status strip and the callout as `font: var(--fs-small)/1
+     var(--font)`, so the name is the document's, not one invented here — and a
+     rule that re-spelled the stack inline would be a third place to change it.
+     Moved off body{} so the shorthand has something to resolve against. */
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+
+  /* ---- radius (3.4) ----
+     One accent scale and the menumate scale below both, because they are two
+     different observations: --r-* is what this design system decided a corner
+     MEANS, and --radius-* is what the two reference applications actually
+     draw. The P2/P3 migration moves the rules onto --r-*; until then the
+     menumate literals are still the ones nine rules read. */
+  --r-xs: 4px;     /* .kbd, .badge      */
+  --r-sm: 6px;     /* .btn, .input, .switch track */
+  --r-md: 8px;     /* .card, .list, .sheet — also the existing --radius-list */
+  --r-lg: 10px;    /* .popover          */
+  --r-full: 999px; /* .badge--pill, .dot */
+
+  /* ---- elevation (3.4). Hairline-first: a desktop utility has no elevation
+     problem, it has a SEPARATION problem, so only the two overlays lift. */
+  --elev-0: none;                              /* flush                        */
+  --elev-1: 0 0 0 .5px var(--line-hairline);   /* the hairline                 */
+  --elev-2: 0 1px 2px rgba(0,0,0,.06),
+            0 4px 12px rgba(0,0,0,.06);        /* popover, menu                */
+  --elev-3: 0 8px 32px rgba(0,0,0,.18),
+            0 2px 8px rgba(0,0,0,.10);         /* sheet / modal                */
+
+  /* ---- motion (3.5). Two kinds, both feedback: a 120ms state change on a
+     control the user just operated, and the live dot's 2s breathing pulse,
+     which is the capture control's entire signal. Nothing animates on first
+     paint: a settings window that fades in feels slow. */
+  --dur-instant: 0ms;
+  --dur-fast: 120ms;   /* hover, focus, switch, chip   */
+  --dur-base: 180ms;   /* popover in, accordion, sheet  */
+  --dur-slow: 240ms;   /* sheet content cross-fade      */
+  --ease-out: cubic-bezier(.2, .8, .3, 1);
+  --ease-in-out: cubic-bezier(.4, 0, .2, 1);
+
+  /* ---- the wash behind a row's trailing badge. menumate's BadgeTone.gray is
+     MMColor.label at 0.08 (App/UI/DesignSystem.swift:510), and MMColor.label is
+     Color.primary — so it is the ink of the theme at eight per cent, not a
+     grey of its own. Written as the two --fg-primary values at 0.08 rather than
+     as color-mix so it follows the file's own convention: a literal in :root, a
+     literal in the dark block, no engine feature in between. */
+  --badge-wash: rgba(29, 29, 31, 0.08);
+
   /* Radius scale, taken from menumate's MMRadius (App/UI/DesignSystem.swift:17-25),
      which distinguishes the shapes macOS actually distinguishes: a window corner
      is not a card corner is not a control corner. The old single 5px applied one
@@ -39,7 +208,13 @@
   --radius-card: 9px;      /* MMRadius.card     */
   --radius-control: 6px;   /* MMRadius.control  */
   --radius-badge: 5px;     /* MMRadius.badge    */
-  --radius: var(--radius-control);
+  /* A card AROUND a list of rows, which is a shape none of the four above is.
+     menumate draws it in two places with the same literal 8 — the review list
+     (App/UI/PackImportSheet.swift:267) and the action list inside an expanded
+     pack row (App/UI/PacksScreen.swift:343) — and deliberately not as a
+     named token: MMRadius.card is 9 and MMRadius.control is 6, so this is a
+     fifth value the reference distinguishes by using it twice. */
+  --radius-list: 8px;
 
   /* DELETED, and the reason is worth recording. --row-gap: 5px sat here for
      months justified by rectangle's extra-shortcuts POPOVER
@@ -50,6 +225,60 @@
      apply. A token that no rule consumes is a record of a decision that was
      never made. The 10px it should have carried is applied to the groups that
      are actually flex columns, below. */
+}
+
+/* --- the old vocabulary, kept as aliases ------------------------------------
+ *
+ * Sixteen names above were retired by the token block and about fifty rules
+ * still read them. Renaming every rule is a two-line-per-rule diff that touches
+ * the whole file and belongs to the phase that introduces the new class names,
+ * so instead each old name is defined ONCE, here, as an alias onto the token
+ * that carries the same obligation. The rules below therefore keep working
+ * unchanged while the source of truth is the semantic set, and the migration
+ * becomes: move a rule to the new name, delete its alias. Nothing here is a
+ * value; every line is a pointer, and the whole block dies in one commit.
+ */
+:root {
+  --text: var(--fg-primary);     /* 14 rules, all row labels and values    */
+  --text-dim: var(--fg-secondary);/* 29 rules; the tertiary tier is P2/P3  */
+  /* --line was one value doing three jobs, and the reason it is now an alias
+     for --line-default rather than for --line-strong is that most of its 17
+     uses are dividers. The five rules that are genuinely a control boundary
+     are on --line-strong, because that is the whole of the defect: a resting
+     input at 1.51:1 cannot be found by a keyboard user's eye. They are:
+         .ctl-input / .ctl-select            a field's extent
+         .ctl-toggle                        the switch track, off state
+         .ctl-actions button / .ctl-button   a button's extent
+         .ctl-tile                          a tile's extent
+         .note-dismiss                      the inline note's dismiss button
+     What is deliberately NOT on --line-strong, and why, because "make every
+     border dark" is not the same instruction:
+         .ctl            border-bottom, a divider between rows (criterion 2)
+         .masthead .faults .timeline .tl-row .about  structural dividers
+         .ctl-fact-value a read-only field, not an operable control, so 1.4.11
+                         does not apply and the divider tier is honest
+         .ctl-chip       a passive tag; its meaning is the word inside it
+         .ctl-card       a card outline. 3.1 gives card outlines the hairline
+                         tier, but demoting this one is a visual change with no
+                         acceptance criterion behind it, and P2 restructures
+                         these cards anyway — so it is flagged, not moved. */
+  --line: var(--line-default);
+  --bg: var(--bg-window);
+  --sel-bg: var(--accent); /* the active nav item: white on it clears 4.5:1 */
+  --hairline: var(--line-hairline);
+  /* MMColor.hairline (App/UI/DesignSystem.swift:58) is separatorColor at 0.7
+     opacity, and the 0.5pt stroke it is used at is the Retina hairline
+     (:71 kHairline). The derivation is kept exactly — --line-hairline over a
+     bridged ButtonBorder lands on #dfdfe0, which is the #dedee1 the old
+     color-mix(--line 70%) produced, so the list cards do not move a pixel. */
+  /* --done was #34c759, which is 2.22:1 on white and is the FILL of the
+     wizard's step-done disc: below the 3:1 floor that a mark owes. The state's
+     own fill token is --ok-fill, and pointing at it is what takes the disc from
+     2.22:1 to 5.02:1. The fuller resolution — a checkmark glyph on a NEUTRAL
+     surface, so "derived as done" is carried by shape rather than by a visible
+     fill — is the wizard's, and lands with the wizard. */
+  --done: var(--ok-fill);
+  --radius: var(--radius-control);
 }
 
 /* THE MACOS-NATIVE FIX, and the reason this app did not feel like a Mac app.
@@ -77,10 +306,19 @@
    deliberate contrast decision outranks a consistency one. */
 @supports (color: AccentColor) {
   :root {
-    --text: CanvasText;
-    --text-dim: GrayText;
-    --line: ButtonBorder;
-    --bg: Canvas;
+    --fg-primary: CanvasText;
+    --fg-secondary: GrayText;
+    /* ButtonBorder is macOS's own control boundary, and it is the token that
+       OWES the 3:1 of 1.4.11, so it is the one that bridges to it. The two
+       weaker lines have no system colour and keep deriving from --fg-primary,
+       which now resolves to CanvasText, so they follow the user's appearance
+       too. The old file bridged --line, which was doing this job and two
+       weaker ones at the same value; the obligation is what moves. */
+    --line-strong: ButtonBorder;
+    --line-hairline: color-mix(in srgb, ButtonBorder 70%, transparent);
+    --bg-window: Canvas;
+    --bg-sidebar: ButtonFace;  /* the rail's own colour today, kept bridged */
+    --bg-raised: ButtonFace;
     --bg-sunken: ButtonFace;   /* NSColor.controlBackgroundColor vs windowBackgroundColor */
     --accent: AccentColor;
     --sel-bg: AccentColor;
@@ -96,32 +334,199 @@
   }
   /* The active nav row is the one place white-on-accent appears, and a user
      accent is not guaranteed to be dark enough for white to clear 4.5:1. Keep
-     the OS's own selection pairing, which is computed for exactly this. */
+     the OS's own selection pairing, which is computed for exactly this.
+     The selected STEP row is the second place, and it is filled with the same
+     accent for the same reason (App/UI/PackImportSheet.swift:255). */
   .section.is-active {
     background: var(--sel-bg);
     color: HighlightText;
+  }
+
+  .ctl-step.is-current {
+    color: HighlightText;
+  }
+
+  /* The filled mark on the selected row knocks its check out in the row's own
+     ink, so the ink has to be the OS pairing rather than a literal white. */
+  .ctl-step.is-current .ctl-step-mark {
+    color: HighlightText;
+  }
+
+  .ctl-step.is-current[data-done='true'] .ctl-step-mark {
+    background: HighlightText;
+    border-color: HighlightText;
+    color: var(--sel-bg);
   }
 }
 
 /* Dark mode is not a palette swap of the same values: the light accent and
    danger sit below 4.5:1 on a near-black field, so each gets its own step
-   here. --sel-bg stays dark enough to keep white text readable. */
+   here. --sel-bg stays dark enough to keep white text readable.
+
+   The theme is already compliant and this block does not pretend otherwise.
+   Measured on #1e1e1e: --fg-primary #f5f5f7 15.31:1, --fg-secondary #a1a1a6
+   6.48:1, --fg-tertiary #8a8a8f 4.85:1, --accent #5b9bff 6.02:1, --ok #4ade80
+   9.57:1, --warn #fbbf24 9.99:1, --danger #ff6f81 6.23:1, --live #4ade80
+   9.57:1, --sel-bg #1f5fbf against white 6.09:1. Every tier passes AA.
+
+   What this block ADDS is the third tier, which the old one lacked entirely: it
+   had --text and --text-dim and nothing dimmer, so every timestamp, section cap
+   and disabled ink in dark mode was drawn at full secondary weight. And it
+   corrects --fg-secondary from #98989d to #a1a1a6, because the rail and the
+   list cards are --bg-sunken #2a2a2c and #98989d is 4.86:1 there against 5.57:1
+   for the step. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --text: #f5f5f7;
-    --text-dim: #98989d;
-    --line: #3a3a3c;
-    --bg: #1e1e1e;
+    --bg-window: #1e1e1e;
+    --bg-sidebar: #1c1c1e;
+    --bg-raised: #252528;      /* raised ABOVE the window plane */
     --bg-sunken: #2a2a2c;
+    --bg-hover: rgba(255, 255, 255, .06);
+    --bg-pressed: rgba(255, 255, 255, .10);
+    --bg-selected: color-mix(in srgb, var(--accent) 12%, transparent);
+
+    --fg-primary: #f5f5f7;
+    --fg-secondary: #a1a1a6;   /* the light #6e6e73 would be 3.29:1 here */
+    --fg-tertiary: #8a8a8f;    /* 4.85:1 — timestamps and caps only     */
+    --fg-onaccent: #ffffff;
+    --fg-link: #5b9bff;
+
+    /* 33% is the 3:1 point on #1e1e1e, so --line-strong clears it with room */
+    --line-hairline: rgba(255, 255, 255, .12);   /* 1.44:1 — decorative  */
+    --line-default:  rgba(255, 255, 255, .22);   /* 2.07:1 — dividers    */
+    --line-strong:   rgba(255, 255, 255, .45);   /* 4.40:1 — control edge */
+
     --accent: #5b9bff;
-    --danger: #ff6f81;
-    --live: #4ade80;
+    --accent-hover: #7aafff;
+    --accent-tint: color-mix(in srgb, var(--accent) 12%, transparent);
+    --accent-ring: color-mix(in srgb, var(--accent) 45%, transparent);
+
+    --ok: #4ade80;  --ok-fill: #30d158;  --ok-wash: rgba(48, 209, 88, .20);
+    --warn: #fbbf24;  --warn-fill: #d97706;  --warn-wash: rgba(217, 119, 6, .20);
+    --danger: #ff6f81;  --danger-fill: #ff453a;  --danger-wash: rgba(255, 69, 58, .20);
+    --live: #4ade80;  --live-fill: #30d158;  --live-wash: rgba(48, 209, 88, .20);
+
+    --elev-2: 0 1px 2px rgba(0, 0, 0, .5), 0 4px 12px rgba(0, 0, 0, .45);
+    --elev-3: 0 8px 32px rgba(0, 0, 0, .6), 0 2px 8px rgba(0, 0, 0, .5);
+
     --sel-bg: #1f5fbf;
+    --badge-wash: rgba(245, 245, 247, 0.08); /* --fg-primary at 0.08, dark */
+  }
+}
+
+/* --- density (7.3) ----------------------------------------------------------
+ *
+ * Compact is the DEFAULT, declared in the token block above; this is the other
+ * setting. The attribute lands on :root, so a rule that needs the row rhythm
+ * reads --row-pad-block and never tests the attribute itself: the density is a
+ * value, not a branch, and the moment a rule has to ask "which density am I in"
+ * the two have stopped being one scale.
+ */
+:root[data-density='comfortable'] {
+  --row-pad-block: var(--sp-4);   /* 12px */
+  --row-min-height: 44px;
+  --control-height: 28px;
+  --nav-min-height: 30px;
+  --page-pad-x: var(--sp-7);      /* 24px */
+}
+
+/* --- prefers-contrast: more -------------------------------------------------
+ *
+ * A window-management utility is used for hours, often on a laptop panel in
+ * daylight, and the two things that suffer first are the weakest line and the
+ * dimmest ink. Six points of alpha on each line tier moves every one of them
+ * up a step without changing which tier any rule reads, and folding tertiary
+ * into secondary costs nothing because tertiary is not allowed to carry a value
+ * in the first place.
+ *
+ * The selected nav row gains a 2px SOLID border, drawn as an inset box-shadow
+ * rather than a border: a real border would add 4px to a row that is height-
+ * constrained by --nav-min-height, and the point of the accommodation is that
+ * the row is still the row. The border is the strongest ink available rather
+ * than the accent, because the accent is P2's 3px selection bar and a second
+ * accent claim in the same row is the saturated-pill tell this design exists to
+ * remove.
+ */
+@media (prefers-contrast: more) {
+  :root {
+    --line-hairline: color-mix(in srgb, var(--fg-primary) 20%, transparent);
+    --line-default:  color-mix(in srgb, var(--fg-primary) 44%, transparent);
+    --line-strong:   color-mix(in srgb, var(--fg-primary) 56%, transparent);
+    --fg-tertiary: var(--fg-secondary);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --line-hairline: rgba(255, 255, 255, .18);
+      --line-default:  rgba(255, 255, 255, .28);
+      --line-strong:   rgba(255, 255, 255, .51);
+    }
+  }
+
+  .section.is-active {
+    box-shadow: inset 0 0 0 2px var(--fg-primary);
+  }
+}
+
+/* --- prefers-reduced-transparency: reduce ----------------------------------
+ *
+ * Every wash in this file is rgba or a color-mix against transparent, and a
+ * translucent surface is a legibility problem exactly when the display is
+ * configured to be hard to read. The values below are the SAME colours already
+ * composited against their own window plane, so nothing about the design
+ * changes except that alpha stops being part of it. --bg-sunken needs no entry:
+ * it is already opaque in both schemes, and a rule that listed it would be
+ * claiming a translucency it does not have.
+ */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --bg-hover: #f2f2f2;
+    --bg-pressed: #e8e8e8;
+    --bg-selected: #e2edff;    /* --accent at 12% over #ffffff */
+    --accent-tint: #e2edff;
+    --accent-ring: #91baff;    /* --accent at 45% over #ffffff */
+    --ok-wash: #e8f2ec;
+    --warn-wash: #f8eee6;
+    --danger-wash: #fae9ec;
+    --live-wash: #e3f4e9;
+    --line-hairline: #dfdfe0;
+    --line-default: #a9a9aa;
+    --line-strong: #8e8e8f;
+    --badge-wash: #ededed;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg-hover: #2c2c2c;
+      --bg-pressed: #353535;
+      --bg-selected: #252d39;  /* --accent at 12% over #1e1e1e */
+      --accent-tint: #252d39;
+      --accent-ring: #395683;  /* --accent at 45% over #1e1e1e */
+      --ok-wash: #22422a;
+      --warn-wash: #433019;
+      --danger-wash: #4b2624;
+      --live-wash: #22422a;
+      --line-hairline: #393939;
+      --line-default: #505050;
+      --line-strong: #838383;
+      --badge-wash: #2f2f2f;
+    }
   }
 }
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  /* 3.2's root. The whole file is currently px, and §9 records that as a real
+     defect rather than a stylistic one — a WKWebView reaches NSFont only
+     through relative units, so `⌘+` and the Accessibility text-size control
+     scale a rem/em rule and silently ignore a px one. Declaring the root here
+     is what makes the --fs-* tokens above resolve to the px the table in 3.2
+     names, and it is inert today: the file contains no rem and no em-rooted
+     length, so nothing below moves a pixel. */
+  font-size: 13px;
 }
 
 html,
@@ -133,8 +538,11 @@ body,
 
 body {
   /* System font stack: the shell is a macOS app, so it should look like one
-     rather than falling back to a browser default. */
-  font: 13px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+     rather than falling back to a browser default. The stack itself is the
+     --font token (3.2) so a shorthand rule can name it too. */
+  font-family: var(--font);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
@@ -154,57 +562,295 @@ body {
   height: 100%;
 }
 
-/* --- masthead and the two status lines ------------------------------------ */
+/* --- the status strip, the callout and the banner (5.1) --------------------
+ *
+ * This block replaces .masthead / .status / .faults, and it is the single most
+ * important fix in the document. The app's most consequential state used to be
+ * a 12px dim corner note under a 15px wordmark, and the one line that tells a
+ * first-run user they must grant Input Monitoring was that same 12px red line.
+ * For the person this app exists for, the most important fact in the window
+ * was indistinguishable from a status blurb.
+ *
+ * .masthead and .masthead h1 are DELETED rather than restyled (5.2). The
+ * window is a native Wails/NSWindow and the OS already draws a title bar with
+ * the app name, so a horizontal band of logo + grey text above the app is the
+ * "web page header" tell; the page title moves into the content pane in P2.
+ *
+ * Nothing below is keyed on a page id, a control id or a plugin id. The four
+ * states are the daemon's own four, so a plugin that ships a page cannot
+ * produce a fifth rule — the rule App.tsx:34-40 states is the reason the state
+ * lives in a data attribute rather than in a class per page.
+ */
 
-.masthead {
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  /* flex: none is not in 5.1's block and is load-bearing: .window is a column
+     flexbox, and a status strip that can be squeezed is a status strip that
+     disappears exactly when the window is short — the case it exists for. */
+  flex: none;
+  min-height: 32px;
+  padding: 0 var(--sp-7);
+  background: var(--bg-sidebar);
+  border-bottom: var(--elev-1);
+  font: var(--fs-small)/1 var(--font);
+}
+
+.statusbar-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-full);
+  background: var(--fg-tertiary);
+  flex: none;
+}
+
+.statusbar[data-state='ok'] .statusbar-dot {
+  background: var(--ok-fill);
+}
+.statusbar[data-state='degraded'] .statusbar-dot {
+  background: var(--warn-fill);
+}
+.statusbar[data-state='down'] .statusbar-dot {
+  background: var(--danger-fill);
+}
+.statusbar[data-state='connecting'] .statusbar-dot {
+  animation: breathe 2s var(--ease-in-out) infinite;
+}
+
+/* The sentence, not the dot, is what says what is happening. That is the
+   never-colour-alone rule (1, and it stays) applied to the one place in the
+   window where a colour would have been the whole message. */
+.statusbar-text {
+  color: var(--fg-primary);
+}
+
+.statusbar-meta {
+  margin-left: auto;
+  color: var(--fg-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The connecting dot breathes rather than spins: 3.5 keeps the 2s opacity
+   cycle the live dot already uses and keeps it a keyframes, never a JS
+   re-render. Under prefers-reduced-motion the global block collapses it to a
+   single pass, which leaves a static tertiary dot — still visibly not-yet-up,
+   and never animated. */
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.callout {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: var(--sp-3);
+  align-items: start;
+  margin: 0 0 var(--sp-5);
+  padding: var(--sp-4);
+  border: 1px solid color-mix(in srgb, var(--warn) 28%, transparent);
+  border-radius: var(--r-md);
+  background: var(--warn-wash);
+}
+
+.callout[data-tone='danger'] {
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  background: var(--danger-wash);
+}
+
+/* The mark is decoration. Every bit of the meaning is in the title, so it is
+   aria-hidden at the call site and the glyph is the one 4.2's mock draws. */
+.callout-icon {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--warn);
+}
+
+/* The middle grid track is minmax(0, 1fr), and min-width: 0 is what lets the
+   daemon's string inside it actually wrap. Without it a grid item's automatic
+   minimum size is its longest unbreakable run, so one long install path in
+   .callout-raw would push the actions column off the right edge. */
+.callout-body {
+  min-width: 0;
+}
+
+.callout[data-tone='danger'] .callout-icon {
+  color: var(--danger);
+}
+
+.callout-title {
+  margin: 0 0 var(--sp-1);
+  font: 590 var(--fs-body)/1.4 var(--font);
+}
+
+.callout-text {
+  margin: 0;
+  font: var(--fs-small)/1.5 var(--font);
+  color: var(--fg-secondary);
+}
+
+/* The daemon's own string, verbatim, in a mono block under a human sentence —
+ * 8.2. Paraphrasing it is where the meaning is lost: the daemon knows which
+ * permission and which call failed, and the shell does not. */
+.callout-raw {
+  margin: var(--sp-2) 0 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--bg-sunken);
+  color: var(--fg-secondary);
+  font: var(--fs-mono)/1.45 var(--font);
+  overflow-wrap: anywhere;
+}
+
+.callout-actions {
+  display: flex;
+  gap: var(--sp-2);
+  align-self: center;
+}
+
+/* .btn arrives here because 5.1's callout markup is written in it and this is
+ * the phase that ships that markup (12.1: `.ctl-button` KEEPS its name and
+ * gains tiers; `.btn` is the new name, and P3 is where the remaining tiers
+ * and the move off .ctl-button happen). Only the two tiers 5.1 asks for are
+ * defined, so this is a two-button subset and not a rival to the one in P3. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-height: 26px;
+  padding: 0 var(--sp-4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-raised);
+  color: var(--fg-primary);
+  font: var(--fs-small)/1 var(--font);
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn--primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--fg-onaccent);
+  font-weight: 600;
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn--ghost {
+  border-color: transparent;
+  background: none;
+}
+
+.btn--sm {
+  min-height: 22px;
+  padding: 0 var(--sp-3);
+  font: var(--fs-meta)/1 var(--font);
+}
+
+/* Four bridge sources failing is an ENGINEERING state, not a user state: the
+ * daemon is up and the settings still work. The old .faults block said the
+ * opposite — four red paragraphs, indistinguishable from the app being broken
+ * (5.1, and acceptance criterion 8). One band, the messages folded away, and
+ * the copy out. */
+.banner {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
-  padding: 14px 20px 10px;
-  border-bottom: 1px solid var(--line);
+  align-items: center;
+  gap: var(--sp-2) var(--sp-4);
+  flex: none;
+  padding: var(--sp-3) var(--sp-7);
+  background: var(--danger-wash);
+  border-bottom: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  font: var(--fs-body)/1.4 var(--font);
 }
 
-.masthead h1 {
+.banner-title {
   margin: 0;
-  font-size: 15px;
-  font-weight: 600;
+  font-weight: 590;
 }
 
-.status {
-  margin: 0;
-  color: var(--text-dim);
-  font-size: 12px;
+.banner-detail {
+  min-width: 0;
+  font: var(--fs-meta)/1.4 var(--font);
+  color: var(--fg-secondary);
 }
 
-/* The tap error is the line that teaches the user which permission to grant,
-   so it is weighted as well as coloured: colour alone is not the signal. */
-.status.is-error {
-  color: var(--danger);
-  font-weight: 600;
+.banner-detail summary {
+  cursor: default;
 }
 
-.faults {
-  padding: 8px 20px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-sunken);
+.banner-detail p {
+  margin: var(--sp-1) 0 0;
+  font: var(--fs-mono)/1.45 var(--font);
+  overflow-wrap: anywhere;
 }
 
-.faults p {
-  margin: 0;
-}
-
-.faults p + p {
-  margin-top: 4px;
+.banner-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-left: auto;
 }
 
 /* --- page navigation -------------------------------------------------------
  *
- * A fixed-width left rail with a small cap over each group of pages, ported
- * from menumate's sidebar (tmp/research/menumate/App/UI/MenuHubScreen.swift:65
- * the 326pt rail beside a detail pane, :692-710 SectionCap the 9.5pt
- * semibold tracked label over a section). Layout and label treatment transfer;
- * the SwiftUI drawing does not, and nothing in this file knows a group name.
+ * A fixed-width left rail with a small cap over each group of pages, grouped
+ * sections, a hairline down the trailing edge, and a filled row for the open
+ * page. The anatomy is menumate's sidebar
+ * (tmp/research/menumate/App/UI/MenuHubScreen.swift:94-130 the column, :65 its
+ * frame, :67-69 the trailing hairline, :102-114 the search field that is NOT
+ * here — see below; :692-712 SectionCap, the 9.5pt semibold tracked label over
+ * each section; :790-794 TierRow's selected fill and its 6pt continuous
+ * corner). Layout and label treatment transfer; the SwiftUI drawing does not,
+ * and nothing in this file knows a group name.
+ *
+ * THE WIDTH is taken from the other reference instead, and the reason is that
+ * it is the one measured against this window. Karabiner-Elements is a real
+ * macOS settings app whose sidebar is the same KIND of thing this one is — a
+ * list of settings pages in named sections — and its window is the same size
+ * (1100pt, src/apps/SettingsWindow/src/View/ContentView.swift:4; CrossOS opens
+ * at 1100x720 in app/main.go:85). It sizes that sidebar
+ * `navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 500)` with
+ * defaultWidth 250 (src/apps/share/swift/Views/SidebarStyle.swift:35 and :39),
+ * and the comment on that line says why: "Allow resizing for longer localized
+ * sidebar titles" — a width chosen so titles FIT, at this window width.
+ * menumate's 326pt is a defensible number too, but it is measured against a
+ * different window (minWidth 760, App/UI/SettingsWindow.swift:32) and against a
+ * rail whose rows carry a 13pt grip, a 17pt icon and a trailing switch
+ * (TierRow, :735-786). This rail's rows are words and nothing else, so the
+ * reference that sized a rail of words is the one that governs.
+ *
+ * NO SEARCH FIELD, and that is a decision rather than an omission. menumate's
+ * field is there because its rail lists things nobody can enumerate up front:
+ * its searchMatches runs over menu actions, the discovered system services and
+ * every registered plug-in extension (:499-518), a population that is large
+ * and unknowable without looking. The other settings rail on disk is the
+ * closer case and omits it: Karabiner's sidebar holds SEVENTEEN items in four
+ * sections (ContentMainView.swift:95-140) and has no search in it — its
+ * SearchField (src/apps/SettingsWindow/src/View/SearchField.swift) is an
+ * NSSearchField over page CONTENT, reached with cmd-F or "/", not a navigator.
+ * CrossOS's rail is fifteen declared pages in four groups
+ * (app/backend/*.go, the contrib(...) calls), which a person can read in one
+ * glance. A filter over a list that short promises navigation power the
+ * surface does not have; it would also add a shell opinion about the nav,
+ * which App.tsx's header reserves for the daemon.
  */
 
 .body {
@@ -215,24 +861,61 @@ body {
 
 .sections {
   flex: none;
-  width: 200px;
+  width: 250px; /* Karabiner SidebarStyle.swift:39 defaultWidth */
   overflow-y: auto;
-  padding: 8px 8px 16px;
-  border-right: 1px solid var(--line);
+  /* Top 12 and sides 10 are the reference's own numbers for this column
+     (MenuHubScreen.swift:119 .padding(.top, 12) and :124
+     .padding(.horizontal, 10)); the 8px this had was neither. The bottom 16 is
+     CrossOS's own and stays: the space menumate leaves at the foot of a
+     sidebar is its action bar (:128, :133), and this rail has no equivalent
+     to put there. */
+  padding: 12px 10px 16px;
+  /* A 0.5pt hairline, not a 1px rule: MenuHubScreen.swift:67-69 draws the
+     divider as `Rectangle().fill(MMColor.separator).frame(width: 0.5)`, and
+     0.5 is the value the reference pins for a hairline everywhere else
+     (DesignSystem.swift:71 kHairline). WebKit keeps the half pixel on a Retina
+     display rather than rounding it up to a full one, which is the point.
+     --line-hairline, not --line-default: this separates the rail from the
+     content plane and nothing depends on being able to see it do so. */
+  border-right: 0.5px solid var(--line-hairline);
   background: var(--bg-sunken);
 }
 
+/* The air between one group's last row and the next group's cap. In the
+   reference that gap is the space around its `sep` — a 0.5pt rule with 5pt of
+   padding above and below (:482-487) — plus the cap's own 2pt top (:711), so
+   it lands at about ten. CrossOS draws no rule there: the reference draws
+   hairlines BETWEEN its sections because its sections are bands inside one
+   previewed menu, whereas these are nav sections, and the system settings
+   rail Karabiner builds from `Section { } header:` (:131-140) draws none. */
 .nav-group + .nav-group {
   margin-top: 10px;
 }
 
 .nav-group-title {
   margin: 0;
-  padding: 4px 6px 3px;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  /* Vertical padding is the reference's: 2pt above, 3pt below
+     (MenuHubScreen.swift:711 and :710). The 4px above is what this had. The
+     6px of SIDE padding is CrossOS's own and stays — the cap has to line up
+     with the row labels under it, and the reference's 14pt does not line up
+     with its own rows because a 13pt grip and a 17pt icon sit in front of
+     them (TierRow :735-786). */
+  padding: 2px 6px 3px;
+  font-size: 9.5px; /* :704 */
+  font-weight: 600; /* :704, .semibold */
+  letter-spacing: 0.04em; /* :705, .tracking(0.4) — 0.4pt at 9.5px is 0.042em */
+  /* UPPERCASE, and it is CrossOS's own: the reference sets no case at all
+     (:703-706 sets size, weight, tracking and colour and nothing else), and
+     Karabiner sets none either because `Section { } header:` (:138) hands the
+     header to SwiftUI, which draws it. What settles it here is content: the
+     reference's caps are multi-word localized phrases that read as sentences
+     at 9.5pt, and these are single daemon-supplied words, where a tracked
+     caps treatment is the macOS source-list convention. Left as it shipped. */
   text-transform: uppercase;
+  /* --text-dim, not the reference's MMColor.label3. The reference does go one
+     step dimmer than its own body ink here (:706), and there is no CSS system
+     colour for tertiaryLabel — --text-dim already resolves to GrayText, the
+     secondary — so matching it exactly would mean a new token used once. */
   color: var(--text-dim);
 }
 
@@ -247,7 +930,6 @@ body {
   margin-right: 0.3em;
   text-align: center;
   color: var(--text-dim);
-}
 }
 
 .section {
@@ -271,19 +953,43 @@ body {
 .section-label {
   flex: 1;
   min-width: 0;
-  overflow-wrap: anywhere;
+  /* Tail-truncation, not wrapping. The reference's row title is
+     `.lineLimit(1)` + `.truncationMode(.tail)` (MenuHubScreen.swift:764-765):
+     one line, cut with an ellipsis. This had `overflow-wrap: anywhere`, which
+     breaks a long daemon-supplied title mid-WORD and can wrap a row to two
+     lines — and a source list whose rows are not all one line tall stops
+     scanning as a list. `min-width: 0` above is what lets the ellipsis fire
+     instead of the row overflowing its column. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* The first-run marker is a hint, not a warning, so it stays in the dim ink
-   the inactive rows use and is hidden on the active row — the fill already
-   says which page is open. */
+/* The first-run marker, which is the row's trailing badge. Its shape is
+   menumate's Badge (App/UI/DesignSystem.swift:520-538): 10.5pt semibold, 0.1
+   tracking, 1.5/7 padding, MMRadius.badge's 5pt corner (:20), on BadgeTone
+   .gray's wash — the theme's ink at 0.08 (:510), which is --badge-wash. A
+   marker set as a chip is legible as a chip; the same words as loose text at
+   the same size were legible only by luck. */
 .section-flag {
   flex: none;
-  font-size: 9.5px;
+  padding: 1.5px 7px;
+  border-radius: var(--radius-badge);
+  background: var(--badge-wash);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
   color: var(--text-dim);
 }
 
+/* On the open page the marker keeps the on-accent ink and loses its wash: the
+   fill already says which page is open, and a grey chip sitting on the accent
+   would be a second, weaker claim. The reference greys the badge instead
+   (MenuHubScreen.swift:775 `tone: selected ? .gray : badge.1`), which paints
+   label2 text on the accent fill — this keeps the existing decision, which
+   hands the pairing to the OS in the @supports block above. */
 .section.is-active .section-flag {
+  background: transparent;
   color: inherit;
 }
 
@@ -342,7 +1048,10 @@ body {
 .note-dismiss {
   appearance: none;
   flex: none;
-  border: 1px solid var(--line);
+  /* A button is a control boundary, so it reads --line-strong and reaches the
+     3:1 of 1.4.11. It was --line, which is 1.51:1: a control the eye could not
+     find. */
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background: var(--bg);
   color: var(--text);
@@ -407,7 +1116,11 @@ body {
   appearance: none;
   min-width: 0;
   min-height: 26px;
-  border: 1px solid var(--line);
+  /* --line-strong (3.27:1), NOT --line. This is the boundary of an interactive
+     control and WCAG 1.4.11 asks 3:1 of exactly that; --line is --line-default
+     at 2.35:1, which is the divider tier. At the old 1.51:1 a keyboard user's
+     eye could not find where the field ended. */
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background: var(--bg);
   color: var(--text);
@@ -441,7 +1154,11 @@ body {
   height: 22px;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--line);
+  /* The switch track is a control boundary (1.4.11) — see .ctl-input above for
+     why this is --line-strong and not --line. The off state is what matters
+     here: it is the only thing telling a low-vision user where the control
+     begins and ends when it is unchecked. */
+  border: 1px solid var(--line-strong);
   border-radius: 11px;
   background: var(--bg-sunken);
   cursor: pointer;
@@ -475,12 +1192,21 @@ body {
   background: #fff;
 }
 
+/* A list of rows in a CARD, which is the same shape as the stepper above and is
+   drawn from the same reference. menumate gives its two list cards identical
+   treatment — the review list (App/UI/PackImportSheet.swift:266-269) and the
+   action list inside an expanded pack row (App/UI/PacksScreen.swift:342-345) —
+   so this shell's one list card takes one treatment rather than the 1px/6px it
+   had: MMColor.card on a 0.5pt MMColor.hairline stroke around an 8pt corner.
+   The rows keep their own padding, which the reference's rows also set
+   individually (PackImportSheet.swift:253-254, PacksScreen.swift:337-338). */
 .ctl-list {
   margin: 4px 0 0;
   padding: 0;
   list-style: none;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  background: var(--bg-sunken); /* MMColor.card */
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-list);
   overflow: hidden;
 }
 
@@ -490,7 +1216,7 @@ body {
   align-items: baseline;
   gap: 4px 12px;
   padding: 6px 9px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 0.5px solid var(--hairline);
   min-width: 0;
 }
 
@@ -598,6 +1324,149 @@ body {
   font-style: italic;
 }
 
+/* --- the detail pane -------------------------------------------------------
+ *
+ * A screen that STATES facts about a thing rather than offering controls to
+ * change it, ported from menumate's pack detail (App/UI/MenuHubPanels.swift).
+ * The reference is the one file in that tree built this way; its rows are
+ * lockRow (:620-633) and PvField (:27-45), and its value is drawn as MMField
+ * (App/UI/DesignSystem.swift:451-482).
+ *
+ * Four things came across, and only four:
+ *
+ *   1. THE KEY COLUMN IS FIXED AND RIGHT-ALIGNED. lockRow puts its label in
+ *      `.frame(width: 70, alignment: .trailing)` and PvField repeats it. Every
+ *      value in the pane therefore starts at the same x, so a reader scans a
+ *      column of facts down the page instead of parsing four sentences. This
+ *      is the one decision that makes the pane read as a pane, and it is a
+ *      decision about the LABEL: the value column is fluid, because the same
+ *      panel gives its values 150pt (MMField, :647), 200pt (:660) and 180pt
+ *      (:670) — a version and a permission error do not want one width.
+ *   2. THE VALUE IS A FIELD, NOT TEXT. Sunken background, 9x4 padding, the
+ *      control radius, a hairline stroke. The box says "this is a value" the
+ *      way a borderless sentence cannot.
+ *   3. MONOSPACE IS A RULE, NOT A STYLE. MMField takes `mono` and the caller
+ *      sets it for the UTI row and not the target row: "public.image" is a
+ *      token and "files only" is words. A reader can then tell from the face
+ *      alone whether a value is machine vocabulary or something a person named,
+ *      which is the whole point of the flag.
+ *   4. TWO SPACINGS, NOT ONE. The pane's VStack runs 13 between its LEVELS
+ *      (:637 — header, description, rows) and the rows' own VStack runs 10
+ *      between ROWS (:657). 13/10 is the ratio that separates "these are
+ *      different kinds of thing" from "these are the same kind of thing". One
+ *      uniform gap is what turns a detail pane back into a wall.
+ *
+ * The lock at the end of every row is the reference's own signal (lock.fill,
+ * 11pt, third tone, under the row's opacity 0.7): these are stated facts, and
+ * the state word beside them is what says so in words.
+ *
+ * The level spacing (rule 4) and the description's tone are applied through
+ * :has() on the frame rather than by restyling .ctl, because .ctl is shared by
+ * every control in the registry and a form row is not a detail pane.
+ */
+
+.ctl:has(> .ctl-facts) {
+  /* MenuHubPanels.swift:637 — 13 between the pane's levels. Replaces the
+     .ctl grid's 4px, which is a form's row rhythm, not a pane's. */
+  row-gap: 13px;
+}
+
+.ctl:has(> .ctl-facts) > .ctl-value {
+  /* MenuHubPanels.swift:645-646 — the description under the title is 11.5pt in
+     the SECOND text tone, never in the first. It describes the pane; it is not
+     one of the pane's values. */
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+.ctl-facts {
+  display: flex;
+  flex-direction: column;
+  /* MenuHubPanels.swift:657 — 10 between rows, tighter than the 13 between
+     levels above them. */
+  gap: 10px;
+  min-width: 0;
+}
+
+.ctl-fact {
+  display: grid;
+  /* lockRow: label in a fixed 70pt trailing-aligned column, value beside it at
+     the HStack's 11pt spacing. */
+  grid-template-columns: 70px minmax(0, 1fr);
+  column-gap: 11px;
+  align-items: baseline;
+  /* lockRow's `.opacity(0.7)`: a pane is read, not edited, and the whole block
+     sitting back is what says so. */
+  opacity: 0.7;
+  min-width: 0;
+}
+
+.ctl-fact-key {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: right;
+}
+
+.ctl-fact-body {
+  display: flex;
+  align-items: baseline;
+  /* The same 11pt as the key gap: lockRow spaces label, value and lock
+     identically because none of the three is subordinate to another. */
+  gap: 11px;
+  min-width: 0;
+}
+
+.ctl-fact-value {
+  /* MMField, DesignSystem.swift:451-482 — MMColor.field maps to
+     --bg-sunken, and its 9x4 padding, control radius and hairline stroke come
+     across as they are. The 150pt width does NOT: this panel's value column is
+     fluid, because its values are a version, a sentence and a permission
+     error rather than three equal tokens. */
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* MMField's `mono ? .system(size: 13, design: .monospaced)`. The stack is the
+   one the activity timeline already uses in this file, so there is one
+   monospace face in the shell rather than two. */
+.ctl-fact-value.is-mono {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.ctl-fact-lock {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.ctl-fact-hint {
+  /* PvField's hint (MenuHubPanels.swift:37-42) — a second line under the
+     value, 11pt in the third tone, 3pt below it. */
+  grid-column: 2;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+/* MMGroup's footer, DesignSystem.swift:576-582 — one 11.5pt line under the
+   rows, in the second text tone. */
+.ctl-facts-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
 .ctl-error {
   color: var(--danger);
   font-weight: 600;
@@ -615,7 +1484,11 @@ body {
 .ctl-button {
   appearance: none;
   min-height: 26px;
-  border: 1px solid var(--line);
+  /* A button's own extent is a control boundary, so --line-strong (1.4.11).
+     Every button in the shell is this one rule, which is why P0 can move the
+     whole set in a single line: DESIGN.md §1 row 8 wants three tiers, and the
+     tiering lands on top of this one. */
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background: var(--bg);
   color: var(--text);
@@ -675,14 +1548,45 @@ body {
  * ordered list whose rows are buttons — keyboard reachable and announced as
  * steps, with aria-current on the open one. The index is in a fixed-width
  * column so the labels line up however long they are.
+ *
+ * THE CARD AND THE MARK are a port of menumate's review list, the gate on its
+ * pack import sheet: the list of things a person has to get through, in a card,
+ * each row carrying a mark, one row filled, and one line under the whole thing
+ * saying how much is left. That is the closest thing in that repository to a
+ * wizard, and it is the source of every measurement below.
+ *
+ *   App/UI/PackImportSheet.swift:230-277  reviewList
+ *     :253-254   row padding, 10 horizontal and 7 vertical
+ *     :257       the rule is an overlay on the TOP of every row after the
+ *                first, so the first row has none above it — which is what
+ *                border-bottom on all but :last-child already does
+ *     :236-245   the MARK: a filled circle once the row is accounted for, and
+ *                a 14x14 ring stroked at 1.3pt until then, both drawn in the
+ *                row's own ink
+ *     :239, :242 the mark is WHITE on the selected row (its ring at 0.6 white)
+ *                and MMColor.green off it
+ *     :255       the selected row is filled with the accent outright
+ *     :247-248   the row title is 12pt, semibold when the row is selected
+ *     :266-269   the container: MMColor.card in a RoundedRectangle(8,
+ *                .continuous) with a 0.5pt MMColor.hairline stroke
+ *     :271-275   the rollup, under the list: 11pt, label3, leading, 8pt above
+ *
+ * ONE THING DOES NOT COME ACROSS, and it is the corner STYLE rather than the
+ * corner size: `style: .continuous` is Apple's squircle and CSS has no
+ * continuous-curve primitive, so `border-radius` below draws the circular arc
+ * instead. The 8 is the reference's and is kept; the curve is the medium's.
  */
 
 .ctl-steps {
   margin: 4px 0 0;
   padding: 0;
   list-style: none;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  background: var(--bg-sunken); /* MMColor.card */
+  /* 0.5pt, not 1px: :268-269 strokes the card with lineWidth 0.5 over
+     MMColor.hairline, and 0.5 is the hairline width the reference pins
+     everywhere else (DesignSystem.swift:71). */
+  border: 0.5px solid var(--hairline);
+  border-radius: var(--radius-list);
   overflow: hidden;
 }
 
@@ -690,30 +1594,97 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding: 0 9px;
-  border-bottom: 1px solid var(--line);
+  gap: 8px; /* :235 HStack(spacing: 8) */
+  padding: 7px 10px; /* :253-254 */
+  border-bottom: 0.5px solid var(--hairline); /* :257, over --hairline */
+  font-size: 12px; /* :247 .font(.system(size: 12)) */
 }
 
 .ctl-step:last-child {
   border-bottom: 0;
 }
 
+/* The selected row is the reference's :255 — filled with the accent, not tinted
+   with it. This is the second place white-on-accent appears after the nav row,
+   so it takes the same treatment and the same reason (see the @supports block
+   below): a user accent is not guaranteed to be dark enough for white. */
 .ctl-step.is-current {
-  background: var(--bg-sunken);
+  background: var(--sel-bg);
+  color: #fff;
+  font-weight: 600; /* :247 weight: isSel ? .semibold : .regular */
+}
+
+/* THE MARK, and the whole reason this row exists rather than a number and a
+   word. A filled circle says "the daemon has derived this as done" and a ring
+   says it has not, so how far along the reader is can be taken in without
+   reading four chips (the reference's :236-245, drawn at 14x14 with the ring
+   stroked at 1.3pt). The SHAPE is the signal and the colour only reinforces it,
+   which is why a mark that fails to render costs nothing: the "Done" chip
+   beside it is the same fact in words. */
+.ctl-step-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px; /* :244 .frame(width: 14, height: 14) */
+  height: 14px;
+  border: 1.3px solid var(--text-dim); /* :242-243, label4 */
+  border-radius: 50%;
+  color: var(--text-dim);
+}
+
+.ctl-step[data-done='true'] .ctl-step-mark {
+  background: var(--done); /* :239 MMColor.green */
+  border-color: var(--done);
+  color: #fff;
+}
+
+/* The check itself, drawn from two borders on a rotated box — the same trick
+   the select's chevron uses above, so it needs no image request and follows
+   the theme. The reference's checkmark.circle.fill is a glyph; this is the
+   closest a stylesheet gets without shipping an icon font. */
+.ctl-step[data-done='true'] .ctl-step-mark::after {
+  content: '';
+  width: 3px;
+  height: 6px;
+  margin-top: -2px;
+  border: solid #fff;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+/* On the selected row the mark keeps the row's own ink: white and filled when
+   the step is done (:239), a 0.6-white ring when it is not (:242). */
+.ctl-step.is-current .ctl-step-mark {
+  color: #fff;
+  border-color: color-mix(in srgb, #fff 60%, transparent);
+}
+
+.ctl-step.is-current[data-done='true'] .ctl-step-mark {
+  background: #fff;
+  border-color: #fff;
+  /* The reference's glyph is a filled disc with the check knocked out of it, so
+     on a white mark the check is whatever is behind it — which here is the
+     accent the row is filled with. */
+  color: var(--sel-bg);
+}
+
+.ctl-step.is-current[data-done='true'] .ctl-step-mark::after {
+  border-color: var(--sel-bg);
 }
 
 .ctl-step-button {
   appearance: none;
   display: flex;
   flex: 1;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 6px 0;
+  min-height: 22px;
+  padding: 0;
   border: 0;
   background: none;
-  color: var(--text);
+  color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -727,9 +1698,28 @@ body {
   font-size: 11px;
 }
 
+/* On the selected row the ordinal goes with everything else: the reference
+   paints the whole row in the selection ink (:248), and a dim index left
+   behind on a filled row is the one thing that would stop reading as selected. */
+.ctl-step.is-current .ctl-step-index {
+  color: inherit;
+}
+
 .ctl-step-label {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* THE ROLLUP, in the reference's position: one line under the list it counts
+   (:271-275 — 11pt, label3, leading-aligned, 8pt above the card). The
+   reference's English value is "Viewed 3 / 8 · view all to continue"; the
+   "n of m" is the shape, and the trailing clause is that screen's GATE, which
+   this wizard has no equivalent of — its Next is not blocked on looking. */
+.ctl-rollup {
+  margin: 0;
+  padding: 8px 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
 }
 
 /* --- the switcher tiles -----------------------------------------------------
@@ -764,7 +1754,11 @@ body {
   gap: 4px;
   overflow: hidden;
   padding: 10px 12px;
-  border: 1px solid var(--line);
+  /* A tile is a button with a custom shape, so its edge owes the same 3:1 as
+     any other control boundary. It matters more here than elsewhere: the tile
+     grid is a flat plane with no rules and no card behind it, so the border is
+     the only thing separating one window from the next. */
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background: var(--bg);
   color: var(--text);

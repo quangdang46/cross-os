@@ -37,18 +37,44 @@
 // (App/UI/OnboardingView.swift:210-213, where `granted` is a Bool? and the icon
 // is drawn only when it is non-nil). A row with no mark is honest about not
 // knowing; a row with a mark is a claim about the machine.
+//
+// THE ROW IS TWO LINES NOW, and that is the port rather than a redesign. The
+// reason used to sit on the label's own line as `ctl-value`, which put a Go
+// error value in the same visual rank as the thing it was explaining — and the
+// reason it is explaining is a log line: "adapter: tap refused (input-monitoring
+// consent missing?)" is `err.Error()` (core/internal/adapter/tap_cgo.go:43) and
+// it is not a sentence anybody fixes a permission from.
+//
+// The reference's row shape is a 13pt semibold title with an 11.5pt label2
+// description UNDER it at spacing 1 (OnboardingView.swift:198-213 permissionRow;
+// GeneralTab.swift:44-55 and :62-75 the same two lines in a preferences row), so
+// the description gets its own line here — `ctl-item is-block`, which is the
+// stacking row three other controls already use for a multi-line entry
+// (PluginDetailControl.tsx:72, PipelineTraceControl.tsx:242,
+// FileTypeListControl.tsx:609) and the only stacking the stylesheet offers
+// without a class name this tree may not invent (common.tsx's header).
+//
+// What goes on that line is lib/readinessReasons.ts's sentence, and it is two
+// sentences because the reference uses two: what is wrong, and then the next
+// action (GeneralTab.swift's DestructiveRestoreDialog, whose impact text at
+// :197-203 is a plain clause followed by the one that has to be believed, each
+// in its own voice). The TONE stays on the chip and off the words, which is the
+// reference's rule exactly: OnboardingView.swift:262-286 draws the mark in
+// orange or green while the text stays in `MMColor.label` and the sub-line in
+// `label3`, so a colour-blind reader and a screen reader get the same sentence.
 
 import type { ReactElement } from 'react'
 import type { ReadinessRow } from '../types/controls'
 import { useResource } from '../lib/useResource'
 import { humanize } from '../lib/format'
+import { CHIP, explainReadiness } from '../lib/readinessReasons'
+import type { ReasonTone } from '../lib/readinessReasons'
 import { ControlFrame, EmptyState } from './common'
 import type { ControlProps } from './common'
 
 /**
- * One readiness row as this file has always drawn it: the verdict chip, the
- * daemon's label, and — the part a person can act on — the daemon's own
- * sentence about what to do.
+ * One readiness row: the verdict chip, the daemon's label, and — under them —
+ * what is wrong in words, then what to do about it.
  *
  * It is exported because the wizard's closing hand-off (the last step of a
  * first-run flow) lists the SAME rows, and a hand-off that worded a row
@@ -56,14 +82,59 @@ import type { ControlProps } from './common'
  * control already exists to prevent: one number on one side of the window and
  * a different one on the other, for one machine. One component, so the wording
  * is one wording.
+ *
+ * THE RAW LINE IS NOT DELETED. Two reasons, and the second is the rule.
+ * First, it is still the truth: the mapping is the shell's, so somebody who
+ * needs to know what the daemon actually said needs a way to read it, and the
+ * row carries it in `title` for the pointer and draws it in the small line
+ * underneath for the screenshot. Second, lib/format.ts's header sets the rule for
+ * every formatter in this tree — "a caller that hides the raw value must keep it
+ * reachable (a title attribute), because a formatter that guesses wrong would
+ * quietly misreport the user's own configuration." A plain sentence over a
+ * dropped error string is that exact failure, so the daemon's own words ride
+ * along under the paraphrase, dimmer, the way DeclutterSheet.swift:104-109 puts
+ * the rejected count under the result sentence and a lastError under that.
+ *
+ * A detail the table does not know gets NO paraphrase. It is drawn as the
+ * daemon's own line, alone, with nothing invented above it — the same decision
+ * the reference makes in `onboarding.diag.extNotEnabled` ("Finder extension not
+ * yet enabled": a state, and no next action, because there was no door to point
+ * at). Shipping a stranger's sentence over an unmapped reason would be worse
+ * than shipping the log line with a dimmer font.
  */
 export function ReadinessLine(props: { row: ReadinessRow }): ReactElement {
   const { row } = props
+  const reason = row.detail ? explainReadiness(row.detail) : undefined
+  // The mark follows the reason's tone, and a reason the table does not know
+  // gets the plain "Not ready" — an unmapped reason is not an unread one, and
+  // drawing it grey would claim the machine had told us nothing when in fact it
+  // told us something this build has no words for.
+  const tone: ReasonTone = row.ready
+    ? 'ready'
+    : reason?.tone === 'unread'
+      ? 'unread'
+      : 'switchedOff'
   return (
-    <li className="ctl-item">
-      <span className="ctl-chip">{row.ready ? 'Ready' : 'Not ready'}</span>
+    <li className="ctl-item is-block" title={row.detail || undefined}>
+      <span className="ctl-chip">{CHIP[tone]}</span>
       <span className="ctl-label">{row.label || humanize(row.id)}</span>
-      {row.detail ? <span className="ctl-value">{row.detail}</span> : null}
+      {reason ? (
+        <>
+          <span className="ctl-value">{reason.what}</span>
+          {reason.next ? <span className="ctl-value">{reason.next}</span> : null}
+          {row.detail ? <span className="ctl-empty">{row.detail}</span> : null}
+        </>
+      ) : row.detail ? (
+        // Unmapped, and said to be unmapped rather than dressed in a sentence
+        // this shell wrote: the daemon's line, then the note that it has no
+        // plain form yet. `ctl-empty` is the dimmer voice the vocabulary has,
+        // and the reference's equivalent is a label2 sub-line under a result
+        // (OnboardingView.swift:279, DeclutterSheet.swift:108).
+        <>
+          <span className="ctl-value">{row.detail}</span>
+          <span className="ctl-empty">This build has no plainer wording for that yet.</span>
+        </>
+      ) : null}
     </li>
   )
 }

@@ -21,11 +21,15 @@
 // third_party/rectangle/ATTRIBUTION.md.
 //
 // The nav rail below is a second port, of menumate's sidebar rather than its
-// manifest: a fixed-width left column with a small section cap over each run of
-// items (tmp/research/menumate/App/UI/MenuHubScreen.swift:65 the 326pt rail, and
-// :692-710 SectionCap — a 9.5pt semibold, tracked label above a group). Both
-// ports transfer layout, not code; menumate's entry is in
-// third_party/menumate/ATTRIBUTION.md.
+// manifest: a fixed-width left column carrying a small section cap over each run
+// of items (tmp/research/menumate/App/UI/MenuHubScreen.swift:94-130 the column,
+// :692-712 SectionCap — a 9.5pt semibold, tracked label above a group). Its
+// WIDTH is Karabiner-Elements' instead, because that is the settings sidebar
+// measured against this window: 250pt ideal, sized so titles fit
+// (src/apps/share/swift/Views/SidebarStyle.swift:35 and :39, at Karabiner's
+// 1100pt default content size and app/main.go:85's 1100). Both ports transfer
+// layout, not code; each reference's entry is in its own
+// third_party/<repo>/ATTRIBUTION.md.
 //
 // What is CrossOS's own: the rows are not hardcoded. The Go Host discovers the
 // pages and their controls (§3.6c) and this file renders whatever the Service
@@ -36,6 +40,7 @@
 // Host is the only place that knows which page a fresh profile lands on.
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { Clipboard } from '@wailsio/runtime'
 // The generated bindings are named in exactly one module (lib/service), so
 // this file never reaches into ../bindings by path: a page, a control and the
 // shell all cross the bridge through the same seam. The controls get `service`
@@ -44,7 +49,8 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 // and the two log sources); handing it the checked copy instead would just move
 // that gap rather than close it.
 import { Service, service } from './lib/service'
-import { humanize } from './lib/format'
+import { humanize, plural } from './lib/format'
+import { commandFor } from './controls/actions'
 import type { Status } from './types/controls'
 import { renderControl, type ControlContext } from './controls'
 
@@ -176,6 +182,89 @@ function splitStamp(line: string): TraceLine {
   return { time: stamp, iso, text: line.slice(stamp.length).trim() }
 }
 
+// The four states the daemon can be in, and the sentence each one is named by
+// (5.1). The dot beside the sentence is the only colour in the window; the
+// sentence is what carries the meaning, which is the never-colour-alone rule
+// applied where a colour would otherwise have been the whole message.
+//
+// Order matters and follows the table: `down` is tested before `degraded`
+// because a daemon that is not running is not "remapping off", it is gone, and
+// a stopped daemon with SafeMode set must not be reported as a warning about
+// shortcuts. A plugin cannot add a fifth state here: the four are properties
+// of the daemon's own status, which is what keeps this file off the page ids
+// the file header rules out.
+type DaemonState = 'connecting' | 'ok' | 'degraded' | 'down'
+
+function daemonState(status: Status | null): DaemonState {
+  if (!status) return 'connecting'
+  if (!status.Running) return 'down'
+  if (status.SafeMode || !status.Interception) return 'degraded'
+  return 'ok'
+}
+
+function statusSentence(status: Status | null): string {
+  switch (daemonState(status)) {
+    case 'connecting':
+      return 'Starting CrossOS…'
+    case 'ok': {
+      // The count is the daemon's own, counted from the plugin rows it serves,
+      // and never from the pages: a page is not a plugin, and a page list that
+      // happened to be the right length would make this number a coincidence.
+      const enabled = (status?.Plugins ?? []).filter((p) => p.Enabled).length
+      return `Remapping on · ${plural(enabled, 'plugin')} active`
+    }
+    case 'degraded':
+      return 'Remapping off — keyboard shortcuts are not being applied'
+    case 'down':
+      return 'CrossOS is not running'
+  }
+}
+
+// The path macOS itself uses, verbatim (8.2). It is a sentence rather than a
+// link because the shell cannot deep-link into a row of the Privacy pane, and
+// a person who is told the row by name does not need the app to press the
+// button for them — the button gets them to the screen that holds the row.
+const INPUT_MONITORING_PATH =
+  'Open System Settings → Privacy & Security → Input Monitoring, add CrossOS, then restart the app.'
+
+// The action id is the permission token the daemon issued and checks, which is
+// a different kind of key from the ones the file header rules out: it names no
+// page, control or plugin, and it already has a command in the registry. Going
+// through commandFor rather than ServiceApi directly is what makes a build
+// whose generated bindings predate OpenSystemSettings refuse in words instead
+// of throwing over a deep link (controls/actions.ts, settingsCalls).
+const OPEN_SETTINGS = 'permissions.openSettings'
+const openSettings = commandFor(OPEN_SETTINGS)
+
+// What Copy diagnostics puts on the clipboard: the status block and all four
+// sources the shell reads, in one plain-text report. Plain text rather than
+// JSON because the person pasting it is pasting into a bug report, and the
+// version, the timestamp and the section headings are the three things a
+// reader needs before any of the values.
+function diagnostics(
+  status: Status | null,
+  pages: Page[],
+  logs: string[],
+  shellLog: string,
+): string {
+  return [
+    'CrossOS diagnostics',
+    `captured ${new Date().toISOString()}`,
+    '',
+    '== status ==',
+    status ? JSON.stringify(status, null, 2) : '(daemon status unavailable)',
+    '',
+    `== settings pages (${pages.length}) ==`,
+    pages.length ? pages.map((p) => `${p.ID} — ${p.Title || p.ID}`).join('\n') : '(none served)',
+    '',
+    `== activity log (${logs.length} lines) ==`,
+    logs.length ? logs.join('\n') : '(empty)',
+    '',
+    '== shell log ==',
+    shellLog || '(empty)',
+  ].join('\n')
+}
+
 function Timeline(props: { logs: string[]; readAt: number }) {
   const { logs, readAt } = props
   // Traces arrive oldest-first (the recorder appends), so newest-first is a
@@ -222,6 +311,15 @@ export default function App() {
   const [note, setNote] = useState<string>('')
   const [faults, setFaults] = useState<Partial<Record<Source, string>>>({})
   const [refreshToken, setRefreshToken] = useState(0)
+  // Dismissals are remembered by the text they dismissed, not by a boolean.
+  // Both callouts re-derive from a 5s poll, so a boolean would be re-armed by
+  // the next poll and the button would be a control that undoes itself; keying
+  // on the message means what you dismissed stays dismissed, and a DIFFERENT
+  // daemon message — a new fault, a different permission — still gets through.
+  const [dismissedTap, setDismissedTap] = useState('')
+  const [dismissedFaults, setDismissedFaults] = useState('')
+  const [openingSettings, setOpeningSettings] = useState(false)
+  const [copyingDiagnostics, setCopyingDiagnostics] = useState(false)
 
   const reportFault = useCallback((source: Source, e: unknown) => {
     setFaults((f) => ({ ...f, [source]: `${source}: unavailable (${message(e)})` }))
@@ -308,6 +406,53 @@ export default function App() {
     (ctl) => ctl.kind === 'traceList' || ctl.kind === 'pipelineTrace',
   )
   const problems = Object.values(faults)
+  // The banner is dismissed against the messages it is showing, so dismissing
+  // survives the next poll and a NEW fault still arrives. Its title says the
+  // daemon is up and the pages below still work, because four bridge sources
+  // failing is an engineering state and the old four-paragraph block implied
+  // the whole app was broken (5.1, acceptance criterion 8).
+  const faultText = problems.join('\n')
+  const showBanner = problems.length > 0 && faultText !== dismissedFaults
+  // Same rule for the permission callout: the daemon's own string is what is
+  // shown, so the string is what is remembered.
+  const tapError = status?.TapError ?? ''
+  const showCallout = tapError !== '' && tapError !== dismissedTap
+
+  // The pane the grant is made in, opened through the action registry. A
+  // refused call says which binding is missing rather than leaving the button
+  // looking like it worked: the grant is made by hand, in a window this app
+  // does not own, so nothing here can be read back as a granted permission.
+  async function openSystemSettings(): Promise<void> {
+    if (!openSettings) {
+      setNote('This build has no way to open System Settings.')
+      return
+    }
+    setOpeningSettings(true)
+    setNote('')
+    try {
+      await openSettings(service)
+      setNote('System Settings opened. Grant the permission it names, then restart CrossOS.')
+    } catch (e) {
+      setNote(`Could not open System Settings: ${message(e)}`)
+    } finally {
+      setOpeningSettings(false)
+    }
+  }
+
+  async function copyDiagnostics(): Promise<void> {
+    setCopyingDiagnostics(true)
+    setNote('')
+    try {
+      await Clipboard.SetText(diagnostics(status, pages, logs, shellLog))
+      setNote('Diagnostics copied — paste them into a bug report.')
+    } catch (e) {
+      // The four sources are still on screen, so a copy that failed has lost
+      // nothing; it must not put the banner in the same state as a fault.
+      setNote(`Could not copy diagnostics: ${message(e)}`)
+    } finally {
+      setCopyingDiagnostics(false)
+    }
+  }
 
   // note is the reporter, not the text: App owns the note line and renders it
   // from its own state, and a control's only job is to say what happened.
@@ -323,25 +468,55 @@ export default function App() {
 
   return (
     <div className="window">
-      <header className="masthead">
-        <h1>CrossOS</h1>
-        <p className="status">
-          {status ? (status.Running ? 'Running' : 'Daemon not running') : 'Connecting…'}
-          {status?.SafeMode ? ' · Safe mode' : ''}
-          {status && !status.Interception ? ' · Remapping off' : ''}
-        </p>
-        {/* The tap error is the line that teaches the user which permission
-            to grant, so it stays visible instead of collapsing into a log. */}
-        {status?.TapError ? <p className="status is-error">{status.TapError}</p> : null}
-      </header>
+      {/* The status strip (5.1). It replaces the masthead, which is deleted
+          (5.2): the window is a native NSWindow and the OS already draws a
+          title bar with the app name, so a band of logo + grey text above the
+          app was the web-page-header tell. This strip is always present, so
+          the daemon's state is never something you have to notice is missing.
 
-      {problems.length ? (
-        <div className="faults" role="status">
-          {problems.map((p) => (
-            <p className="ctl-error" key={p}>
-              {p}
-            </p>
-          ))}
+          .statusbar-meta is defined and deliberately not filled here. 5.1's
+          example puts the version in it and the footer (5.13) also keeps it,
+          and the window is 1100px wide with both in frame: two strings saying
+          the same number is one fact with two answers, and 5.2 puts the
+          version on About and nowhere else in the chrome. P2 rewrites the
+          footer and settles where it lives once. */}
+      <div className="statusbar" data-state={daemonState(status)}>
+        <span className="statusbar-dot" aria-hidden="true" />
+        <span className="statusbar-text">{statusSentence(status)}</span>
+      </div>
+
+      {showBanner ? (
+        <div className="banner" data-tone="danger" role="status">
+          <p className="banner-title">
+            {plural(problems.length, 'source')} unavailable — the daemon is up, so the pages below
+            still work.
+          </p>
+          {/* The messages go in a <details>: four paragraphs of bridge errors
+              is what this replaced, and a person who needs them opens them
+              rather than reading past them to the button. */}
+          <details className="banner-detail">
+            <summary>{plural(problems.length, 'message')}</summary>
+            {problems.map((p) => (
+              <p key={p}>{p}</p>
+            ))}
+          </details>
+          <div className="banner-actions">
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={copyDiagnostics}
+              disabled={copyingDiagnostics}
+            >
+              Copy diagnostics
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => setDismissedFaults(faultText)}
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -400,6 +575,47 @@ export default function App() {
             <>
               <h2 className="group-title">{page.Title || page.ID}</h2>
               {schema.description ? <p className="page-desc">{schema.description}</p> : null}
+              {/* The permission callout (5.1), in the page's own anatomy
+                  position — title, description, callout, controls (4.2) — and
+                  not in the window's chrome, because above the fold on an
+                  1100x720 window means above the fold of the content pane.
+
+                  The title is 5.1's own sentence; the body names the setting
+                  path macOS uses, verbatim (8.2), and the daemon's string goes
+                  under it in a mono block, unparaphrased. The daemon knows
+                  which permission and which call failed and the shell does
+                  not, so the daemon's words are the ones that are shown. */}
+              {showCallout ? (
+                <div className="callout" data-tone="warn" role="status">
+                  <span className="callout-icon" aria-hidden="true">
+                    ⚠
+                  </span>
+                  <div className="callout-body">
+                    <p className="callout-title">
+                      CrossOS needs Input Monitoring to remap keys
+                    </p>
+                    <p className="callout-text">{INPUT_MONITORING_PATH}</p>
+                    <p className="callout-raw">{tapError}</p>
+                  </div>
+                  <div className="callout-actions">
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      onClick={openSystemSettings}
+                      disabled={openingSettings}
+                    >
+                      Open System Settings
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--ghost"
+                      onClick={() => setDismissedTap(tapError)}
+                    >
+                      I&apos;ve done this
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               {controls.length === 0 ? (
                 <p className="ctl-empty">This page declares no controls yet.</p>
               ) : (

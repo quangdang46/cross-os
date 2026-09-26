@@ -193,8 +193,14 @@ describe('the last step, on a machine that has just been granted', () => {
     expect(within(wizard).getAllByText('Finder shortcuts').length).toBeGreaterThan(0)
     // The path is the daemon's `detail`, printed by the checklist's own row
     // renderer, so the shell composes no System Settings location of its own.
+    // The assertion is on the raw line because that is the guarantee being made:
+    // whatever the row's plain sentence says, the daemon's own words are still on
+    // it (ChecklistControl's ReadinessLine, and lib/format.ts's rule that a
+    // formatter must keep what it hid reachable). Tapping for the sentence is a
+    // separate assertion in readinessReasons.test.ts.
     expect(
-      within(wizard).getAllByText('grant Accessibility in System Settings').length,
+      within(wizard).getAllByText('adapter: tap refused (input-monitoring consent missing?)').length,
     ).toBeGreaterThan(0)
+    expect(within(wizard).getAllByText(/Input Monitoring/).length).toBeGreaterThan(0)
   })
 })

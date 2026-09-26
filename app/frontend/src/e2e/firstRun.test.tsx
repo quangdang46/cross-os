@@ -132,13 +132,30 @@ describe('a fresh machine, from the first launch to the last decision', () => {
     const active = screen.getAllByRole('button').filter((b) => b.getAttribute('aria-current') === 'page')
     expect(active.map((b) => b.querySelector('.section-label')?.textContent)).toEqual(['Welcome'])
 
-    // Nothing is ready and the wizard says which permission buys each row,
-    // rather than showing a stepper with no verdict beside it.
-    expect(await screen.findByText(/0 checks of 4 ready/)).toBeTruthy()
+    // Nothing is done, and the wizard says so ONCE, in the rollup under the
+    // list it counts — five declared steps, none of them derived as done. The
+    // old assertion here read "0 checks of 4 ready", and the 4 was READINESS
+    // ROWS, not steps: it was a count of the list the checklist below draws,
+    // printed a second time by the wizard and a third time by the daemon's own
+    // sentence on the Verify step. Three copies of one number is how copies
+    // come to disagree, so the wizard's is the one that went. What each row
+    // still needs is named by the checklist, which is the only place that
+    // answers it.
+    expect(await screen.findByText('0 of 5 steps done.')).toBeTruthy()
     const checklist = pane('Readiness')
     expect(within(checklist).getByText('Keyboard interception')).toBeTruthy()
     expect(within(checklist).getAllByText('Not ready')).toHaveLength(4)
-    expect(within(checklist).getAllByText('grant Accessibility in System Settings')).toHaveLength(4)
+    // The headline is now the sentence a person can act on, and it is the
+    // REFERENCE's shape: what is wrong, then what to do (menumate's
+    // onboarding.diag.extNotRegistered, "Extension not registered (run the main
+    // app once first)"). The daemon's own log line is still on every row, one
+    // line under it, because lib/format.ts's rule is that a formatter must keep
+    // what it hid reachable — the guarantee that lets the shell paraphrase at all.
+    expect(within(checklist).getAllByText(/needs permission to see the keys you press/).length).toBe(4)
+    expect(within(checklist).getAllByText(/Input Monitoring/).length).toBe(4)
+    expect(
+      within(checklist).getAllByText('adapter: tap refused (input-monitoring consent missing?)').length,
+    ).toBe(4)
 
     // --- 2. pick the Windows 11 profile, from inside the flow --------------
     // The step that declares the profile cards as its own body, so the product
@@ -191,7 +208,12 @@ describe('a fresh machine, from the first launch to the last decision', () => {
     // is a RE-READ, so it reports what the daemon can see now rather than
     // telling the person they did it.
     fireEvent.click(within(wizard).getByRole('button', { name: 'verify' }))
-    expect(await within(wizard).findByText(/0 checks of 4 ready/)).toBeTruthy()
+    // The verify is a RE-READ, so the answer is the daemon's own, and the only
+    // place this page states a count of it is the rollup under the step list.
+    // Three steps are derived as done — welcome, the pick, and the per-extension
+    // step the pick performed — and the two that need the permission are not, so
+    // the rollup moves without anything here having decided that it should.
+    expect(await within(wizard).findByText('3 of 5 steps done.')).toBeTruthy()
 
     // --- 4. the person grants it, out of this window, and the step waits ----
     // The switch is in System Settings, so no bound call can throw it — the
@@ -217,7 +239,13 @@ describe('a fresh machine, from the first launch to the last decision', () => {
     // daemon's own row moves its cursor to the end, which is the only thing
     // that offers a finish at all.
     await waitFor(() => expect(within(wizard).getAllByText('Done')).toHaveLength(5))
-    expect(within(wizard).getByText('Every check is ready.')).toBeTruthy()
+    // The settled message. Matched as a phrase rather than a full sentence: the
+    // wizard prints one ("Every check is ready — no second click needed.") and
+    // the line above already waits for it, so this is the second statement of the
+    // same fact rather than a new one — what it adds is that the wait is OVER
+    // and every row came back ready, which the checklist's four Ready chips below
+    // then confirm row by row.
+    expect(within(wizard).getByText(/Every check is ready/)).toBeTruthy()
     expect(within(pane('Readiness')).getAllByText('Ready')).toHaveLength(4)
 
     // The page never changed. The nav's own answer to "where am I" is still the
