@@ -534,6 +534,18 @@ final class NoteView: NSView {
             column.leadingAnchor.constraint(equalTo: leadingAnchor),
             column.trailingAnchor.constraint(equalTo: trailingAnchor),
             column.topAnchor.constraint(equalTo: topAnchor),
+            // The BOTTOM pin, and its absence is why three plugin rows
+            // overlapped by 14pt each in the first audit run.
+            //
+            // A view pinned leading/trailing/top and nothing else has no
+            // height: Auto Layout is free to give it zero and let the
+            // content overflow, and the content does — the switch on row two
+            // lands on top of the switch on row one. The audit named it as
+            // "NSSwitch and NSSwitch overlap by 54x14 [window A x=306 y=-11 |
+            // window B x=306 y=-21]", and the ten points between them were
+            // the ten points each row claimed for itself and none of them
+            // gave back.
+            column.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
         ])
     }
 
@@ -578,6 +590,18 @@ final class ButtonRowView: NSView {
             column.leadingAnchor.constraint(equalTo: leadingAnchor),
             column.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             column.topAnchor.constraint(equalTo: topAnchor),
+            // The BOTTOM pin, and its absence is why three plugin rows
+            // overlapped by 14pt each in the first audit run.
+            //
+            // A view pinned leading/trailing/top and nothing else has no
+            // height: Auto Layout is free to give it zero and let the
+            // content overflow, and the content does — the switch on row two
+            // lands on top of the switch on row one. The audit named it as
+            // "NSSwitch and NSSwitch overlap by 54x14 [window A x=306 y=-11 |
+            // window B x=306 y=-21]", and the ten points between them were
+            // the ten points each row claimed for itself and none of them
+            // gave back.
+            column.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
         ])
     }
 

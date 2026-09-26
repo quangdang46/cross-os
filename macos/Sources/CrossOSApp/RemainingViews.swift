@@ -38,6 +38,27 @@ final class ZoneEditorView: CardControl {
             showError("Could not read the zones.", "\(error)")
             return
         }
+        // An empty editor is a state, and the audit is right to call a stack
+        // with nothing in it 0pt tall — the two facts are the same fact. What
+        // was missing is the SAYING of it: a pane with no rows is a question
+        // the person has to answer from the rest of the page, and the answer
+        // is not on the page.
+        //
+        // The zone NAMES are the daemon's, but their ids and names are
+        // editable (ZoneEditorControl.tsx:13-18): `winlayout.DefaultZones` is
+        // empty by design — the daemon holds no display geometry outside the
+        // adapter — so without an Add control this editor could only ever
+        // show "No snap zones are configured" and a person who wanted a snap
+        // rectangle would have nowhere to put one.
+        if draft.isEmpty {
+            replaceBody(with: EmptyStateView(
+                headline: "No snap zones.",
+                detail: "A zone is a rectangle a window snaps to. None are defined, and the daemon "
+                      + "ships none because it holds no display geometry of its own — the ones you "
+                      + "add are stored here."
+            ))
+            return
+        }
         redraw(context: context)
     }
 

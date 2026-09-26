@@ -95,6 +95,27 @@ jobs:
       # port is judged against are the ones in docs/baseline/.
       - name: Switcher geometry probe
         run: ./.build/release/CrossOS --geometry
+      # The design audit, which is what a screenshot cannot do in CI: it
+      # needs no display because it measures rather than photographs. It
+      # exits non-zero on a FAIL, so a palette that drops below its contrast
+      # floor or a row that collapses to nothing stops the build — which is
+      # the check the React suite could not provide, because jsdom does not
+      # load a stylesheet and a green run there meant a page nobody had
+      # looked at.
+      #
+      # It reads a live daemon, so this step starts one first. The audit is
+      # about the UI against real data, and every page against an empty
+      # fixture is an audit of nothing.
+      - name: Start the daemon
+        run: |
+          go -C core build -o "$RUNNER_TEMP/crossos" ./cmd/crossos/
+          "$RUNNER_TEMP/crossos" serve &
+          for _ in $(seq 1 20); do
+            [ -S "$HOME/Library/Application Support/CrossOS/crossos.sock" ] && break
+            sleep 0.5
+          done
+      - name: Design audit
+        run: ./.build/release/CrossOS --audit
 
   build:
     strategy:

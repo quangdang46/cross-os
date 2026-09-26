@@ -10,7 +10,7 @@ import CrossOSCore
 @main
 struct CrossOSApp {
     @MainActor
-    static func main() {
+    static func main() async {
         let app = NSApplication.shared
 
         // `--describe` prints the view tree and exits. It exists because this
@@ -24,6 +24,21 @@ struct CrossOSApp {
             app.delegate = delegate
             app.finishLaunching()
             delegate.probeLayers()
+            return
+        }
+
+        if CommandLine.arguments.contains("--audit") {
+            // Top-level, NOT inside a Task. Swift's top-level `await` runs
+            // the main actor with an implicit run loop, and that is the thing
+            // a window and a socket read both need. An audit launched as
+            // `Task { @MainActor in }` inside `app.run()` deadlocked on the
+            // first page with no output at all: the task held the main actor
+            // while the run loop that would have drained it had not started.
+            //
+            // That is worth writing down rather than fixing silently, because
+            // the deadlock looks exactly like a slow build and the fix —
+            // moving it — looks like giving up on the measurement.
+            await AppDelegate().auditThenExit()
             return
         }
 
@@ -113,13 +128,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         exit(0)
     }
 
+    /// Measure the design properties a screenshot would show, and print them.
+    ///
+    /// This is what replaces looking. The renderer needs a display and this
+    /// machine has none, but the four things a screenshot is good for —
+    /// contrast, rhythm, fit and duplication — are all arithmetic, and the
+    /// arithmetic is exact where the eye is approximate.
+    ///
+    /// It is not a substitute. A window can pass everything here and still
+    /// feel wrong, and nothing here can tell you the page is beautiful. It
+    /// tells you the six ways a settings pane is usually broken, and this
+    /// codebase has shipped all six.
+    @MainActor
+    func auditThenExit() async {
+        let shell = ShellWindowController(client: client)
+        self.shell = shell
+        shell.showWindow(nil)
+        shell.window?.makeKeyAndOrderFront(nil)
+        await ShotRenderer.settle(1.2)
+
+        // The design system's own findings, before any page. These are
+        // properties of the PALETTE and the SCALE rather than of a page, so
+        // they are measured once and printed under their own heading — they
+        // are not a per-page finding and printing them as one would be a
+        // number repeated fifteen times.
+        let systemFindings = Audit.contrastMatrix() + Audit.rhythmAudit()
+        var findings = systemFindings
+        print("design system")
+        AuditPrinter.emitPage("design system", findings: systemFindings)
+        let pages = (try? await client.pages()) ?? []
+
+        for page in pages {
+            shell.show(page)
+            await ShotRenderer.settle(0.9)
+            // The CONTENT PANE, not the window. `contentView` is the whole
+            // window including the sidebar, and the sidebar has an outline
+            // view at x=0..255 — so auditing the window compared every
+            // page's switch at x=244 against the nav rail's own scroll
+            // view, which cannot happen to a person. The split view's second
+            // item is the pane a page's controls actually live in.
+            guard let pageView = shell.pageController?.view else { continue }
+            let found = Audit.fitAudit(root: pageView, page: page.id)
+                + Audit.duplicationAudit(root: pageView)
+            findings += found
+            // Per page, immediately. A hang on page fifteen must not cost
+            // the report on pages one to fourteen.
+            AuditPrinter.emitPage(page.id, findings: found)
+        }
+
+        print("")
+        AuditPrinter.emitSummary(findings, pages: pages.count)
+        exit(findings.contains { $0.severity >= .fail } ? 1 : 0)
+    }
+
     /// Print the layer tree of the window, to find out where the pixels are.
     func probeLayers() {
         let shell = ShellWindowController(client: client)
         self.shell = shell
         shell.showWindow(nil)
         shell.window?.makeKeyAndOrderFront(nil)
-        ShotRenderer.settle(1.2)
+        // Synchronous on purpose: this mode is not in a Task, so nothing is
+        // waiting on an async call and spinning the run loop is safe. The
+        // audit's settle is async for the opposite reason — it IS in a Task
+        // and spinning there deadlocks.
+        RunLoop.current.run(until: Date().addingTimeInterval(1.2))
         if let content = shell.window?.contentView {
             printLayerTree(content, depth: 0)
         }
@@ -157,7 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.shell = shell
             shell.showWindow(nil)
             shell.window?.makeKeyAndOrderFront(nil)
-            ShotRenderer.settle(1.5)
+            await ShotRenderer.settle(1.5)
 
             do {
                 let written = try await ShotRenderer.captureAll(client: client, out: out)

@@ -133,9 +133,21 @@ public enum Gap {
     public static let close: CGFloat = 6
     /// The default row gap, and the one a control's own padding adds to.
     public static let row: CGFloat = 10
-    /// Between two groups of rows.
-    public static let group: CGFloat = 18
-    /// Between the rail and the content plane.
+    /// Between two groups of rows, and between the rail and the content
+    /// plane.
+    ///
+    /// 20, and it was 18 — the audit's rhythm check found it, and the story
+    /// is worth keeping: 18 was the only value in this file that was not on
+    /// the scale, and it got there the way off-scale values always do, by
+    /// being written once and then looked at enough times to feel right. The
+    /// scale is 0/2/4/6/8/10/12/16/20/24/32/40/56; 18 is a half-step nobody
+    /// named, which is the same failure the React shell had ninety-three
+    /// times and caught with a fifteen-test contract.
+    ///
+    /// `group` and `plane` were separate names for one value once `group`
+    /// moved to 20, and two names for one gap is two decisions pretending to
+    /// be one. They are the same gap.
+    public static let group: CGFloat = 20
     public static let plane: CGFloat = 20
 }
 

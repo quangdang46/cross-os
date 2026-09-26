@@ -88,6 +88,14 @@ public final class ShellWindowController: NSWindowController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("ShellWindowController is created in code") }
 
+    /// The content pane's view controller, so a caller that needs to measure
+    /// ONE pane — the audit, which is about a page's controls and not about
+    /// the window's whole geometry — can reach it without walking the split
+    /// view and guessing which half it landed in.
+    public var pageController: NSViewController? {
+        split.splitViewItems.last?.viewController
+    }
+
     public func show(_ page: Page) {
         (split.splitViewItems.last?.viewController as? PageViewController)?.show(page)
     }

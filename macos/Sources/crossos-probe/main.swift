@@ -69,6 +69,9 @@ do {
     case "readiness":
         emit(try await client.readiness())
 
+    case "zones":
+        emit(try await client.zones())
+
     case "events":
         emit(try await client.eventLogs())
 

@@ -124,15 +124,24 @@ enum ShotRenderer {
         }
     }
 
-    /// Let the run loop run for `seconds`, so a layout pass, an async client
-    /// call and its redraw all complete before anything is measured.
+    /// Let layout, async loads and redraws finish before anything is measured.
     ///
-    /// This is the same settle the `--describe` mode does, and it is why the
-    /// numbers there were real. A capture taken at t=0 catches the window
-    /// before Auto Layout has run and the answer is a frame of zeros.
+    /// **Async, and that is the whole point.** The first version called
+    /// `RunLoop.current.run(until:)`, which BLOCKS the thread it is on. Inside
+    /// a `Task { @MainActor in }` that is a deadlock: the task holds the main
+    /// actor, the run loop never gets a turn to drain the actor's queue, and
+    /// the client calls the task is waiting on never complete. The `--audit`
+    /// mode hung on the first page with no output at all, which is what a
+    /// deadlock looks like from the outside.
+    ///
+    /// `Task.sleep` YIELDS the actor instead, so the queue drains, the socket
+    /// read completes, the redraw lands, and the measurement is of a settled
+    /// tree. A capture taken at t=0 catches the window before Auto Layout has
+    /// run and the answer is a frame of zeros — which is why there is a settle
+    /// at all rather than none.
     @MainActor
-    static func settle(_ seconds: Double = 1.2) {
-        RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+    static func settle(_ seconds: Double = 1.2) async {
+        try? await Task.sleep(for: .seconds(seconds))
     }
 
     /// Capture every page the daemon serves, plus the states worth seeing.
@@ -148,7 +157,7 @@ enum ShotRenderer {
         let shell = ShellWindowController(client: client)
         shell.showWindow(nil)
         shell.window?.makeKeyAndOrderFront(nil)
-        settle(1.5)
+        await settle(1.5)
 
         guard let content = shell.window?.contentView else {
             throw ShotError.noContentView
@@ -161,7 +170,7 @@ enum ShotRenderer {
         let pages = (try? await client.pages()) ?? []
         for page in pages {
             shell.show(page)
-            settle(1.0)
+            await settle(1.0)
             let path = "\(out)/\(page.id.replacingOccurrences(of: ".", with: "-")).png"
             try capture(content, to: path)
             written.append(path)

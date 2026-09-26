@@ -68,14 +68,31 @@ class CardControl: NSView {
     required init?(coder: NSCoder) { fatalError("CardControl is created in code") }
 
     /// Put a view in the card, replacing whatever was there.
+    ///
+    /// **The view is added BEFORE the width constraint is activated**, and
+    /// that order is not cosmetic. A constraint needs a common ancestor at
+    /// the moment it activates, and the first version built the constraint
+    /// then called `addArrangedSubview` — which threw
+    /// `NSGenericException: ... they have no common ancestor` and took the
+    /// process with it.
+    ///
+    /// It crashed on `core.profiles` and only there, because that is the one
+    /// page whose load calls `showError`, and the error path is the one that
+    /// replaces a body when the stack is already built. Every other page loads
+    /// a body into an empty stack and got away with it.
     func replaceBody(with view: NSView) {
         bodyStack.arrangedSubviews.forEach {
             bodyStack.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.widthAnchor.constraint(equalTo: bodyStack.widthAnchor).isActive = true
         bodyStack.addArrangedSubview(view)
+        // Now they share an ancestor, and the constraint holds the body to
+        // the card's width — which is what makes a card fill its pane rather
+        // than size itself to its longest label.
+        bodyStack.arrangedSubviews.last?.widthAnchor.constraint(
+            equalTo: bodyStack.widthAnchor
+        ).isActive = true
     }
 
     /// Replace the body with a few lines of text.
@@ -144,6 +161,18 @@ final class ErrorView: NSView {
             column.leadingAnchor.constraint(equalTo: leadingAnchor),
             column.trailingAnchor.constraint(equalTo: trailingAnchor),
             column.topAnchor.constraint(equalTo: topAnchor),
+            // The BOTTOM pin, and its absence is why three plugin rows
+            // overlapped by 14pt each in the first audit run.
+            //
+            // A view pinned leading/trailing/top and nothing else has no
+            // height: Auto Layout is free to give it zero and let the
+            // content overflow, and the content does — the switch on row two
+            // lands on top of the switch on row one. The audit named it as
+            // "NSSwitch and NSSwitch overlap by 54x14 [window A x=306 y=-11 |
+            // window B x=306 y=-21]", and the ten points between them were
+            // the ten points each row claimed for itself and none of them
+            // gave back.
+            column.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
         ])
     }
 
