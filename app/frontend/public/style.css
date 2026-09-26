@@ -2334,10 +2334,37 @@ body {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  /* Back to auto placement: pinning column 2 in a one-column grid would
-     conjure a second column and undo the stack. */
-  .ctl > :not(.ctl-head) {
+  /* Back to auto placement, and the specificity has to MATCH what it is undoing
+     rather than merely restating it. The column rules above are a list of
+     `.ctl > .ctl-x` (0,2,0) and a catch-all of `.ctl > :not(...)` eight deep
+     (0,9,0) — and a one-column grid plus `grid-column: 2` does not stack, it
+     CONJURES an implicit second column, which is the whole thing the collapse
+     exists to prevent. A reset at (0,2,0) loses to the catch-all and the
+     narrow layout quietly stopped being a narrow layout. */
+  .ctl > .ctl-toggle,
+  .ctl > .ctl-input,
+  .ctl > .ctl-select,
+  .ctl > .ctl-chip,
+  .ctl > .ctl-actions,
+  .ctl > .ctl-value,
+  .ctl > .ctl-empty,
+  .ctl > :not(.ctl-head):not(.ctl-toggle):not(.ctl-input):not(.ctl-select):not(.ctl-chip):not(.ctl-value):not(.ctl-empty) {
     grid-column: auto;
+  }
+
+  /* The label is still the first row of a stack rather than a track beside one. */
+  .ctl-head {
+    grid-row: auto;
+  }
+
+  /* Stacked, there is no shared right edge left to share: a switch alone on a
+     line of its own, 130px away from the words that describe it, reads as a
+     different control. It goes back in with the fields. */
+  .ctl-item > .ctl-toggle,
+  .ctl-item > .ctl-input,
+  .ctl-item > .ctl-select,
+  .ctl-item > .ctl-chip.is-state {
+    margin-left: 0;
   }
 
   .masthead,

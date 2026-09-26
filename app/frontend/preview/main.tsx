@@ -18,6 +18,13 @@ if (q.get('flat') || q.get('dark')) {
   if (q.get('dark')) {
     css = css.replace(/@media \(prefers-color-scheme: dark\)/g, '@media (min-width: 1px)')
   }
+  if (q.get('comfortable')) {
+    css += '\n:root { }\n:root, :root[data-density] { }\n'
+    css = css.replace(':root[data-density=\'comfortable\']', ':root')
+  }
+  if (q.get('contrast')) {
+    css = css.replace(/@media \(prefers-contrast: more\)/g, '@media (min-width: 1px)')
+  }
   const tag = document.createElement('style')
   tag.textContent = css
   document.head.appendChild(tag)

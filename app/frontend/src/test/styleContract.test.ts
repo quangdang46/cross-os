@@ -102,6 +102,21 @@ describe('the control row', () => {
     expect(CSS).not.toMatch(/\.ctl:has\([^{]*\{\s*grid-template-columns/)
   })
 
+  it('collapses to one column below 40em, at a specificity that can undo it', () => {
+    // A one-column grid plus `grid-column: 2` does not stack — it CONJURES an
+    // implicit second column, which is the whole thing the collapse exists to
+    // prevent. The reset has to beat what it undoes, and the catch-all that
+    // routes content to `1 / -1` is eight `:not()` deep at (0,9,0): a reset at
+    // (0,2,0) loses to it and the narrow layout quietly stops being narrow.
+    const narrow = CSS.slice(at('@media (max-width: 40em)'))
+    expect(narrow).toMatch(/\.ctl\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/)
+    const resets = narrow.match(/grid-column:\s*auto/g) ?? []
+    expect(resets.length, 'the narrow branch resets no column').toBeGreaterThan(0)
+    // The long selector is the point: matching the catch-all is what makes the
+    // reset win. A short `.ctl > *` here would look right and do nothing.
+    expect(narrow).toMatch(/\.ctl > :not\(\.ctl-head\):not\(\.ctl-toggle\)/)
+  })
+
   it('is nestable', () => {
     // SchemaFormControl emits a .ctl inside a ControlFrame. The inner one
     // re-entered the grid inside the parent's content column and came out as
