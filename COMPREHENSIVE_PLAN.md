@@ -1113,7 +1113,7 @@ Reuse rules:
 | Repo | OS | License | Takeaways | Type |
 |---|---|---|---|---|
 | pqrs-org/Karabiner-Elements | macOS | Unlicense | low-level remap, virtual HID, device identification | 🟢 study/adapt |
-| jtroo/kanata | Win/macOS/Linux | GPL-3.0 | layers, tap-hold, macros, config engine | 🟡 architecture |
+| jtroo/kanata | Win/macOS/Linux | **LGPL-3.0** (verified in clone — the file reads "GNU LESSER GENERAL PUBLIC LICENSE Version 3"; this row previously said GPL-3.0) | layers, tap-hold, macros, config engine | 🟡 architecture |
 | houmain/keymapper | Win/macOS/Linux | GPL-3.0 | context-aware + per-app mapping (closest to core idea) | 🟡 architecture |
 | Fuzzy-and-Fluffy/windows-keyboard-for-mac | macOS | MIT (LICENSE verified in clone) | Windows muscle-memory rules + behavior matrix | 🟡 behavior |
 | venkatarangan/karabiner-mac-to-windows | macOS | MIT (LICENSE verified in clone) | deep Windows mapping, Finder behavior | 🟡 behavior |
@@ -1130,12 +1130,12 @@ Reuse rules:
 | Repo | License | Takeaways | Type |
 |---|---|---|---|
 | lwouis/alt-tab-macos | GPL-3.0 | hook → enumerate windows → filter → MRU → switcher UI → focus | 🟡 architecture |
-| ramonwessels/rectangle | MIT (LICENSE verified in clone) | Accessibility API, frame calc, shortcuts, snap zones | 🟡 architecture |
-| mikusnuz/nudge | MIT | 19 window actions, customizable shortcuts, drag-to-snap, multi-monitor — read BEFORE Rectangle | 🟢 adapt |
+| rxhanson/Rectangle | MIT (LICENSE read at 12a9bc79 via `git show 12a9bc79:LICENSE`) | Accessibility API, frame calc, shortcuts, snap zones | 🟡 architecture |
+| mikusnuz/nudge | MIT | 19 window actions (confirmed: `SnapAction` has 19 cases), customizable shortcuts, drag-to-snap, multi-monitor — read BEFORE Rectangle. Two of these have **no file in the §9.10/§9.11 copy set**, so they are study-only: drag-to-snap lives in `Nudge/Core/DragSnapManager.swift` (a `cghidEventTap` on `leftMouseDragged`/`leftMouseUp`, edgeThreshold 100 / cornerRadius 200) and hotkeys in `Nudge/Core/HotkeyManager.swift` — neither is named in §9.10 or §9.11, and neither is referenced by any of the five files that are. | 🟢 adapt |
 | asmvik/yabai | MIT | windows/spaces/displays internals (heavyweight, study) | 🟢 study |
 | ianyh/Amethyst | MIT | window state, layouts, keyboard commands, config, accessibility | 🟢 study |
 | saforem2/chunkwm | MIT (LICENSE verified in clone) | plugin architecture splitting WM into separate modules | 🟡 architecture |
-| LGUG2Z/komorebi | custom | engine → CLI → JSON schema → TCP socket → external clients (Core↔Plugin model) | 🟡 architecture |
+| LGUG2Z/komorebi | Komorebi License 2.0.0 (bespoke, NOT OSI — verified at e0709f0 in `LICENSE.md`; restricts distribution, adds a Changes License, and its "Personal Uses" grant is "without any anticipated commercial application") → **fails the copy gate** | engine → CLI → JSON schema → TCP socket → external clients (Core↔Plugin model) | 🟡 architecture |
 
 ### 9.3 Finder / Context menu — P0
 
@@ -1179,6 +1179,8 @@ Reuse rules:
 |---|---|---|---|
 | earendil-works/pi | MIT (LICENSE verified in clone) | extension loader/discovery, versioned extension+UI API, commands/tools/events, plugin-contributed widgets/views — the philosophy reference for §3.6c UI contributions. API is a versioned public contract, never the internal component tree | 🟡 architecture |
 | hluk/CopyQ | GPL-3.0 | user-defined custom commands + global shortcuts + context menus + scripting API (commands/settings/network/filesystem) without touching core — closest model for CrossOS Plugin → register command/shortcut/menu/settings/UI | 🟡 architecture |
+
+**Not re-verifiable (2026-09-26).** Neither `earendil-works/pi` nor `hluk/CopyQ` has a clone in either research tree (`tmp/research/` or `.tmp/research/`), so pi's "MIT (LICENSE verified in clone)" above asserts a check that cannot currently be repeated, and CopyQ's "GPL-3.0" is unconfirmed. Every other row in §9.1–9.7 with a clone was read at its pinned commit during this pass. Both are graded 🟡 architecture and appear in §9.11's "NO" set, so the merge gate is not exposed either way — but neither licence claim should be relied on until a clone exists.
 
 ### 9.8 Our Feature → source mapping
 
@@ -1224,7 +1226,7 @@ read as "copy the file then edit"):
 | Repo | Direct code reuse? | Meaning |
 |---|---|---|
 | newfile | YES | FIFinderSync subclass + filename/filetype helpers may be copied, then adapted to CrossOS IPC/contracts |
-| nudge | YES | geometry/AX helpers (`WindowManager`, `SnapZone`, `SnapAction`, `AccessibilityHelper`, `DisplayHelper`) may be copied, then stripped of app UI |
+| nudge | YES | geometry/AX helpers (`WindowManager`, `SnapZone`, `SnapAction`, `AccessibilityHelper`, `DisplayHelper`) may be copied, then stripped of app UI. What each actually holds, verified at 57d1e6bc: the AX **move/resize writes are in `WindowManager.swift`** (13 `setValue`/AXValue sites), not in `AccessibilityHelper.swift` — that file is 45 lines of `AXIsProcessTrusted` permission gating plus a 2s `Timer` poll and contains no AX writes. Copying `AccessibilityHelper` expecting the AX primitives yields a permission check. |
 | menumate | PARTIAL | manifest/rule/config/IPC *concepts + schema shapes* may be ported; script executor is NOT copied (CrossOS executes native capabilities; shell is Level B) |
 | windows-keyboard-for-mac, karabiner-mac-to-windows, karabiner-windows-mode | DATA ONLY | behavior matrices re-expressed as CrossOS Rules→Intents; no source files copied |
 | pcfy-my-mac | SCRIPTS ONLY | installer sequencing reference; nothing ships in the Core binary |
@@ -1277,19 +1279,43 @@ merge
 CrossOS is MIT: this gate is load-bearing, not advisory. GPL/copyleft and
 no-license sources can never pass it — they stay architecture/behavior-only.
 
+**Step 1 is not performable as written** — "verify the pinned commit" implies
+reading a licence file, and the file is not called `LICENSE` in most of these
+repos. Recorded from `git show <pinned-sha>:<file>`, 2026-09-26:
+
+| Repo | Licence file at the pinned commit | Licence actually read |
+|---|---|---|
+| rxhanson/Rectangle | `LICENSE` | MIT |
+| microsoft/vscode | `LICENSE.txt` | MIT |
+| mikusnuz/nudge | `LICENSE` | MIT |
+| pqrs-org/Karabiner-Elements | `LICENSE.md` | Unlicense (public-domain dedication) |
+| ianyh/Amethyst | `LICENSE.md` | MIT |
+| raxigan/pcfy-my-mac | `LICENSE` | MIT |
+| Hibrielle/menumate | `LICENSE` | MIT |
+| mariusgm/newfile | `LICENSE` | MIT |
+| funny-dog/FinderRight | `LICENSE` | MIT |
+| lwouis/alt-tab-macos | `LICENCE.md` | **GPL-3.0** |
+
+The last row is the trap: `alt-tab-macos` spells it `LICENCE`, so any check
+that looks for `LICENSE` — or that trusts a repository's GitHub licence
+classifier — reports "no licence" and lets a GPL-3.0 source past step 2.
+`files-community/files` has the same problem, carrying `LICENSE-MIT` and
+`LICENSE-MPL` and no `LICENSE`. Always resolve the licence file by listing the
+tree, never by guessing the name.
+
 | Repo (license) | Feature | Exact source files / modules | Primitive to extract | Mode | CrossOS destination | CrossOS contract | Divergence / rewrite reason |
 |---|---|---|---|---|---|---|---|
 | mikusnuz/nudge (MIT) | Window snapping | `Nudge/Core/WindowManager.swift`, `Nudge/Core/SnapZone.swift`, `Nudge/Core/SnapAction.swift`, `Nudge/Helpers/AccessibilityHelper.swift`, `Nudge/Helpers/DisplayHelper.swift` | frame calc, snap zones, frame history, AX move/resize calls, multi-monitor logic | 🟢 ADAPT | `platform/darwin/` (AX calls) + window capability handlers | `window.*` capabilities (§3.12) via Adapter | Nudge is a full app (menubar UI, overlay, analytics); take ONLY geometry+AX primitives. Hotkey/prefs/analytics stay behind. |
 | mariusgm/newfile (MIT) | Finder Sync + file creation | `Extension/FinderSync.swift`, `Shared/FilenameGenerator.swift`, `Shared/FileTypeEntry.swift`, `Shared/SettingsStore.swift`, `Shared/SeedPresets.swift` | FIFinderSync subclass pattern, menu building, filename generation, file-type presets | 🟢 COPY/ADAPT | `extensions/finder-sync/` + `platform/darwin/` | `finder.menu`, `filesystem.createFile`, `filesystem.createFolder` | Host app UI (SwiftUI prefs, template editor) is NOT copied — CrossOS settings UI is declarative (§3.6c). |
-| Hibrielle/menumate (MIT) | Plugin/manifest/IPC/security | `Core/Sources/MenuMateCore/PackManifest.swift`, `Core/Sources/MenuMateCore/RuleMatcher.swift`, `Core/Sources/MenuMateCore/ConfigStore.swift`, `Core/Sources/MenuMateCore/PackInspector.swift`, `Core/Sources/MenuMateCore/IPC.swift`, `Core/Sources/MenuMateCore/ShellRunner.swift`, `Core/Sources/MenuMateCore/ActionInterface.swift`, `FinderExtension/FinderSync.swift` | manifest schema, rule-matching semantics, config store, pack inspection, IPC framing | 🟢 ADAPT | `core/` (registry, matcher, config) | Plugin Registry (§3.6), Rule Engine, Permission Manager | MenuMate executes user scripts as actions; CrossOS executes native capabilities by default — script execution is Level B gated. Port concepts, not the executor verbatim. |
+| Hibrielle/menumate (MIT) | Plugin/manifest/IPC/security | `Core/Sources/MenuMateCore/PackManifest.swift`, `Core/Sources/MenuMateCore/RuleMatcher.swift`, `Core/Sources/MenuMateCore/ConfigStore.swift`, `Core/Sources/MenuMateCore/PackInspector.swift`, `Core/Sources/MenuMateCore/IPC.swift`, `Core/Sources/MenuMateCore/ActionInterface.swift`, `FinderExtension/FinderSync.swift` | manifest schema, rule-matching semantics, config store, pack inspection, IPC framing | 🟢 ADAPT | `core/` (registry, matcher, config) | Plugin Registry (§3.6), Rule Engine, Permission Manager | MenuMate executes user scripts as actions; CrossOS executes native capabilities by default — script execution is Level B gated. Port concepts, not the executor verbatim. `Core/Sources/MenuMateCore/ShellRunner.swift` is that executor (`public enum ShellRunner { run(...) }` over Foundation `Process`, with the SIGTERM→grace→SIGKILL timeout path) and is deliberately NOT in the file list above, to match the PARTIAL grade in §9.11. |
 | Fuzzy-and-Fluffy/windows-keyboard-for-mac (MIT) | Shortcut behavior matrix | Karabiner complex-modification JSONs + behavior docs in repo | per-app rule matrix (which Ctrl+key maps to what, terminal/VM/browser exclusions) | 🟡 BEHAVIOR | `plugins/windows-keyboard/` rules | `Rule` + `Intent` (§3.5) | Behavior data only — re-expressed as CrossOS Rules→Intents, never executed as Karabiner config. |
 | venkatarangan/karabiner-mac-to-windows (MIT) | Deep Windows mapping | Karabiner JSON rules | Finder behavior, extended key coverage | 🟡 BEHAVIOR | `plugins/windows-keyboard/` rules | `Rule` + `Intent` | Same as above — data in, CrossOS contracts out. |
 | rux616/karabiner-windows-mode (Unlicense) | Windows/Linux rules | Karabiner JSON rules | dev-tool exclusions, mode toggle semantics | 🟡 BEHAVIOR | `plugins/windows-keyboard/` rules | `Rule` + `Intent` | Same as above. |
 | raxigan/pcfy-my-mac (MIT) | Setup orchestration | setup scripts/CLI | install-order, app provisioning sequence | 🟢 ADAPT (scripts only) | `scripts/` | build/install tooling, NOT runtime | Reference for installer UX only — nothing ships in the Core binary. |
 | asmvik/yabai (MIT) | AX/Space internals | window/space/display query code | AX attribute names, space/display enumeration semantics | 🟡 ARCHITECTURE | `platform/darwin/` | `window.read` capability internals | yabai leans on scripting-addition/SIP-disabled paths — CrossOS uses ONLY SIP-clean AX APIs. Study, don't port. |
 | ianyh/Amethyst (MIT) | Layout management | layout algorithms | tiling layout math, window-state model | 🟡 ARCHITECTURE | future layout capability | `window.*` (Phase 2+) | Layout engine is a future plugin, not MVP — concepts only. |
-| ramonwessels/rectangle (MIT) | Snap zones UX | snap-zone definitions, shortcut defaults | zone geometry, default shortcut set | 🟡 BEHAVIOR | `plugins/windows-window/` | `window.*` capabilities | Nudge is the code source; Rectangle is the UX cross-check. |
-| lgrammel/app-launcher (MIT) | Launcher base | global-hotkey + app-discovery code | hotkey registration, app enumeration | 🟢 STUDY | Phase 2 launcher plugin | `app.launch` | Forkable base — evaluate at Phase 2, not MVP. |
+| rxhanson/Rectangle (MIT) | Snap zones UX | snap-zone definitions, shortcut defaults | zone geometry, default shortcut set | 🟡 BEHAVIOR | `plugins/windows-window/` | `window.*` capabilities | Nudge is the code source; Rectangle is the UX cross-check. |
+| lgrammel/app-launcher (MIT) | Launcher base | global-hotkey + app-discovery code | hotkey registration, app enumeration | 🟡 ARCHITECTURE | Phase 2 launcher plugin | `app.launch` | Forkable base — evaluate at Phase 2, not MVP. Graded 🟡 not 🟢 so this row agrees with §9.11, which lists app-launcher in the "NO — concepts/behavior/UX only" set. Per §9's own legend 🟢 means copy-permitted, so 🟢 STUDY here read as permission to fork that §9.11 withholds. |
 | hammerspoon/hammerspoon (MIT) | Module API model | Lua module/event/window/hotkey APIs | extension-point taxonomy (what surfaces a automation host exposes) | 🟡 ARCHITECTURE | `core/` plugin API design | Plugin Registry (§3.6) | API taxonomy reference — CrossOS API is Go/JSON-RPC, not Lua. |
 | linearmouse/linearmouse (MIT) | Device modules + tests | per-device module structure | module-per-device pattern, test layout | 🟡 ARCHITECTURE | future device plugins | Capability Registry pattern | Pattern reference for Keyboard+Mouse+Trackpad split. |
 | MonitorControl/MonitorControl (MIT) | Display controls | helper-process + OSD + shortcut code | privileged-helper pattern, OSD pattern | 🟡 ARCHITECTURE | future display plugin | `shell.execute` / helper model | Pattern only — display DDC is out of MVP scope. |

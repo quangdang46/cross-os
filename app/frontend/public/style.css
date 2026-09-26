@@ -1,12 +1,13 @@
 /* CrossOS shell styles.
  *
  * Structure follows the rectangle preferences form it was ported from
- * (tmp/research/rectangle/Rectangle/PrefsWindow/SettingsViewController.swift:
- * a vertical, leading-aligned stack of label-beside-control rows with a
- * closing About block), and the nav rail follows menumate's sidebar (see the
- * page-navigation section below). What is CrossOS's own: the spacing scale and
- * the system-font stack, chosen to read as a native macOS settings pane inside
- * a webview rather than as a web page.
+ * (tmp/research/rectangle/Rectangle/Base.lproj/Main.storyboard:2693 — a
+ * vertical, leading-aligned stack of rows, each a control with its label beside
+ * it; the version and the check-for-updates row sit at the head of that form,
+ * :2696 and :2751, not at its foot), and the nav rail follows menumate's
+ * sidebar (see the page-navigation section below). What is CrossOS's own: the
+ * spacing scale and the system-font stack, chosen to read as a native macOS
+ * settings pane inside a webview rather than as a web page.
  *
  * The ctl-* vocabulary below is the styling contract for the control registry
  * in src/controls. Class names, not element names, are the contract: a
@@ -29,8 +30,77 @@
      4.5:1 (Karabiner's capture label is .green for the same reason). */
   --live: #166534;
   --sel-bg: #0a66ff; /* the active nav item: white on it clears 4.5:1 */
-  --row-gap: 5px; /* mirrors the reference stack's spacing:5 */
-  --radius: 5px;
+  /* Radius scale, taken from menumate's MMRadius (App/UI/DesignSystem.swift:17-25),
+     which distinguishes the shapes macOS actually distinguishes: a window corner
+     is not a card corner is not a control corner. The old single 5px applied one
+     radius to all three, which is the uniform-radius tell. --radius stays the
+     name the 9 existing rules already mean, now resolving to the control value. */
+  --radius-window: 11px;   /* MMRadius.window   */
+  --radius-card: 9px;      /* MMRadius.card     */
+  --radius-control: 6px;   /* MMRadius.control  */
+  --radius-badge: 5px;     /* MMRadius.badge    */
+  --radius: var(--radius-control);
+
+  /* DELETED, and the reason is worth recording. --row-gap: 5px sat here for
+     months justified by rectangle's extra-shortcuts POPOVER
+     (SettingsViewController.swift:310, spacing 5) while its own comment admitted
+     the real settings FORM is spacing 10 (Main.storyboard:2693). The form is
+     what this stylesheet is a port of. It was also DEAD: grep found 0 usages,
+     because .form is a block, not a flex column, so a row-gap on it could never
+     apply. A token that no rule consumes is a record of a decision that was
+     never made. The 10px it should have carried is applied to the groups that
+     are actually flex columns, below. */
+}
+
+/* THE MACOS-NATIVE FIX, and the reason this app did not feel like a Mac app.
+
+   The palette above is a hardcoded hex set, which means the app IGNORES the two
+   things a Mac user actually configures: their light/dark appearance and their
+   accent colour, both set in System Settings > Appearance. Every real macOS app
+   follows both, because AppKit resolves NSColor semantic names
+   (controlBackgroundColor, windowBackgroundColor, separatorColor,
+   labelColor, accentColor) against the user's settings rather than storing
+   literals. menumate does exactly that -- its MMColor is a bridge over NSColor
+   for precisely this reason (App/UI/DesignSystem.swift:45-62).
+
+   A WKWebView can reach the same values through the CSS system colours, which
+   WebKit resolves from the same user preferences. So where they are available,
+   hand the resolution back to the OS. The hex block above is KEPT as the
+   fallback, deliberately: it carries contrast ratios that were computed and
+   written down, and dropping it would trade a working, documented palette for
+   an unverified one on any engine that does not support these keywords.
+
+   --live and --danger are NOT bridged, on purpose. menumate's red/green are
+   SwiftUI semantic colours, but the values here were chosen to clear 4.5:1 as
+   documented above, and Apple's system red (#ff3b30 light) does not. Swapping
+   them for the "more native" colour would make the app LESS readable. A
+   deliberate contrast decision outranks a consistency one. */
+@supports (color: AccentColor) {
+  :root {
+    --text: CanvasText;
+    --text-dim: GrayText;
+    --line: ButtonBorder;
+    --bg: Canvas;
+    --bg-sunken: ButtonFace;   /* NSColor.controlBackgroundColor vs windowBackgroundColor */
+    --accent: AccentColor;
+    --sel-bg: AccentColor;
+    /* menumate's accentTint: the accent at 13% light / 26% dark
+       (App/UI/DesignSystem.swift:39-41), for a selected row that must not
+       read as a filled button. */
+    --accent-tint: color-mix(in srgb, AccentColor 13%, transparent);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --accent-tint: color-mix(in srgb, AccentColor 26%, transparent);
+    }
+  }
+  /* The active nav row is the one place white-on-accent appears, and a user
+     accent is not guaranteed to be dark enough for white to clear 4.5:1. Keep
+     the OS's own selection pairing, which is computed for exactly this. */
+  .section.is-active {
+    background: var(--sel-bg);
+    color: HighlightText;
+  }
 }
 
 /* Dark mode is not a palette swap of the same values: the light accent and
@@ -221,7 +291,7 @@ body {
    markup, and the weight below. */
 .section.is-active {
   background: var(--sel-bg);
-  color: #fff;
+  color: #fff; /* on-accent ink: see the contrast note on --sel-bg */
   font-weight: 600;
 }
 

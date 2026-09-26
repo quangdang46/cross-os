@@ -112,10 +112,14 @@ function readRow(value: unknown): WindowRow {
 
 /**
  * What a tile is called on screen. The title first, the app second, and a last
- * resort that is still words — the same rule the snap-area list follows (see
- * third_party/rectangle/ATTRIBUTION.md, block 3): a machine with no title falls
- * back to the app, and no tile is ever identified by its key alone, because a
- * window whose only name is a number tells a person nothing they can act on.
+ * resort that is still words. This ladder is CrossOS's own and is NOT a rectangle
+ * port: rectangle has no title/app/key fallback to copy. Its snap-area menu
+ * reads a localized name per action and simply omits an action that has none
+ * (`WindowAction.displayName` is optional, `WindowAction.swift:364` declares it `String?`
+ * by default; `SnapAreaViewController.swift:279` guards on it and returns). The
+ * rule here is the opposite choice — never drop a tile, and never let one be
+ * identified by its key alone, because a window whose only name is a number
+ * tells a person nothing they can act on.
  */
 function rowName(row: WindowRow): string {
   return row.title || row.app_id || 'Untitled window'

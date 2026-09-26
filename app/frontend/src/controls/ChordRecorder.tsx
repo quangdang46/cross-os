@@ -185,7 +185,7 @@ export function ChordRecorder(props: ChordRecorderProps): ReactElement {
   // Ported from VS Code, which prints the count ON THE RECORDER as the chord
   // completes and before anything is saved: its define-keybinding widget calls
   // printExisting(model.fetch(`"${keybindingStr}"`).length) on every change
-  // (keybindingsEditor.ts:353). That is the whole point of a recorder that
+  // (keybindingsEditor.ts:354). That is the whole point of a recorder that
   // presses keys rather than typing them — the moment a person can see "this
   // is already taken" is the moment they can do something about it. A conflict
   // list on another part of the page answers one step too late.

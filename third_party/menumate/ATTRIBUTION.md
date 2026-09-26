@@ -2,11 +2,11 @@
 
 Source repository: Hibrielle/menumate
 Source commit: 017d6dae1e8569b9d92513036503b013dc528283
-Source file: Core/Sources/MenuMateCore/PackManifest.swift
+Source file: Core/Sources/MenuMateCore/PackManifest.swift (:43-55 the custom init(from:) that fills defaults and, through the 8-key CodingKeys at :39-41, ignores every unknown key; :82-111 the separate validate() — decode parses, validate decides; :115-121 isSafeRelativeScriptPath, the in-pack relative-path rule)
 Original license: MIT
 Original copyright: Copyright (c) 2026 Hibrielle
 CrossOS destination: core/pkg/plugin/pack.go (ParsePackManifest + Validate)
-Modification: decode-then-validate + unknown-keys-ignored + defaults (pack icon shippingbox, placement topLevel, isEnabled true) ported to Go; schema shapes (§5.3/5.4) adapted; script executor NOT copied
+Modification: decode-then-validate + unknown-keys-ignored + the two defaults this file actually carries (icon ?? "shippingbox" at :53, placement ?? .topLevel at :169) ported to Go; schema shapes (§5.3/5.4) adapted. NOT PORTED — a CrossOS addition: isEnabled. The string does not occur anywhere in this file and PackAction here has no such field; the reference carries no decode default for it either, because MenuAction (Models.swift:88) uses synthesized Codable and the only `isEnabled: true` in the reference is Models.swift:155, a seed-construction value inside defaultSeed(). pack.go:160-163 fills isEnabled true at decode as a §5.3 schema decision, not as a port; script executor NOT copied
 Reason for modification: language port; CrossOS executes native capabilities, script execution is Level B gated
 CrossOS license: MIT
 
@@ -16,7 +16,7 @@ Source file: Core/Sources/MenuMateCore/RuleMatcher.swift
 Original license: MIT
 Original copyright: Copyright (c) 2026 Hibrielle
 CrossOS destination: core/pkg/plugin/pack.go (Match + VisibleActions, MatchCtx/MatchItem/MatchResult)
-Modification: targets/UTI/count filters + typed result (never bare bool) ported; UTType resolution stays platform-side (MatchItem.UTI is a string)
+Modification: targets/UTI/count filters (:73-101 evaluate — targets :86-91, UTI :84 and :92-97, count :81-82) + a typed result ported: evaluate returns MatchResult, and the reference's own Bool-returning matches (:55-57) is only a thin wrapper over it, so the destination keeps the typed case; UTType resolution stays platform-side (MatchItem.UTI is a string)
 Reason for modification: language port; filesystem metadata resolution is the caller's job
 CrossOS license: MIT
 
@@ -42,7 +42,7 @@ CrossOS license: MIT
 
 Source repository: Hibrielle/menumate
 Source commit: 017d6dae1e8569b9d92513036503b013dc528283
-Source file: App/UI/MenuHubScreen.swift (:63-68 the fixed-width sidebar beside a detail pane; :94 the sidebar column; :692-710 SectionCap, a 9.5pt semibold tracked label over each section)
+Source file: App/UI/MenuHubScreen.swift (:63-72 the HStack holding the fixed-width sidebar — .frame(width: 326) at :65 — beside the detail pane at :70-71; :94 the sidebar column; :692-710 SectionCap, a 9.5pt semibold tracked label over each section)
 Original license: MIT
 Original copyright: Copyright (c) 2026 Hibrielle
 CrossOS destination: app/frontend/src/App.tsx (navGroups + the nav rail markup), app/frontend/public/style.css (the .sections / .nav-group / .nav-group-title rules)
@@ -55,24 +55,24 @@ Source commit: 017d6dae1e8569b9d92513036503b013dc528283
 Source file: App/UI/MenuHubScreen.swift (:181 the SectionCap, and :183-188 the ForEach under it in which every entry is handed to actionRow, so each entry gets its own row rather than being summarised into the one above it; :246-247 the same ForEach->actionRow shape for a parent's sub-items, but nested under that parent's own header row at :231-240 rather than under a cap)
 Original license: MIT
 Original copyright: Copyright (c) 2026 Hibrielle
-CrossOS destination: app/frontend/src/controls/PluginListControl.tsx (one row per installed extension, each carrying its own state and its own reason beside it: the group label standing over each list at :212-213, the row per plugin at :215-256, the Enabled/Disabled state beside the box at :237, and the daemon's own reason quoted into the row at :238 by metaLine at :67-74)
+CrossOS destination: app/frontend/src/controls/PluginListControl.tsx (one row per installed extension, each carrying its own state and its own reason beside it: the group label standing over each list at :212-213, the row per plugin at :215-256, the Enabled/Disabled state beside the box at :236, and the daemon's own reason quoted into the row at :237 by metaLine at :67-74)
 Modification: structural port, no code copied. What transfers is the LAYOUT: a list under a cap in which every entry is drawn as its own row, because the question a reader is answering is which extension contributes what — collapsing the entries into one summary answers it for none of them. The rows here are the daemon's extension registry (core:pluginMeta) and each carries the daemon's own reason for its load state.
 Reason for modification: the reference is a SwiftUI app computing live menu state from an extension manager; this is React over a declared schema reading a registry, and no pack manifest is loaded at runtime so there are no contributed actions to list yet.
 CrossOS license: MIT
 
 Source repository: Hibrielle/menumate
 Source commit: 017d6dae1e8569b9d92513036503b013dc528283
-Source file: App/UI/PacksScreen.swift (:255-368 struct PackRow — :258 the `let expanded: Bool` parameter and :278 `if expanded { expandedBody }`, so the card ships collapsed and expansion is the parent's state; :282-318 the header is one Button whose whole surface toggles (.contentShape(Rectangle()) at :315, .buttonStyle(.plain) at :317); :309-311 the trailing "n of m" enabledCount/totalCount Text; :320-367 expandedBody, inset under the header text by .padding(.leading, 46) at :359, holding one row per member each with its own MMSwitch bound to a per-row callback at :327-330)
+Source file: App/UI/PacksScreen.swift (:255-368 struct PackRow — :258 the `let expanded: Bool` parameter and :278 `if expanded { expandedBody }`, so the card ships collapsed and expansion is the parent's state; :282-318 the header is one Button whose whole surface toggles (.contentShape(Rectangle()) at :315, .buttonStyle(.plain) at :317); :309-311 the trailing enabledCount/totalCount rollup (the packs.enabledCount Text); :320-367 expandedBody, inset under the header text by .padding(.leading, 46) at :359, holding one row per member each with its own MMSwitch bound to a per-row callback at :327-330)
 Original license: MIT
 Original copyright: Copyright (c) 2026 Hibrielle
 CrossOS destination: app/frontend/src/controls/ProfileListControl.tsx (the expand-in-place profile card, the trailing selected-of-total rollup, the per-capability switch list inside the expanded card, and the reviewed-all gate that arms the Apply)
-Modification: structural port, no code copied. What transfers is the INTERACTION MODEL and the state machine: a card that is collapsed until asked, whose expansion is owned above it rather than hidden inside the row; a header that carries an "n of m" count so a reader can see how much of the thing is on without opening it; and one switch per member living inside the expanded body rather than on a separate settings page. The reference is SwiftUI on macOS and the destination is React over a declared schema, so the drawing, the icons, the AppIcon and the MMSwitch component do not transfer and none were copied. CrossOS's own vocabulary travels in its place: the members are the profile layer's capabilities (core/pkg/profiles) and the counts come from the daemon's plan arithmetic. Of those counts, the per-capability INPUTS (will_enable, will_enable_plugin, enabled, total) are served by the daemon and the rollups are summed in the control — both the header's "n of m" and the preview sentence — because the selection is a client-side filter over the bundle and the daemon cannot narrow its own answer to a subset it was not told about until the apply. The script executor is NOT copied (§9.11 PARTIAL: menumate is concepts-and-schema-shapes only).
+Modification: structural port, no code copied. What transfers is the INTERACTION MODEL and the state machine: a card that is collapsed until asked, whose expansion is owned above it rather than hidden inside the row; a header whose trailing edge carries how many of the members are on (packs.enabledCount, whose English value is "%lld/%lld enabled") so a reader can see how much of the thing is on without opening it; and one switch per member living inside the expanded body rather than on a separate settings page. The reference is SwiftUI on macOS and the destination is React over a declared schema, so the drawing, the icons, the AppIcon and the MMSwitch component do not transfer and none were copied. CrossOS's own vocabulary travels in its place: the members are the profile layer's capabilities (core/pkg/profiles) and the counts come from the daemon's plan arithmetic. Of those counts, the per-capability INPUTS (will_enable, will_enable_plugin, enabled, total) are served by the daemon and the rollups are summed in the control — both the header's "n of m" and the preview sentence — because the selection is a client-side filter over the bundle and the daemon cannot narrow its own answer to a subset it was not told about until the apply. The script executor is NOT copied (§9.11 PARTIAL: menumate is concepts-and-schema-shapes only).
 Reason for modification: the reference lists installed third-party extension packs with their contributed menu actions, each of which the user can enable independently and which the import path treats as a bulk write. CrossOS lists its own profile bundles — data declared in-repo, not installed code — and the settings nav has no per-pack settings page to put a duplicate of each member's editor on, so the members' individual verdicts stay on the pages that own them (Keyboard, Windows, Explorer) while the profile's own capabilities get switches here. The boundary is stated once in app/backend/profilespage.go and cited by this destination, because the previous version of this control stated the opposite.
 CrossOS license: MIT
 
 Source repository: Hibrielle/menumate
 Source commit: 017d6dae1e8569b9d92513036503b013dc528283
-Source file: App/UI/PackImportSheet.swift (:230-277 private func reviewList — :236-245 a row shows a filled check only once its id is in the reviewer's `viewed` set and an empty circle until then; :260-263 the `.onTapGesture { selectedActionID = a.id; viewed.insert(a.id) }` that selects a row is the same tap that inserts it into `viewed`, so looking at a row IS the act of acknowledging it; :271-273 the `viewedProgress` "viewed n of m" Text, its font and its colour, which sits under the list and says plainly how much is left)
+Source file: App/UI/PackImportSheet.swift (:230-277 private func reviewList — :236-245 a row shows a filled check only once its id is in the reviewer's `viewed` set and an empty circle until then; :260-263 the `.onTapGesture { selectedActionID = a.id; viewed.insert(a.id) }` that selects a row is the same tap that inserts it into `viewed`, so looking at a row IS the act of acknowledging it; :271-273 the `viewedProgress` Text, its font and its colour, which sits under the list and says plainly how much is left; :367-369 allViewed, the gate itself, which tests every declared action rather than the selected one)
 Original license: MIT
 Original copyright: Copyright (c) 2026 Hibrielle
 CrossOS destination: app/frontend/src/controls/ProfileListControl.tsx (the reviewGate helper and its rendered sentence, the per-capability switch that doubles as the review, and the "Reviewed n of m" line beside the Apply)

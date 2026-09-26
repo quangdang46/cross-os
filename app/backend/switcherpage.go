@@ -6,10 +6,13 @@
 // control is a panel over core:windows and not a list the shell can sort.
 //
 // The layout is one row per window, each named in words beside its own tile
-// rather than by its id — the same rule the snap-area list follows (see
-// third_party/rectangle/ATTRIBUTION.md, block 3); the row carries the window
-// title the daemon sent, and a machine with no title falls back to the app so
-// no row is identified by a key alone.
+// rather than by its id. This rule is NOT rectangle's: the snap-area list is
+// the opposite of it, since its eight rows are bare NSPopUpButtons with no text
+// label at all (Main.storyboard, the SnapAreaViewController scene, holds eight
+// popUpButtons and zero text fields) and are told apart by position and by the
+// Directional tag (1...8, SnapAreaModel.swift:125-137), never by a word. The
+// row carries the window title the daemon sent, and a machine with no title
+// falls back to the app so no row is identified by a key alone.
 //
 // The two actions are the daemon's own method names because an action id is
 // the permission token it checks. core.switcherFocus is the row write (the

@@ -40,8 +40,9 @@ import type { ControlProps } from './common'
 // person reads a rectangle. The wire spelling is the key; the label is ours.
 /**
  * The eight named places, ported from Rectangle's snap-area rows
- * (SnapAreaViewController.swift:18-25: topLeft, top, topRight, left, right,
- * bottomLeft, bottom, bottomRight).
+ * (SnapAreaViewController.swift:16-23: topLeftLandscapeSelect through
+ * bottomRightLandscapeSelect — topLeft, top, topRight, left, right, bottomLeft,
+ * bottom, bottomRight).
  *
  * The reference asks WHICH PLACE and CrossOS asked for four numbers, and that
  * is the whole difference between a person naming where a window should go and

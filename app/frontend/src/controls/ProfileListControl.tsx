@@ -71,13 +71,40 @@
 //      something other than what will be applied. The reference's "you have
 //      seen it, and that is a session-long fact" is the other defensible rule.
 //   2. The per-capability switches are NOT sourced from rectangle
-//      (ramonwessels/rectangle), which an earlier draft of this header cited
-//      for a "one selector per named area" list. That repository is not
-//      materialized under .tmp/research/ and its upstream returns "Repository
-//      not found", so the citation could not be opened and has been DROPPED
-//      rather than left standing as an uncheckable claim. The switch list's
-//      actual source is the PacksScreen expandedBody cited above, which is
-//      where a member-per-row switch list genuinely lives.
+//      (github.com/rxhanson/Rectangle, pinned 12a9bc79f99abeb86297da3d7436b4489f920fa2
+//      and opened there). The account was RENAMED, so an earlier wave read the
+//      dead old URL as a repository that had ceased to exist and dropped the
+//      citation on that premise. The premise was false, and the reason the
+//      citation is actually absent is a better one, so the drop STANDS.
+//      It was cited for "a one selector per named area" list, and that is an
+//      accurate description of the file, which is exactly why it looked
+//      plausible. Opened, the file is the wrong list:
+//        SnapAreaViewController.swift:173-199 loadSnapAreas gathers two arrays
+//          of eight NSPopUpButton (:16-23, :27-34) and initializes each on its
+//          own — a MAPPING, one named screen region to the one action that
+//          region accepts;
+//        :202-229 initialize is what makes it a mapping and not a setting: :216
+//          filters a dropdown's OPTIONS by that region's own compatibility and
+//          :213 restores a single selected tag for it, so a row is a choice
+//          among values rather than a state a person turns on or off;
+//        :158-160 showHidePortrait hides or shows all eight rows on whether a
+//          PORTRAIT DISPLAY IS CONNECTED. There is no per-row enable anywhere in
+//          the file, so the reference has no operation the Toggle at :419-435
+//          performs;
+//        and every write is immediate (:46-47 sets Defaults.unsnapRestore and
+//          returns) while a grep for apply/undo/revert over all 292 lines matches
+//          NOTHING — there is no commit and no way back anywhere in the file.
+//          Nothing is held and nothing is committed, against a card that HOLDS a
+//          selection (:350-353), sends it in one write (:295-322), and takes it
+//          back through revert (:261-287).
+//      The two share one shallow layer: a row per member, a label beside its own
+//      control, which :75-86 builds for its single hand-made row — and the
+//      control there is a popup. Below that layer they differ on every part a
+//      port leans on. The switches' real source is the PacksScreen expandedBody
+//      cited above (:320-367), whose members each carry their OWN switch bound
+//      to a per-row callback (:327-330), and whose parent's enabledCount/
+//      totalCount rollup (:309-311) is what makes a held selection readable
+//      before it is sent.
 //
 // No code was copied: every reference is Swift and this is React over a
 // declared schema, so the interaction model transfers and the drawing does

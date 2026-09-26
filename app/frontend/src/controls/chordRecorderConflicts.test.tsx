@@ -1,5 +1,5 @@
 // What the recorder says about a chord the moment it is captured (port of
-// VS Code, keybindingsEditor.ts:353 — the define-keybinding widget prints the
+// VS Code, keybindingsEditor.ts:354 — the define-keybinding widget prints the
 // count of existing bindings as the chord completes, before anything is saved).
 //
 // The third test is the one that matters: a count that could not be read is not

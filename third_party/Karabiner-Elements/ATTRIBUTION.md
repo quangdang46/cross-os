@@ -16,7 +16,7 @@ Source file: src/apps/SettingsWindow/src/View/ProfileEditView.swift
 Original license: Unlicense (public domain dedication)
 Original copyright: No copyright reserved — the authors dedicated the work to the public domain
 CrossOS destination: app/frontend/src/controls/PluginDetailControl.tsx (the detail side of that split: the selected item's own fields, one label beside its value per row)
-Modification: structural port, no code copied — the reference's editable name field becomes a read-only manifest row, and its Save/Cancel pair is not ported: an extension's manifest is the daemon's (core:pluginMeta) and the shell has no write path to it. The rule that transfers is the one the reference's detail pane already keeps: a field it does not recognise is still shown, not dropped.
+Modification: structural port, no code copied — the reference's editable name field (:16-17, a label and its TextField inside one HStack) becomes a read-only manifest row, and its Save/Cancel pair (:24-43) is not ported: an extension's manifest is the daemon's (core:pluginMeta) and the shell has no write path to it. The rule that transfers is the label-beside-its-value row (:15-21). The empty-field case is NOT a port: the reference has no equivalent because the one field it renders (:17) cannot be absent, whereas a CrossOS manifest row with no version still prints the row and carries the reason it is empty (PluginDetailControl.tsx:76) rather than dropping the line or inventing a value.
 Reason for modification: language and medium port; the reference edits a profile, CrossOS reports one.
 CrossOS license: MIT
 
@@ -57,7 +57,7 @@ CrossOS license: MIT
 
 Source repository: pqrs-org/Karabiner-Elements
 Source commit: c7197aaf27345c11a0d1e4bf9ddad0c9020ae387
-Source file: src/apps/EventViewer/src/View/CaptureInputEventsView.swift:15-32 and src/apps/EventViewer/src/View/CaptureActiveLabel.swift:16-49
+Source file: src/apps/EventViewer/src/View/CaptureInputEventsView.swift:15-32 and src/apps/EventViewer/src/View/CaptureActiveLabel.swift:16-48
 Original license: Unlicense (public domain dedication)
 Original copyright: No copyright reserved — the authors dedicated the work to the public domain
 CrossOS destination: app/frontend/src/controls/ObserveToggleControl.tsx and the .ctl-live / .ctl-live-dot / .ctl-stop rules in app/frontend/public/style.css
@@ -71,7 +71,7 @@ Source file: src/apps/SettingsWindow/src/View/ComplexModificationsView.swift:175
 Original license: Unlicense (public domain dedication)
 Original copyright: No copyright reserved — the authors dedicated the work to the public domain
 CrossOS destination: app/frontend/src/controls/MatrixControl.tsx, app/frontend/src/controls/OverridesControl.tsx, app/frontend/src/controls/ShortcutListControl.tsx, and the .ctl-item.ctl-off rule in app/frontend/public/style.css
-Modification: structural port, no code copied. What transfers is that the off state is said TWICE and the two halves agree. The reference greys the row's own text (:175-177) AND prints a caption in the same grey beside the control (:179-182), and neither is the signal on its own: a row that is only greyed says nothing to a colour-blind reader or to a screen reader, and a control that is only greyed says nothing about what the rule is doing. CrossOS now has both on all THREE of its rule tables — the behaviour matrix, the per-app overrides and the all-rules registry — each greying from the value the daemon echoed back, so the row, the word beside it and the toggle cannot disagree.
+Modification: structural port, no code copied. What transfers is that the off state is said TWICE and the two halves agree. The reference greys the row's own text (:175-177) AND prints a caption in the same grey beside that text (:179-182), and neither is the signal on its own: a row that is only greyed says nothing to a colour-blind reader or to a screen reader, and a control that is only greyed says nothing about what the rule is doing. The caption is a second signal on the TEXT, not a label on the control — the Toggle sits in a later HStack (:195-207) and is never greyed, which is why the row carries its own state rather than borrowing the switch's. CrossOS now has both on all THREE of its rule tables — the behaviour matrix, the per-app overrides and the all-rules registry — each greying from the value the daemon echoed back, so the row, the word beside it and the toggle cannot disagree.
 Reason for modification: language and medium port — SwiftUI's .gray on a Text block becomes one class in a stylesheet whose vocabulary is closed on purpose. §9.11 keeps Karabiner as concepts/behavior/UX; the behaviour is the two-halves rule, not the colour.
 CrossOS license: MIT
 

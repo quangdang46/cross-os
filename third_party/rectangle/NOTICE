@@ -2,9 +2,10 @@ CrossOS draws its settings surface and its zone-list rows from rectangle.
 
 rectangle — Copyright (c) 2019-2026 Ryan Hanson — MIT License (see LICENSE in
 this directory).
-Source: https://github.com/ramonwessels/rectangle
+Source: https://github.com/rxhanson/Rectangle
 Per-file attribution: see ATTRIBUTION.md.
 
 No rectangle source code is vendored. The reference informed STRUCTURE only: a
-form of grouped rows, an About block carrying the version, and one row per named
-zone with that zone's own state.
+form of grouped rows, the version label and the check-for-updates row at the HEAD
+of that form rather than in a closing About block (there is no About block in
+the settings scene), and one row per named zone with that zone's own state.

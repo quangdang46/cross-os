@@ -2,7 +2,10 @@ No VS Code source is included; the LICENSE is recorded here for the
 keyboard-editor reference only. The project is MIT, which passes the §9.11
 gate.
 
-The reference clone is at .tmp/research/vscode, a sparse checkout of
-src/vs/workbench/contrib/preferences and src/vs/platform/keybinding. It is
-not a dependency, is not built, is not vendored, and is not required to build,
-test or ship CrossOS.
+The reference clone is at .tmp/research/vscode, checked out at the pinned commit
+above. It is a blobless PARTIAL CLONE of the whole repository (origin has
+promisor=true, partialclonefilter=blob:none) and not a sparse checkout:
+core.sparseCheckout is unset and ~19.3k of its files are present on disk, of
+which only 49 are under src/vs/workbench/contrib/preferences and
+src/vs/platform/keybinding. It is not a dependency, is not built, is not
+vendored, and is not required to build, test or ship CrossOS.

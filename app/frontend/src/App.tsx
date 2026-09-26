@@ -1,16 +1,20 @@
 // CrossOS settings shell.
 //
-// Port source: rectangle (ramonwessels/rectangle), whose preferences window
-// is the closest analog to a CrossOS settings surface — one scrolling form of
-// grouped rows, each row a label beside its control, closed by an About block
-// carrying the version.
+// Port source: rectangle (rxhanson/Rectangle), whose preferences window
+// is the closest analog to a CrossOS settings surface — one fixed form of
+// grouped rows, each row a control with its label beside it, with the version
+// and the update affordance at the head of the form.
 //
+//   tmp/research/rectangle/Rectangle/Base.lproj/Main.storyboard
+//     :2685-3457  the settings scene
+//     :2693       the content stack: vertical, leading-aligned, spacing 10
+//     :2696, :2751  two of its seven horizontal rows (:2696 :2751 :2790 :2831
+//     :2848 :2942 :3262 — :2831 is hidden="YES"), control beside label
 //   tmp/research/rectangle/Rectangle/PrefsWindow/SettingsViewController.swift
-//     :307-311  vertical, leading-aligned stack with uniform row spacing
-//     :10, :15   version label + check-for-updates button (About block)
-//     :60        a launch-on-login style checkbox per setting
+//     :9-39   one outlet per control on those rows (all 27 the class declares)
+//     :57-61  the per-setting action: read the control, write Defaults
 //   tmp/research/rectangle/Rectangle/PrefsWindow/PrefsViewController.swift
-//     one control per action, laid out in the same row shape
+//     :11-48  one shortcut control per action (the row shape is the storyboard's)
 //
 // No code was copied: the reference is AppKit and this is React, so the form's
 // STRUCTURE transfers, not its implementation. Tracked in
@@ -63,7 +67,7 @@ interface Page {
   Title: string
   Group: string
   // Symbol is the mark the daemon chose for the SECTION this page belongs to.
-  // It is a property of the section and not of the page, which is why fourteen
+  // It is a property of the section and not of the page, which is why seven
   // pages in one group all carry the same one — and why the shell keeps no map
   // from a group name to a picture. The vocabulary is the daemon's, and a shell
   // that hardcoded it would be a second place a section could be renamed with
@@ -431,8 +435,10 @@ export default function App() {
         </main>
       </div>
 
-      {/* About block: version plus the newest shell log line, mirroring
-          rectangle's version label and check-for-updates row. */}
+      {/* About block: version plus the newest shell log line. Rectangle's
+          version label and check-for-updates row are at the HEAD of its form
+          (Main.storyboard:2696 and :2751), not closing it; placing this one
+          at the foot is CrossOS's own, and is a departure, not a port. */}
       <footer className="about">
         {/* Version is served by the daemon; until the first status lands the
             block shows the name alone rather than a placeholder version that

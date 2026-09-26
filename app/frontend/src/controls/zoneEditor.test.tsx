@@ -1,5 +1,5 @@
 // The snap-zone editor's named places (cross-os-1uu follow-on; the eight
-// directions are ported from Rectangle's SnapAreaViewController.swift:18-25).
+// directions are ported from Rectangle's SnapAreaViewController.swift:16-23).
 //
 // The port's whole value is that a person NAMES where a window goes instead of
 // working out what 0.5 means. These tests pin that, and pin the two things it
