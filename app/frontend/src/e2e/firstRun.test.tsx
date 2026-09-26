@@ -128,7 +128,7 @@ describe('a fresh machine, from the first launch to the last decision', () => {
     // --- 1. a fresh profile lands on the wizard -----------------------------
     await open()
 
-    expect(screen.getByRole('heading', { name: 'Welcome', level: 2 })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Welcome', level: 1 })).toBeTruthy()
     const active = screen.getAllByRole('button').filter((b) => b.getAttribute('aria-current') === 'page')
     expect(active.map((b) => b.querySelector('.section-label')?.textContent)).toEqual(['Welcome'])
 
@@ -261,7 +261,7 @@ describe('a fresh machine, from the first launch to the last decision', () => {
     // --- 6. the next load lands on Home -------------------------------------
     cleanup()
     await open()
-    expect(screen.getByRole('heading', { name: 'Home', level: 2 })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Home', level: 1 })).toBeTruthy()
     const landing = screen.getAllByRole('button').filter((b) => b.getAttribute('aria-current') === 'page')
     expect(landing.map((b) => b.querySelector('.section-label')?.textContent)).toEqual(['Home'])
     // The card answers for the machine rather than for the wizard that is done.
@@ -382,7 +382,7 @@ describe('when a source fails', () => {
     // is one row on the page, never a blank window. A source that still
     // answers is still shown, which is the other half — one dead call must not
     // blank the ones that worked.
-    expect(screen.getByRole('heading', { name: 'Welcome', level: 2 })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Welcome', level: 1 })).toBeTruthy()
     expect(screen.getByRole('navigation', { name: 'Settings pages' })).toBeTruthy()
     expect(within(wizard).getByRole('button', { name: 'verify' })).toBeTruthy()
     expect(screen.getByText('CrossOS 0.4.0')).toBeTruthy()

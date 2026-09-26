@@ -131,7 +131,7 @@ describe('the opening page', () => {
     await mount()
     await settle()
 
-    expect(screen.getByRole('heading', { name: 'Welcome', level: 2 })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Welcome', level: 1 })).toBeTruthy()
     const active = screen.getAllByRole('button').filter((b) => b.getAttribute('aria-current'))
     expect(active.map((b) => b.textContent)).toEqual(['WelcomeStart here'])
   })
@@ -167,7 +167,7 @@ describe('the opening page', () => {
     await settle()
     expect(again.calls).toContain('Pages')
     expect(
-      screen.getByRole('heading', { name: 'Keyboard', level: 2 }),
+      screen.getByRole('heading', { name: 'Keyboard', level: 1 }),
     ).toBeTruthy()
   })
 })

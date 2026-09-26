@@ -571,10 +571,20 @@ export default function App() {
         </nav>
 
         <main className="form">
+          {/* The measure and the scroll container are two elements (5.4): `.form`
+              scrolls, `.page` is the 760px document column inside it. It is
+              left-aligned, not centred — see the rule. */}
+          <div className="page">
           {page ? (
             <>
-              <h2 className="group-title">{page.Title || page.ID}</h2>
-              {schema.description ? <p className="page-desc">{schema.description}</p> : null}
+              {/* An h1, because it is the top-level heading of this pane: the
+                  sidebar caps are h2 over their groups and the 12px uppercase
+                  cap this replaced was indistinguishable from them, so nothing
+                  on screen said which of the fifteen pages you were on. */}
+              <div className="page-header">
+                <h1 className="page-title">{page.Title || page.ID}</h1>
+                {schema.description ? <p className="page-desc">{schema.description}</p> : null}
+              </div>
               {/* The permission callout (5.1), in the page's own anatomy
                   position — title, description, callout, controls (4.2) — and
                   not in the window's chrome, because above the fold on an
@@ -619,12 +629,21 @@ export default function App() {
               {controls.length === 0 ? (
                 <p className="ctl-empty">This page declares no controls yet.</p>
               ) : (
-                controls.map((ctl, i) => (
-                  // Positional key: the list is schema-ordered and stable, and
-                  // naming a control field here would couple the shell to a
-                  // shape the registry owns.
-                  <Fragment key={i}>{renderControl(ctl, ctx)}</Fragment>
-                ))
+                /* The implicit section (4.3). A page that declares no
+                   `sections[]` gets ONE card holding every row, with no card
+                   header — structurally correct, and visually close to what
+                   shipped. It is the fallback half of the contract: when the
+                   daemon does ship sections[], they win and this is replaced by
+                   one card per section. Both paths stay live, which is what
+                   makes a daemon/shell version skew survivable. */
+                <div className="card">
+                  {controls.map((ctl, i) => (
+                    // Positional key: the list is schema-ordered and stable, and
+                    // naming a control field here would couple the shell to a
+                    // shape the registry owns.
+                    <Fragment key={i}>{renderControl(ctl, ctx)}</Fragment>
+                  ))}
+                </div>
               )}
             </>
           ) : (
@@ -648,20 +667,24 @@ export default function App() {
           ) : null}
 
           {ownsTrace ? null : <Timeline logs={logs} readAt={readAt} />}
+
+          {/* The footer (5.13), moved INSIDE the content pane. It spanned the
+              full window width under both the rail and the content, which made
+              it a second horizontal rule competing with the sidebar's own for
+              the same edge — and a full-width band under a 760px column is
+              chrome pretending to be part of the document. The version is a
+              fact, not chrome: About (110) is where it belongs, and this keeps
+              it only as a convenience. */}
+          <footer className="about">
+            {/* Version is served by the daemon; until the first status lands the
+                block shows the name alone rather than a placeholder version that
+                could be mistaken for the real one. */}
+            <span className="version">CrossOS{status?.Version ? ` ${status.Version}` : ''}</span>
+            {shellLog ? <span className="about-msg">{shellLog}</span> : null}
+          </footer>
+          </div>
         </main>
       </div>
-
-      {/* About block: version plus the newest shell log line. Rectangle's
-          version label and check-for-updates row are at the HEAD of its form
-          (Main.storyboard:2696 and :2751), not closing it; placing this one
-          at the foot is CrossOS's own, and is a departure, not a port. */}
-      <footer className="about">
-        {/* Version is served by the daemon; until the first status lands the
-            block shows the name alone rather than a placeholder version that
-            could be mistaken for the real one. */}
-        <span className="version">CrossOS{status?.Version ? ` ${status.Version}` : ''}</span>
-        {shellLog ? <span className="about-msg">{shellLog}</span> : null}
-      </footer>
     </div>
   )
 }
