@@ -9,6 +9,7 @@ import CrossOSCore
 
 @main
 struct CrossOSApp {
+    @MainActor
     static func main() {
         let app = NSApplication.shared
 
@@ -17,6 +18,31 @@ struct CrossOSApp {
         // not evidence that it drew anything, and the previous shell's defects
         // were all invisible in a passing test suite and visible only by
         // looking. Printing the tree is looking, in a form CI can read.
+        if CommandLine.arguments.contains("--probe-layers") {
+            app.setActivationPolicy(.accessory)
+            let delegate = AppDelegate()
+            app.delegate = delegate
+            app.finishLaunching()
+            delegate.probeLayers()
+            return
+        }
+
+        if CommandLine.arguments.contains("--shots") {
+            app.setActivationPolicy(.accessory)
+            let delegate = AppDelegate()
+            app.delegate = delegate
+            app.finishLaunching()
+            // The run loop is started rather than a bare `Task`, because
+            // `main` returning tears the process down and an unstructured
+            // task dies with it — which is why the first run exited 0 having
+            // written nothing. `app.run()` plus a `finishLaunching` that
+            // already happened is the arrangement that keeps it alive long
+            // enough to draw, and the task calls `exit` when it is done.
+            delegate.shotsThenExit()
+            app.run()
+            return
+        }
+
         if CommandLine.arguments.contains("--geometry") {
             probeGeometry()
             exit(0)
@@ -42,6 +68,7 @@ struct CrossOSApp {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shell: ShellWindowController?
     private let client = LiveCoreClient()
@@ -84,6 +111,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         exit(0)
+    }
+
+    /// Print the layer tree of the window, to find out where the pixels are.
+    func probeLayers() {
+        let shell = ShellWindowController(client: client)
+        self.shell = shell
+        shell.showWindow(nil)
+        shell.window?.makeKeyAndOrderFront(nil)
+        ShotRenderer.settle(1.2)
+        if let content = shell.window?.contentView {
+            printLayerTree(content, depth: 0)
+        }
+        exit(0)
+    }
+
+    private func printLayerTree(_ view: NSView, depth: Int) {
+        let pad = String(repeating: "  ", count: depth)
+        let f = view.frame
+        let layerInfo = view.layer.map { l in
+            "subs=\(l.sublayers?.count ?? 0) hidden=\(l.isHidden) needsDisplay=\(l.needsDisplay)"
+                + " contents=\(l.contents == nil ? "nil" : "set")"
+        } ?? "layer=nil"
+        print("\(pad)\(type(of: view)) \(Int(f.width))x\(Int(f.height))@\(Int(f.minX)),\(Int(f.minY)) \(layerInfo)")
+        for sub in view.subviews {
+            printLayerTree(sub, depth: depth + 1)
+        }
+    }
+
+    /// Render every page to a PNG and exit.
+    ///
+    /// The app's own pixels, drawn by the app. See `ShotRenderer` for why
+    /// this exists instead of `screencapture` — and for what it does not
+    /// include, which is the window chrome.
+    func shotsThenExit() {
+        let out = CommandLine.arguments
+            .first { $0.hasPrefix("--out=") }
+            .map { String($0.dropFirst("--out=".count)) } ?? "/tmp/crossos-shots-swift"
+
+        // The window is AppKit, so every touch of it is on the main actor,
+        // and this method IS on the main actor — so the work happens in a
+        // Task and the run loop above is what keeps that Task alive.
+        Task { @MainActor in
+            let shell = ShellWindowController(client: client)
+            self.shell = shell
+            shell.showWindow(nil)
+            shell.window?.makeKeyAndOrderFront(nil)
+            ShotRenderer.settle(1.5)
+
+            do {
+                let written = try await ShotRenderer.captureAll(client: client, out: out)
+                for path in written { print(path) }
+                print("\(written.count) shots in \(out)")
+            } catch {
+                print("shots failed: \(error)")
+            }
+            exit(0)
+        }
     }
 
     /// A window that closes is a window that can come back. Without this the
