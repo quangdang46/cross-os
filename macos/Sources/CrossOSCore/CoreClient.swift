@@ -77,6 +77,15 @@ public protocol CoreClient: Sendable {
     /// plugins, so a new command must show up with no shell change.
     func commands() async throws -> [CommandRow]
 
+    /// A plugin's declarative config schema (`core.pluginSchemas`).
+    ///
+    /// Served as an object so the shell renders it directly rather than
+    /// re-parsing a JSON string — the same trap the generated bindings
+    /// document for pages (uisources.go:76-80). Empty today, and that is the
+    /// daemon's honest answer rather than a failure: no plugin declares one
+    /// yet, and the schemaForm page says so in words.
+    func pluginSchemas() async throws -> [SchemaRow]
+
     /// Plugin manifest facts (`core.pluginMeta`).
     func pluginMeta() async throws -> [PluginMetaRow]
 
@@ -559,6 +568,10 @@ public actor LiveCoreClient: CoreClient {
 
     public func commands() async throws -> [CommandRow] {
         try decode([CommandRow].self, from: await call("core.commands"), method: "core.commands")
+    }
+
+    public func pluginSchemas() async throws -> [SchemaRow] {
+        try decode([SchemaRow].self, from: await call("core.pluginSchemas"), method: "core.pluginSchemas")
     }
 
     public func pluginMeta() async throws -> [PluginMetaRow] {

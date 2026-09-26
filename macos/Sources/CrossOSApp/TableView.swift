@@ -43,6 +43,10 @@ protocol TableContent: AnyObject {
 extension TableContent {
     func toggle(row: Int, column: Int) -> (isOn: Bool, onChange: @MainActor (Bool) -> Void)? { nil }
     func isDimmed(row: Int) -> Bool { false }
+    /// Whether a row is the daemon's CURRENT SELECTION. Distinct from
+    /// `isDimmed`, which is "off": a row can be neither, and confusing the two
+    /// would draw the window you are on as an unavailable one.
+    func isHighlighted(row: Int) -> Bool { false }
 }
 
 /// An `NSTableView` wired to a `TableContent`.

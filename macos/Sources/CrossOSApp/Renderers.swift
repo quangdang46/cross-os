@@ -64,6 +64,17 @@ struct Renderers: Sendable {
         register(.license) { control, context in LicenseView(control: control, context: context) }
         register(.palette) { control, context in PaletteView(control: control, context: context) }
         register(.shortcutList) { control, context in ShortcutListView(control: control, context: context) }
+        register(.zoneEditor) { control, context in ZoneEditorView(control: control, context: context) }
+        register(.finderMenu) { control, context in FinderMenuView(control: control, context: context) }
+        register(.pluginDetail) { control, context in PluginDetailView(control: control, context: context) }
+        register(.keymapEditor) { control, context in KeymapEditorView(control: control, context: context) }
+        register(.ruleBuilder) { control, context in RuleBuilderView(control: control, context: context) }
+        register(.schemaForm) { control, context in SchemaFormView(control: control, context: context) }
+        // The switcher panel is the settings page's HALF of the switcher: it
+        // draws the same tiles the overlay does, from the same daemon list, in
+        // a column rather than a grid. The overlay itself is a second window
+        // and is summoned by the chord, not by this page.
+        register(.switcherPanel) { control, context in SwitcherPageView(control: control, context: context) }
 
         // The three retired spellings, mapping to what replaced them.
         // `app/backend` re-points them by renaming the `kind` field; these are
@@ -134,16 +145,13 @@ enum Kind: String {
     case license
     case palette
     case shortcutList
-
-    // NOT yet drawn, and deliberately absent as cases. A page carrying one of
-    // these draws `UnsupportedView`, which names the kind — so a half-ported
-    // page is visibly half-ported rather than quietly missing a row. A case
-    // here would be a lie: `Kind` is what this shell can draw, and these are
-    // not drawn yet. The names live in the daemon's page schemas and in
-    // `src/test/styleContract`-style coverage, not here.
-    //
-    // finderMenu, keymapEditor, pluginDetail, ruleBuilder, schemaForm,
-    // switcherPanel, zoneEditor
+    case zoneEditor
+    case finderMenu
+    case pluginDetail
+    case keymapEditor
+    case ruleBuilder
+    case schemaForm
+    case switcherPanel
 }
 
 // MARK: - Unsupported

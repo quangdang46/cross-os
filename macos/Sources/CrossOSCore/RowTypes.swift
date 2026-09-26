@@ -338,3 +338,17 @@ public struct PluginMetaRow: Codable, Sendable, Equatable {
     public var loaded: Bool
     public var reason: String?
 }
+
+/// One plugin's declarative config schema (`core.pluginSchemas`).
+///
+/// `schema` is an untyped object rather than a modelled form, and that is
+/// deliberate: a schema-shape this client does not know must render
+/// VISIBLY rather than silently as nothing. A plugin may only contribute the
+/// declarative tier (custom views are rejected upstream, bead cross-os-4lm),
+/// so this is the whole plugin-configuration path — and a path that fails
+/// quietly is a plugin system that is broken with nothing saying so.
+public struct SchemaRow: Codable, Sendable, Equatable {
+    public var plugin: String
+    public var title: String
+    public var schema: [String: JSONValue]
+}

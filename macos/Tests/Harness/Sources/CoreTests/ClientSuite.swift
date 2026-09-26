@@ -35,6 +35,7 @@ public actor SpiedCoreClient: CoreClient {
     private var userRulesAnswer: [UserRuleRow] = []
     private var commandsAnswer: [CommandRow] = []
     private var pluginMetaAnswer: [PluginMetaRow] = []
+    private var schemasAnswer: [SchemaRow] = []
     private var tracesAnswer: [TraceRow] = []
     private var fileTypesAnswer: [FileTypeRow] = []
     private var healthyAnswer = false
@@ -192,6 +193,11 @@ public actor SpiedCoreClient: CoreClient {
     public func commands() async throws -> [CommandRow] {
         record("core.commands")
         return commandsAnswer
+    }
+
+    public func pluginSchemas() async throws -> [SchemaRow] {
+        record("core.pluginSchemas")
+        return schemasAnswer
     }
 
     public func pluginMeta() async throws -> [PluginMetaRow] {
