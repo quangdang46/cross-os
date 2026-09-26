@@ -22,9 +22,16 @@
 
 ---
 
-## 1. Diagnosis — what is wrong with the current UI
+## 1. Diagnosis — what was wrong with the React UI
 
-The shell is not badly *styled*; it is badly *structured*. `public/style.css`
+> **Historical.** This section diagnosed `app/frontend/public/style.css`, a
+> 2,646-line stylesheet that made a webview imitate a native macOS settings
+> pane. Both the stylesheet and the React shell are **deleted** (see §12). The
+> evidence stays because it is why the port happened: every symptom below is a
+> class of defect that has no representation in AppKit, and four of them
+> shipped. The measurements are in `docs/baseline/`.
+
+The shell was not badly *styled*; it was badly *structured*. `public/style.css`
 carries genuinely good decisions (a 4-step radius scale, `@supports (color:
 AccentColor)` bridging to the OS palette, a `prefers-reduced-motion` block,
 tabular numerals on the countdown). Those survive this rewrite. What fails is
@@ -1430,14 +1437,48 @@ tokens.
 
 ---
 
-## 12. Migration
+## 12. Migration — done
 
-### 12.1 Class map
+> **Historical.** The plan below was a phased CSS rewrite. What actually
+> happened was a port: the React shell and its stylesheet are gone, and
+> `macos/` is an AppKit application. The class map is kept because it records
+> which React construct each native view replaced, and the reasoning in §1–§11
+> is why the native views are shaped the way they are.
 
-Nothing is deleted before its replacement ships. The stylesheet is edited in
-phases, not rewritten.
+### 12.0 What replaced it
 
-| Current | New | Note |
+| Was | Is | Note |
+|---|---|---|
+| `app/frontend/` (17,742 lines TSX) | `macos/Sources/CrossOSApp/` | AppKit, no SwiftUI |
+| `public/style.css` (2,646 lines) | native controls | **deleted, not ported** |
+| `app/backend/` (7,735 lines Go) | `macos/Sources/CrossOSCore/` | **deleted, not ported** — it was already Wails-free |
+| `@wailsio/runtime` | `NSApp` / `NSPasteboard` / `NSPanel` | three calls, three APIs |
+| `App.tsx`'s 5s poll | `ShellWindowController.startPolling` | the same cadence, inherited |
+| `useResource`'s generation counter | the same counter, by hand | `Task.cancel()` is not it |
+| `cts` tokens | `Palette` / `Gap` / `Typeface` / `Radius` | four enums, every value native |
+| `preview/` + `webkit-probe.swift` | `CrossOS --describe` + `--geometry` | AppKit is the engine that ships |
+
+**Why the CSS is gone rather than translated.** Every control now draws
+itself: `NSSwitch` draws the knob and its lift, `NSTableView` recycles rows and
+draws the focus ring, `NSTextField` coerces. The measurements in §1 are
+symptoms of a webview being asked to do work the platform already does — a
+1.00:1 control border because `ButtonBorder` resolves to white, a label broken
+one character per line because a chip took the flex space.
+
+**What is not lost.** The citations into `tmp/research/` — `MenuHubPanels.swift:637`,
+`MMField/DesignSystem.swift:451-482`, `lockRow`, `PvField:37-42` — were
+measurements taken from real native apps and they moved into the Swift beside
+the code that uses them, where each says what it is for.
+
+### 12.1 The class map the port replaced
+
+The left column is the React shell's vocabulary and the right is the CSS this
+document originally proposed to replace it with. **Neither shipped** — the CSS
+column is what the port made unnecessary, because every row in it describes a
+shape AppKit draws itself. The third column is the reason it is here: it says
+what each control was FOR, and that is the brief the Swift views answer.
+
+| React class | CSS proposal (not shipped) | Why it existed |
 |---|---|---|
 | `.window` | `.shell` | unchanged anatomy |
 | `.masthead`, `.masthead h1` | — | **deleted** (§5.2) |
