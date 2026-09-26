@@ -59,6 +59,11 @@ struct Renderers: Sendable {
         register(.fileTypeList) { control, context in FileTypeListView(control: control, context: context) }
         register(.pipelineTrace) { control, context in PipelineTraceView(control: control, context: context) }
         register(.pluginList) { control, context in PluginListView(control: control, context: context) }
+        register(.trial) { control, context in TrialView(control: control, context: context) }
+        register(.credits) { control, context in CreditsView(control: control, context: context) }
+        register(.license) { control, context in LicenseView(control: control, context: context) }
+        register(.palette) { control, context in PaletteView(control: control, context: context) }
+        register(.shortcutList) { control, context in ShortcutListView(control: control, context: context) }
 
         // The three retired spellings, mapping to what replaced them.
         // `app/backend` re-points them by renaming the `kind` field; these are
@@ -124,6 +129,11 @@ enum Kind: String {
     case fileTypeList
     case pipelineTrace
     case pluginList
+    case trial
+    case credits
+    case license
+    case palette
+    case shortcutList
 
     // NOT yet drawn, and deliberately absent as cases. A page carrying one of
     // these draws `UnsupportedView`, which names the kind — so a half-ported
@@ -132,8 +142,8 @@ enum Kind: String {
     // not drawn yet. The names live in the daemon's page schemas and in
     // `src/test/styleContract`-style coverage, not here.
     //
-    // credits, finderMenu, keymapEditor, license, palette, pluginDetail,
-    // ruleBuilder, schemaForm, shortcutList, switcherPanel, trial, zoneEditor
+    // finderMenu, keymapEditor, pluginDetail, ruleBuilder, schemaForm,
+    // switcherPanel, zoneEditor
 }
 
 // MARK: - Unsupported

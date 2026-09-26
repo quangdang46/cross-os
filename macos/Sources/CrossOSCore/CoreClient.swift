@@ -90,9 +90,9 @@ public protocol CoreClient: Sendable {
 
     /// The trial in flight (`safety.trialState`) and its three transitions.
     func trialState() async throws -> TrialState
-    func beginTrial() async throws -> String
-    func confirmTrial() async throws -> String
-    func rollbackTrial() async throws -> String
+    func beginTrial(plugin: String) async throws -> String
+    func confirmTrial(plugin: String, healthy: Bool) async throws -> String
+    func rollbackTrial(plugin: String) async throws -> String
 
     /// Panic stop and the way back (`safety.panicStop`, `safety.resume`).
     func panicStop() async throws -> JSONValue
@@ -588,18 +588,23 @@ public actor LiveCoreClient: CoreClient {
         try decode(TrialState.self, from: await call("safety.trialState"), method: "safety.trialState")
     }
 
-    public func beginTrial() async throws -> String {
-        let raw = try await call("safety.beginTrial", .object([:]))
+    public func beginTrial(plugin: String) async throws -> String {
+        let raw = try await call("safety.beginTrial", .object(["plugin": .string(plugin)]))
         return raw.stringValue ?? ""
     }
 
-    public func confirmTrial() async throws -> String {
-        let raw = try await call("safety.confirmTrial", .object([:]))
+    public func confirmTrial(plugin: String, healthy: Bool) async throws -> String {
+        let params = JSONValue.object([
+            "plugin": .string(plugin),
+            "confirmed": .bool(true),
+            "healthy": .bool(healthy),
+        ])
+        let raw = try await call("safety.confirmTrial", params)
         return raw.stringValue ?? ""
     }
 
-    public func rollbackTrial() async throws -> String {
-        let raw = try await call("safety.rollbackTrial", .object([:]))
+    public func rollbackTrial(plugin: String) async throws -> String {
+        let raw = try await call("safety.rollbackTrial", .object(["plugin": .string(plugin)]))
         return raw.stringValue ?? ""
     }
 

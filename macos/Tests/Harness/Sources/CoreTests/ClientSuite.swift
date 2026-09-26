@@ -37,6 +37,7 @@ public actor SpiedCoreClient: CoreClient {
     private var pluginMetaAnswer: [PluginMetaRow] = []
     private var tracesAnswer: [TraceRow] = []
     private var fileTypesAnswer: [FileTypeRow] = []
+    private var healthyAnswer = false
     private var trialAnswer = TrialState(plugin: "", state: "none", remainingMS: 0, timeoutMS: 0)
 
     public init() {}
@@ -219,17 +220,22 @@ public actor SpiedCoreClient: CoreClient {
         return trialAnswer
     }
 
-    public func beginTrial() async throws -> String {
+    public func beginTrial(plugin: String) async throws -> String {
         record("safety.beginTrial")
         return "started"
     }
 
-    public func confirmTrial() async throws -> String {
+    public func confirmTrial(plugin: String, healthy: Bool) async throws -> String {
         record("safety.confirmTrial")
-        return "kept"
+        // The healthy flag is the DAEMON's claim, and a stub that always says
+        // true would make the fail-closed gate untestable — the whole point of
+        // the flag is that the shell passes false when it cannot see the
+        // plugin.
+        healthyAnswer = healthy
+        return healthy ? "kept" : "refused: the shell could not see the plugin"
     }
 
-    public func rollbackTrial() async throws -> String {
+    public func rollbackTrial(plugin: String) async throws -> String {
         record("safety.rollbackTrial")
         return "reverted"
     }

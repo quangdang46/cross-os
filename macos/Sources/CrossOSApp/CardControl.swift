@@ -78,6 +78,30 @@ class CardControl: NSView {
         bodyStack.addArrangedSubview(view)
     }
 
+    /// Replace the body with a few lines of text.
+    ///
+    /// Four controls are exactly this — a heading and two or three sentences —
+    /// and writing a stack view for each of them is four copies of the same
+    /// eight lines. `typeface` is a parameter because the point of the four is
+    /// that they are NOT the same size: a licence is a caption and a title is
+    /// a card title, and a helper that forced one on all of them would be
+    /// flattening the difference the four exist to express.
+    func replaceBody(with text: [(String, NSFont)]) {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Gap.tight
+        for (line, font) in text {
+            let field = NSTextField(labelWithString: line)
+            field.font = font
+            field.textColor = font == Typeface.caption ? Palette.secondaryInk : Palette.primaryInk
+            field.lineBreakMode = .byWordWrapping
+            field.maximumNumberOfLines = 0
+            stack.addArrangedSubview(field)
+        }
+        replaceBody(with: stack)
+    }
+
     /// Show a failure, in the card, in words that say what to do.
     ///
     /// The detail names the RPC because a person reading "could not load" with
