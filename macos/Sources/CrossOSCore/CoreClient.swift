@@ -28,6 +28,35 @@ public protocol CoreClient: Sendable {
     /// The daemon's recent log lines (`core.eventLogs`).
     func eventLogs() async throws -> [String]
 
+    /// The behaviour matrix (`config.getMatrix`).
+    func matrix() async throws -> [MatrixRow]
+
+    /// The per-app overrides (`config.getOverrides`).
+    func overrides() async throws -> [OverrideRow]
+
+    /// Which rule wins each contested chord (`core.conflicts`).
+    func conflicts() async throws -> [ConflictRow]
+
+    /// What the recorder is doing (`core.observeState`).
+    func observeState() async throws -> ObserveStateRow
+
+    /// Installed apps (`core.apps`). An empty list is the answer on a platform
+    /// with no enumeration, not a failure.
+    func apps() async throws -> [AppRow]
+
+    /// Profiles (`core.profiles`), in the daemon's declared order.
+    func profiles() async throws -> [ProfileRow]
+
+    /// Switch a rule on or off (`config.setRuleEnabled`).
+    ///
+    /// Returns the STORED state, not a success flag. The Go client decodes the
+    /// answer's `enabled` straight into a bool and the React control reads it
+    /// as "the new state" — reading it as "did it stick?" printed "The daemon
+    /// kept Ctrl+C off." the moment somebody turned a rule OFF, on the one
+    /// control whose whole job is making the machine stop remapping that
+    /// chord (MatrixControl.tsx:34-41).
+    func setRuleEnabled(ruleID: String, enabled: Bool) async throws -> Bool
+
     /// The settings pages the daemon is serving, in the order the nav will
     /// draw them.
     ///
@@ -371,5 +400,38 @@ public actor LiveCoreClient: CoreClient {
 
     public func pages() async throws -> [Page] {
         try Page.decodeList(await call("core.pages"))
+    }
+
+    public func matrix() async throws -> [MatrixRow] {
+        try decode([MatrixRow].self, from: await call("config.getMatrix"), method: "config.getMatrix")
+    }
+
+    public func overrides() async throws -> [OverrideRow] {
+        try decode([OverrideRow].self, from: await call("config.getOverrides"), method: "config.getOverrides")
+    }
+
+    public func conflicts() async throws -> [ConflictRow] {
+        try decode([ConflictRow].self, from: await call("core.conflicts"), method: "core.conflicts")
+    }
+
+    public func observeState() async throws -> ObserveStateRow {
+        try decode(ObserveStateRow.self, from: await call("core.observeState"), method: "core.observeState")
+    }
+
+    public func apps() async throws -> [AppRow] {
+        try decode([AppRow].self, from: await call("core.apps"), method: "core.apps")
+    }
+
+    public func profiles() async throws -> [ProfileRow] {
+        try decode([ProfileRow].self, from: await call("core.profiles"), method: "core.profiles")
+    }
+
+    public func setRuleEnabled(ruleID: String, enabled: Bool) async throws -> Bool {
+        let params = JSONValue.object(["rule_id": .string(ruleID), "enabled": .bool(enabled)])
+        // The answer is an object with the stored state in it, not a bare
+        // bool — the Go client unwraps `.enabled` from it.
+        let raw = try await call("config.setRuleEnabled", params)
+        let object = raw.objectValue ?? [:]
+        return object["enabled"]?.boolValue ?? false
     }
 }

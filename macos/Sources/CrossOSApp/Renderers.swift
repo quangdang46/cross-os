@@ -45,7 +45,16 @@ struct Renderers: Sendable {
         register(.wizard) { WizardView(control: $0, context: $1) }
         register(.note) { control, _ in NoteView(control: control) }
         register(.version) { control, _ in NoteView(control: control) }
-        register(.button) { ButtonRowView(control: $0, context: $1) }
+        register(.button) { control, context in ButtonRowView(control: control, context: context) }
+
+        // Projections of daemon data. Each is a card with rows in it, and the
+        // rows are a table rather than a stack — see TableView.swift for what
+        // a table gives that a stack does not.
+        register(.matrix) { control, context in MatrixView(control: control, context: context) }
+        register(.overrides) { control, context in OverridesView(control: control, context: context) }
+        register(.conflictResolver) { control, context in ConflictResolverView(control: control, context: context) }
+        register(.observeToggle) { control, context in ObserveToggleView(control: control, context: context) }
+        register(.auditList) { control, context in AuditListView(control: control, context: context) }
 
         // The three retired spellings, mapping to what replaced them.
         // `app/backend` re-points them by renaming the `kind` field; these are
@@ -95,21 +104,27 @@ struct Renderers: Sendable {
 /// a page id by accident, and so the SwiftUI-adjacent mistake of a `switch` over
 /// strings is not available here at all.
 enum Kind: String {
+    // Registered, and each one draws.
     case homeSummary
     case checklist
     case wizard
     case note
     case version
     case button
+    case matrix
+    case overrides
+    case conflictResolver
+    case observeToggle
+    case auditList
 
-    // The kinds the other pages need, NOT yet registered. A page carrying one
-    // of these draws `UnsupportedView`, which names the kind — so a
-    // half-ported page is visibly half-ported rather than quietly missing a
-    // row. Listing them here as cases would be a lie: a case that exists is a
-    // kind this shell can draw, and these are not drawn yet.
+    // NOT yet drawn, and deliberately absent as cases. A page carrying one of
+    // these draws `UnsupportedView`, which names the kind — so a half-ported
+    // page is visibly half-ported rather than quietly missing a row. A case
+    // here would be a lie: `Kind` is what this shell can draw, and these are
+    // not drawn yet. The names live in the daemon's page schemas and in
+    // `src/test/styleContract`-style coverage, not here.
     //
-    // auditList, conflictResolver, credits, fileTypeList, finderMenu,
-    // keymapEditor, license, matrix, observeToggle, overrides, palette,
+    // credits, fileTypeList, finderMenu, keymapEditor, license, palette,
     // pipelineTrace, pluginDetail, pluginList, profileList, ruleBuilder,
     // schemaForm, shortcutList, switcherPanel, trial, zoneEditor
 }

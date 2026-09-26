@@ -23,6 +23,13 @@ public actor SpiedCoreClient: CoreClient {
     private var eventLogsAnswer: [String] = []
     private var triggerAnswer = SwitcherTrigger(triggered: false)
     private var pagesAnswer: [Page] = []
+    private var matrixAnswer: [MatrixRow] = []
+    private var overridesAnswer: [OverrideRow] = []
+    private var conflictsAnswer: [ConflictRow] = []
+    private var observeAnswer = ObserveStateRow(observe: false, mode: "off")
+    private var appsAnswer: [AppRow] = []
+    private var profilesAnswer: [ProfileRow] = []
+    private var storedRuleState = false
 
     public init() {}
 
@@ -37,6 +44,13 @@ public actor SpiedCoreClient: CoreClient {
     public func setEventLogs(_ value: [String]) { eventLogsAnswer = value }
     public func setTrigger(_ value: SwitcherTrigger) { triggerAnswer = value }
     public func setPages(_ value: [Page]) { pagesAnswer = value }
+    public func setMatrix(_ value: [MatrixRow]) { matrixAnswer = value }
+    public func setOverrides(_ value: [OverrideRow]) { overridesAnswer = value }
+    public func setConflicts(_ value: [ConflictRow]) { conflictsAnswer = value }
+    public func setObserve(_ value: ObserveStateRow) { observeAnswer = value }
+    public func setApps(_ value: [AppRow]) { appsAnswer = value }
+    public func setProfiles(_ value: [ProfileRow]) { profilesAnswer = value }
+    public func setStoredRuleState(_ value: Bool) { storedRuleState = value }
 
     public func count(of method: String) -> Int {
         callLog.filter { $0 == method }.count
@@ -77,6 +91,44 @@ public actor SpiedCoreClient: CoreClient {
     public func pages() async throws -> [Page] {
         record("core.pages")
         return pagesAnswer
+    }
+
+    public func matrix() async throws -> [MatrixRow] {
+        record("config.getMatrix")
+        return matrixAnswer
+    }
+
+    public func overrides() async throws -> [OverrideRow] {
+        record("config.getOverrides")
+        return overridesAnswer
+    }
+
+    public func conflicts() async throws -> [ConflictRow] {
+        record("core.conflicts")
+        return conflictsAnswer
+    }
+
+    public func observeState() async throws -> ObserveStateRow {
+        record("core.observeState")
+        return observeAnswer
+    }
+
+    public func apps() async throws -> [AppRow] {
+        record("core.apps")
+        return appsAnswer
+    }
+
+    public func profiles() async throws -> [ProfileRow] {
+        record("core.profiles")
+        return profilesAnswer
+    }
+
+    public func setRuleEnabled(ruleID: String, enabled: Bool) async throws -> Bool {
+        record("config.setRuleEnabled")
+        // The STORED state, the way the daemon answers. A stub that echoed the
+        // request would make the one assertion this exists for — that a
+        // refusal is reported rather than reconciled with the row — untestable.
+        return storedRuleState
     }
 }
 
