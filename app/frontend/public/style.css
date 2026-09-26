@@ -1445,15 +1445,25 @@ body {
 }
 
 /* The knob. Its position is the on/off signal, so the switch still reads with
-   no colour perception at all. */
+   no colour perception at all.
+
+   The shadow is not decoration and it is not a hover effect: a macOS switch
+   knob is a physical disc sitting PROUD of its track, and that lift is most of
+   what makes the control read as a switch rather than as a coloured pill. It
+   also separates the knob from the track when the two are the same colour,
+   which is the ON state — without it, an on switch is a white dot on blue with
+   no edge between them. */
 .ctl-toggle::after {
   content: '';
   position: absolute;
   left: 2px;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: var(--fg-secondary);
+  background: #fff;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, .28),
+    0 0 0 0.5px rgba(0, 0, 0, .06);
   transition: transform 120ms ease;
 }
 
@@ -1483,10 +1493,29 @@ body {
   margin: 4px 0 0;
   padding: 0;
   list-style: none;
-  background: var(--bg-sunken); /* MMColor.card */
+  /* TRANSPARENT inside a card, and that is the point. The card is already the
+     surface; a list card drawn on top of it in a second grey is a card inside a
+     card, which is the thing every reference avoids — Linear's "Coding tools",
+     Slite's preferences and Opera's rows are all ONE white card with hairline
+     separators, never a lighter block nested in a whiter one.
+
+     Outside a card the list still carries its own surface, because there is no
+     card to inherit: the switcher overlay's tile grid and the wizard's stepper
+     both draw on the window plane. */
+  background: transparent;
   border: 0.5px solid var(--line-hairline);
   border-radius: var(--radius-list);
   overflow: hidden;
+}
+
+/* And no outline of its own when the card is already there. A rounded border
+   drawn inside a rounded card is two edges where the reference has one: the
+   rows read as a group because the HAIRLINES between them say so, not because
+   there is a second box drawn around them. The card's edge is the group's
+   edge, and the list's job inside it is the separators alone. */
+.card .ctl > .ctl-list {
+  border: 0;
+  border-radius: 0;
 }
 
 /* A row INSIDE a list card — the behaviour matrix, the shortcut table, the
