@@ -83,6 +83,30 @@ public final class PageViewController: NSViewController {
         // So the width is a CONSTRAINT on the stack's children, and the
         // alignment stays leading, which is the right alignment for a
         // vertical list of short rows.
+        // `.leading`, NOT `.width`.
+        //
+        // `.width` fixed the height and broke the width: a row became as wide
+        // as its CONTENT (341pt, the longest line) and the stack then
+        // distributed the rows across the pane, so every card sat at x=493 in
+        // an 850pt pane — the right half of the screen.
+        //
+        // The height is fixed BELOW instead, per row, by an explicit width
+        // constraint plus vertical hugging. That keeps `.leading`'s meaning
+        // ("align to the leading edge, take the height of the first child")
+        // and puts the fill where it belongs: on the row.
+        //
+        // A `.leading`-aligned vertical stack gives each row the height of its
+        // FIRST child. Every row here is a control whose first child is
+        // another `.leading` stack, and that runs down to a label that reports
+        // the height of nothing — so every row measured 0pt, the page's own
+        // stack was 176pt of title and description, and the cards were laid
+        // out at y=-162: below their rows, outside the clip view, and
+        // therefore neither on screen nor in a render of the page.
+        //
+        // `.width` makes the stack distribute children along the cross axis
+        // and take its own height from the SUM of theirs, which is the thing
+        // a vertical stack is for. Five fixes went into the card before this
+        // one, and the card was innocent every time.
         stack.alignment = .leading
         stack.spacing = Gap.group
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -137,10 +161,21 @@ public final class PageViewController: NSViewController {
     /// behaviour matrix both re-created their rows on a refresh token bump and
     /// neither tore the old ones down.
     private func rebuild(for page: Page) {
-        while stack.arrangedSubviews.count > 3 {
-            let last = stack.arrangedSubviews.last
-            stack.removeArrangedSubview(last!)
-            last?.removeFromSuperview()
+        // Everything that is not one of the three chrome views goes, and the
+        // three are named rather than counted.
+        //
+        // A COUNT was wrong here and wrong in the way that costs an afternoon:
+        // `pageId` is the third chrome view and it is added at the END of this
+        // method, not in `loadView`, so "keep the first three" kept the
+        // PREVIOUS page's first control and removed the page id instead. Two
+        // pages rendered into one, and Safety showed Home's wizard above its
+        // own three buttons. Naming the chrome is a claim about a thing; a
+        // count is a claim about an arrangement, and the arrangement changed
+        // when the page id moved.
+        for view in stack.arrangedSubviews
+        where view !== titleField && view !== descriptionField && view !== pageId {
+            stack.removeArrangedSubview(view)
+            view.removeFromSuperview()
         }
 
         let context = ControlContext(
@@ -163,22 +198,18 @@ public final class PageViewController: NSViewController {
             for control in controls {
                 let view = Renderers.shared.makeView(for: control, context: context)
                 stack.addArrangedSubview(view)
-                // Every row is the width of the pane less the stack's padding,
-                // stated rather than negotiated: `NSStackView.alignment`
-                // cannot express it on macOS (see the note on `alignment`
-                // above), and a row that sizes to its own content is a card
-                // the width of its longest label.
-                //
-                // The autoresizing flag goes first. A constraint on a view
-                // that still has a frame-based layout is inert, and the row
-                // keeps whatever width it measured for itself — which is how
-                // the card stayed 337px through six fixes that each looked
-                // right and changed nothing.
+                // Fill the pane, and hug the content vertically. Two
+                // constraints, one axis each: `.leading` alignment already
+                // keeps the row on the left and takes its height from the
+                // first child, and the height that produces is wrong for a
+                // row whose first child is another leading-aligned stack.
+                // Hugging is what corrects it, and the width is what fills.
                 view.translatesAutoresizingMaskIntoConstraints = false
                 view.widthAnchor.constraint(
                     equalTo: stack.widthAnchor,
                     constant: -(Gap.plane * 2)
                 ).isActive = true
+                view.setContentHuggingPriority(.defaultLow, for: .vertical)
             }
         }
 

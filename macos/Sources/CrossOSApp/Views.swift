@@ -22,7 +22,7 @@ import CrossOSCore
 /// IS: every row's key gets the same trailing edge because they are in the
 /// same column of the same stack, and a value that needs two lines takes them
 /// without moving any other row's key.
-final class HomeSummaryView: NSView {
+final class HomeSummaryView: NSStackView {
     private let client: any CoreClient
     private let rows = NSStackView()
     private let foot = NSTextField(labelWithString: "")
@@ -58,13 +58,8 @@ final class HomeSummaryView: NSView {
         foot.maximumNumberOfLines = 0
 
         let card = Card()
-        let cardColumn = NSStackView(views: [rows, foot])
-        cardColumn.orientation = .vertical
-        cardColumn.alignment = .leading
-        cardColumn.spacing = Gap.row
-        cardColumn.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(card)
-        card.setContent(cardColumn)
+        addArrangedSubview(card)
+        card.setContent(NSStackView(views: [rows, foot]))
         NSLayoutConstraint.activate([
             card.leadingAnchor.constraint(equalTo: leadingAnchor),
             card.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -82,6 +77,19 @@ final class HomeSummaryView: NSView {
             // hence `setContentCompressionResistancePriority(.defaultLow)`
             // above, which is what lets the stack's proposal win.
         ])
+
+        // Hug the card VERTICALLY, which is the width constraint's other half
+        // and was missing.
+        //
+        // A `.leading`-aligned vertical stack gives a row the height it
+        // measured, and this view measured zero: nothing tied its height to
+        // the card it holds. The card was then laid out below its own control
+        // — outside the clip view, below the page's own origin — so it was
+        // neither on screen nor in a render of the page. Every page came out
+        // with its title, its description and a hole exactly where the cards
+        // go, and the audit could not see it because the card DOES have a
+        // height; the row it hangs in does not.
+        setContentHuggingPriority(.defaultLow, for: .vertical)
         // At REQUIRED, so "a card is the width of its pane" beats the card's
         // own intrinsic width. A card that is the width of its longest label is
         // a chip with a border, and a chip with a border in a settings pane
@@ -248,12 +256,16 @@ final class FactRow: NSView {
 /// page read "Keyboard interceptionCrossOS needs permission to see the keys
 /// you press…Security.adapter: tap refused" — four sentences, one line, no
 /// gaps. The fix was a column, and a column is what this is.
-final class ChecklistView: NSView {
+final class ChecklistView: NSStackView {
     init(control: Control, context: ControlContext) {
         super.init(frame: .zero)
-        // Laid out by Auto Layout, not by its frame. Without this the
-        // constraints below are inert and the view keeps whatever size it
-        // measured for itself.
+        // A stack in name only is a stack that measures nothing: without an
+        // orientation and a `.width` alignment this view is a vertical column
+        // that takes each row's height from its first child, and the whole
+        // chain runs down to a label that reports the height of nothing.
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
         // A `.width`-aligned stack proposes its own width and every row takes
         // it — UNLESS the row has an intrinsic width and resists. A card
@@ -270,17 +282,17 @@ final class ChecklistView: NSView {
 
         let stack = NSStackView()
         stack.orientation = .vertical
+        // `.leading` so the rows sit at the LEFT of a card that fills 810pt.
+        // `.width` would stretch each row and distribute them, which is what
+        // put every line at the trailing edge of the card: a card that fills
+        // and is unreadable.
         stack.alignment = .leading
-        stack.spacing = Gap.row
+        stack.distribution = .fill
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         let card = Card()
-        let cardColumn = NSStackView(views: [stack])
-        cardColumn.orientation = .vertical
-        cardColumn.alignment = .leading
-        cardColumn.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(card)
-        card.setContent(cardColumn)
+        addArrangedSubview(card)
+        card.setContent(stack)
         NSLayoutConstraint.activate([
             card.leadingAnchor.constraint(equalTo: leadingAnchor),
             card.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -298,6 +310,19 @@ final class ChecklistView: NSView {
             // hence `setContentCompressionResistancePriority(.defaultLow)`
             // above, which is what lets the stack's proposal win.
         ])
+
+        // Hug the card VERTICALLY, which is the width constraint's other half
+        // and was missing.
+        //
+        // A `.leading`-aligned vertical stack gives a row the height it
+        // measured, and this view measured zero: nothing tied its height to
+        // the card it holds. The card was then laid out below its own control
+        // — outside the clip view, below the page's own origin — so it was
+        // neither on screen nor in a render of the page. Every page came out
+        // with its title, its description and a hole exactly where the cards
+        // go, and the audit could not see it because the card DOES have a
+        // height; the row it hangs in does not.
+        setContentHuggingPriority(.defaultLow, for: .vertical)
         // At REQUIRED, so "a card is the width of its pane" beats the card's
         // own intrinsic width. A card that is the width of its longest label is
         // a chip with a border, and a chip with a border in a settings pane
@@ -377,15 +402,19 @@ final class ChecklistView: NSView {
 /// `NSTextField` with a line-break mode, in a stack, and it cannot be squeezed
 /// below its intrinsic width by a chip sitting beside it. The bug has no
 /// representation, which is the entire reason this port exists.
-final class WizardView: NSView {
+final class WizardView: NSStackView {
     private let currentStep = 0
     private let stack = NSStackView()
 
     init(control: Control, context: ControlContext) {
         super.init(frame: .zero)
-        // Laid out by Auto Layout, not by its frame. Without this the
-        // constraints below are inert and the view keeps whatever size it
-        // measured for itself.
+        // A stack in name only is a stack that measures nothing: without an
+        // orientation and a `.width` alignment this view is a vertical column
+        // that takes each row's height from its first child, and the whole
+        // chain runs down to a label that reports the height of nothing.
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
         // A `.width`-aligned stack proposes its own width and every row takes
         // it — UNLESS the row has an intrinsic width and resists. A card
@@ -401,18 +430,27 @@ final class WizardView: NSView {
         setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         stack.orientation = .vertical
+        // `.leading` so the rows sit at the LEFT of a card that fills 810pt.
+        // `.width` would stretch each row and distribute them, which is what
+        // put every line at the trailing edge of the card: a card that fills
+        // and is unreadable.
         stack.alignment = .leading
-        stack.spacing = Gap.row
+        stack.distribution = .fill
         stack.translatesAutoresizingMaskIntoConstraints = false
 
+        // No wrapper between the view and the card. The wrapper was a
+        // `.leading`-aligned vertical stack holding another one, and
+        // `.leading` takes the height of the FIRST child — so the chain ran
+        // down to a leaf that reports the height of nothing, the card
+        // measured zero, and the content was laid out at y=-162, below its
+        // own view and outside the clip view. Every page rendered with a
+        // title, a description and a hole exactly where the cards go.
+        //
+        // `card` is a `.width`-aligned stack: it takes its height from the
+        // sum of its rows, which is what a vertical stack is for.
         let card = Card()
-        let cardColumn = NSStackView(views: [stack])
-        cardColumn.orientation = .vertical
-        cardColumn.alignment = .leading
-        cardColumn.spacing = Gap.row
-        cardColumn.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(card)
-        card.setContent(cardColumn)
+        addArrangedSubview(card)
+        card.setContent(stack)
         NSLayoutConstraint.activate([
             card.leadingAnchor.constraint(equalTo: leadingAnchor),
             card.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -430,6 +468,19 @@ final class WizardView: NSView {
             // hence `setContentCompressionResistancePriority(.defaultLow)`
             // above, which is what lets the stack's proposal win.
         ])
+
+        // Hug the card VERTICALLY, which is the width constraint's other half
+        // and was missing.
+        //
+        // A `.leading`-aligned vertical stack gives a row the height it
+        // measured, and this view measured zero: nothing tied its height to
+        // the card it holds. The card was then laid out below its own control
+        // — outside the clip view, below the page's own origin — so it was
+        // neither on screen nor in a render of the page. Every page came out
+        // with its title, its description and a hole exactly where the cards
+        // go, and the audit could not see it because the card DOES have a
+        // height; the row it hangs in does not.
+        setContentHuggingPriority(.defaultLow, for: .vertical)
         // At REQUIRED, so "a card is the width of its pane" beats the card's
         // own intrinsic width. A card that is the width of its longest label is
         // a chip with a border, and a chip with a border in a settings pane
@@ -606,10 +657,8 @@ final class ButtonRowView: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { finalError() }
+    required init?(coder: NSCoder) { fatalError("ButtonRowView is created in code") }
 }
-
-private func finalError() -> Never { fatalError("ButtonRowView is created in code") }
 
 /// The button target, holding the control each button stands for.
 ///

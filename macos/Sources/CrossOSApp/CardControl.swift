@@ -61,7 +61,36 @@ class CardControl: NSView {
             card.leadingAnchor.constraint(equalTo: leadingAnchor),
             card.trailingAnchor.constraint(equalTo: trailingAnchor),
             card.topAnchor.constraint(equalTo: topAnchor),
+            // The card's HEIGHT, which is the whole control: a control that
+            // draws a card is as tall as the card, and without this the
+            // control is 0pt tall and the card is laid out below it at
+            // y=-162, outside the clip view, so it is neither on screen nor
+            // in a render of the page.
+            //
+            // The audit caught the same shape on eight row views that pinned
+            // leading/trailing/top and nothing else. This one was invisible to
+            // it for a different reason: the card has a height, so the row did
+            // not read as collapsed, and the symptom was a page that rendered
+            // with its title, its description and a hole where the content
+            // goes.
+            // Not a fixed height — the card sizes itself to its content, and
+            // the bottom pin is what lets the CONTROL take the card's height
+            // rather than the other way round.
         ])
+
+        // HUG, which is a priority and not a constraint.
+        //
+        // A `.leading`-aligned vertical stack gives a row the height it
+        // measured, and this control measured zero because the card's own
+        // height came through a padding stack that nothing was holding. A
+        // `bottomAnchor <= bottomAnchor` permits zero and does not create a
+        // height; four attempts to fix it with constraints all left the card
+        // at y=-162, below the row and outside the clip view, which is why
+        // every page rendered with a title, a description and a hole.
+        //
+        // Hugging the content vertically is the constraint Auto Layout
+        // actually applies here, and it is one line.
+        setContentHuggingPriority(.defaultLow, for: .vertical)
     }
 
     @available(*, unavailable)

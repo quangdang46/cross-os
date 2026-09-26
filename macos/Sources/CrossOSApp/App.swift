@@ -153,6 +153,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // are not a per-page finding and printing them as one would be a
         // number repeated fifteen times.
         let systemFindings = Audit.contrastMatrix() + Audit.rhythmAudit()
+        if let pageView = shell.pageController?.view {
+            print("SHOT CONSTRAINTS")
+            for v in [pageView, pageView.firstCard(), pageView.firstCard()?.superview].compactMap({ $0 }) {
+                print("  \(type(of: v)) frame=\(v.frame) huggingV=\(v.contentHuggingPriority(for: .vertical))")
+                for c in v.constraints {
+                    let a = (c.firstItem as? NSView).map { "\(type(of: $0))" } ?? "nil"
+                    let b = (c.secondItem as? NSView).map { "\(type(of: $0))" } ?? "nil"
+                    print("    \(c.relation.rawValue) \(a).\(c.firstAttribute.rawValue) -> \(b).\(c.secondAttribute.rawValue) p=\(c.priority.rawValue) active=\(c.isActive)")
+                }
+            }
+        }
+
         var findings = systemFindings
         print("design system")
         AuditPrinter.emitPage("design system", findings: systemFindings)

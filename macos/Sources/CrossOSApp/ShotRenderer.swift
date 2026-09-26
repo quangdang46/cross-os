@@ -1,127 +1,114 @@
 import AppKit
+import CoreGraphics
 import CrossOSCore
 
 /// Renders the real view tree to PNGs, from inside the app's own process.
 ///
-/// **Why this exists and why it is not a screenshot tool.** The environment
-/// this was built in denies Screen Recording, so `screencapture` returns
-/// "could not create image from display" for the whole screen and for a
-/// single window alike. That is a permission boundary on *reading another
-/// process's* pixels, and nothing here reads another process's pixels:
-/// `NSView.cacheDisplay(in:to:)` asks the view to draw itself into a bitmap,
-/// which is the same call a print context makes and the same one
-/// `NSBitmapImageRep` makes. The app renders its own content to a file it
-/// owns, and no permission is involved because none is needed.
+/// **Why PDF and not a bitmap context.** `screencapture` is denied in the
+/// environment this was built in — "could not create image from display", for
+/// the whole screen and for a single window alike. That is a permission
+/// boundary on reading *another process's* pixels, and this reads none: the app
+/// renders its own content into a file it owns.
 ///
-/// The alternative was `--describe`, and it is not a substitute. Frames catch
-/// "this row is 883px tall in a 720px window". They cannot catch "this grey is
-/// wrong", because that is a judgement about a colour and a judgement belongs
-/// to somebody looking. This produces the pixels that judgement needs.
+/// The first version drew into an `NSBitmapImageRep` with
+/// `cacheDisplay(in:to:)` and got half a page: the sidebar drew, the page pane
+/// came out white. Six attempts at that path, each ruling out one theory —
 ///
-/// **What it is faithful to, and what it is not.** It is the real view tree
-/// after a real layout pass, drawn by the real AppKit controls with the real
-/// semantic colours, so spacing, hierarchy, truncation and contrast are all
-/// what ships. What it does NOT include is the window chrome — the title bar,
-/// the traffic lights, the split divider — because `cacheDisplay` draws a
-/// view's content and the frame is drawn by the window server above it. A
-/// missing title bar is a limitation of the method and not a claim that the
-/// app has none.
+///   - the sidebar drawing at all means the process CAN draw, so "no display"
+///     was never the answer;
+///   - `CALayer.render(in:)` added nothing, and `--probe-layers` said why:
+///     every layer reports `contents == nil`, because AppKit draws to the
+///     window server and keeps no per-layer bitmap to composite;
+///   - turning layer backing off for the whole subtree changed nothing;
+///   - a single `NSTextField` captured on its own produced 3.2KB of real
+///     glyphs, and one taken from the live page produced 1846 — so the drawing
+///     path works and the failure is asking ONE view to draw a subtree of
+///     layer-backed containers.
+///
+/// `dataWithPDF(inside:)` takes a different road. It asks Core Graphics for a
+/// *vector* stream and every view draws into it — no cached bitmap, no
+/// per-layer composition, and the same call a print job makes. It handled the
+/// scroll view that defeated every bitmap approach, on the first try.
+///
+/// **`sips` is not the rasterizer.** A PDF written by the app rasterizes to a
+/// correct image through Core Graphics and to a blank one through `sips`, and
+/// that difference cost an hour before it was traced. The rasterizer here is
+/// `CGContext.drawPDFPage`, and that is the only one in this file.
+///
+/// **What this is not.** It is not a screenshot: no window chrome, no title bar,
+/// no traffic lights — `dataWithPDF(inside:)` draws a view's content and the
+/// frame is drawn by the window server above it. A missing title bar is a
+/// limitation of the method, not a claim that the app has none.
 
 enum ShotRenderer {
-    /// Draw one view to a PNG, after letting the run loop settle so Auto
-    /// Layout has resolved and any async load has landed.
-    ///
-    /// **Two passes, and the second one is the one that works.**
-    /// `cacheDisplay(in:to:)` asks the view to draw itself, and a view draws
-    /// its frame — which for an `NSSplitViewItem` is a background and nothing
-    /// else, because the split view's content lives in a layer the item
-    /// references rather than one it owns. The first attempt at this rendered a
-    /// white page with a grey stripe down the left: the sidebar, and no
-    /// content, which is exactly what a capture that stops at the view's own
-    /// frame looks like.
-    ///
-    /// So the tree is walked and every view with a backing layer is asked to
-    /// render that layer directly. `CALayer.render(in:)` composites what a
-    /// layer actually holds — including the sublayers a split view item's
-    /// content lives in — so it sees the parts `cacheDisplay` does not.
-    ///
-    /// The result is not a screenshot: it is the app drawing its own content
-    /// into a bitmap, which is what a print context does.
+    /// The scale every page renders at. 2 is a Retina pixel ratio, which is
+    /// what the docs/baseline/ screenshots used and what makes a 13px label
+    /// legible in a file rather than a smear.
+    static let scale: CGFloat = 2
+
+    /// Draw one view to a PNG, after letting layout and async loads settle.
     @MainActor
     static func capture(_ view: NSView, to path: String) throws {
+        // A view that has drawn keeps what it drew, and `dataWithPDF` asks
+        // the view for ITS drawing. The page view is reused across pages, so
+        // without this the second capture returned the first page's content
+        // under the second page's title — Safety rendered as the wizard
+        // because Home was captured first and nothing forgot it.
+        // Layer backing OFF for the whole subtree, and this is what makes
+        // buttons and switches appear.
+        //
+        // `dataWithPDF` asks a view to DRAW, and a layer-backed view
+        // delegates to a bitmap its layer already holds — so text drew (a
+        // label draws itself) and every NSButton, NSSwitch and NSTableView
+        // did not. Turning layers off puts them back on the immediate-mode
+        // path the PDF context understands.
+        //
+        // It runs in the shot mode only, on a tree about to be thrown away.
+        view.setLayersOff()
+        view.displayIfNeeded(view.bounds)
+
         let bounds = view.bounds
-        let scale: CGFloat = 2
-        let pixelSize = NSSize(width: bounds.width * scale, height: bounds.height * scale)
+        guard bounds.width > 0, bounds.height > 0 else { throw ShotError.noContentView }
 
-        guard let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: Int(pixelSize.width),
-            pixelsHigh: Int(pixelSize.height),
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
+        let pdf = view.dataWithPDF(inside: bounds)
+        // A temporary file, because CGPDFDocument takes a URL and the PDF is
+        // in memory. The alternative — CFDataProvider over the Data — does not
+        // bridge from Swift without a manual unsafeBitCast that buys nothing
+        // here: this runs in a shot mode, writes a file anyway, and the
+        // temporary is removed before the function returns.
+        let temporary = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("crossos-shot-\(UUID().uuidString).pdf")
+        try pdf.write(to: temporary)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        guard let document = CGPDFDocument(temporary as CFURL) else { throw ShotError.noPDF }
+        guard let page = document.page(at: 1) else { throw ShotError.noPDFPage }
+
+        let pixelWidth = Int(bounds.width * scale)
+        let pixelHeight = Int(bounds.height * scale)
+        guard let context = CGContext(
+            data: nil,
+            width: pixelWidth, height: pixelHeight,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else {
-            throw ShotError.noBitmapRep(bounds)
-        }
-        rep.size = pixelSize
-
-        guard let context = NSGraphicsContext(bitmapImageRep: rep) else {
             throw ShotError.noContext
         }
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = context
 
-        // The order matters and the first version had it wrong. Every layer in
-        // this tree reports `contents == nil`, which is not a bug in the
-        // capture: AppKit draws straight to the window server and keeps no
-        // bitmap per layer, so there is nothing for `CALayer.render(in:)`
-        // to composite and the first attempt produced a white page with a
-        // grey stripe down the left.
-        //
-        // What has to happen is the opposite: make every view DRAW while the
-        // bitmap context is current. `displayIfNeeded` walks the tree and asks
-        // each view to lay out and draw itself, and because the current
-        // graphics context is the bitmap, the drawing lands in the bitmap.
-        // That is the same call a print context makes, and it is why no
-        // permission is involved: the app is drawing its own content into a
-        // file it owns.
-        view.needsLayout = true
-        view.layoutSubtreeIfNeeded()
-        view.displayIfNeeded()
-        view.displayIgnoringOpacity(bounds, in: context)
+        // White, not transparent. A PNG with alpha reads as a checkerboard or
+        // as black depending on the viewer, and a page's background is the
+        // window's colour — without it under the text the text is unreadable.
+        context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: CGFloat(pixelWidth), height: CGFloat(pixelHeight)))
+        context.scaleBy(x: scale, y: scale)
+        context.drawPDFPage(page)
 
-        NSGraphicsContext.restoreGraphicsState()
-
-        // The layer pass, on top of the view pass. `walkLayers` is the one
-        // that matters and it is not optional: an `NSSplitView` keeps each
-        // item's content in a layer the split view OWNS and the item's view
-        // does not, so drawing the root layer composites the two item frames
-        // and nothing inside them. Walking the sublayers by hand is what puts
-        // the page content in the bitmap.
-        walkLayers(view.layer, into: context.cgContext, scale: scale)
-
+        guard let image = context.makeImage() else { throw ShotError.noImage }
+        let rep = NSBitmapImageRep(cgImage: image)
         guard let data = rep.representation(using: .png, properties: [:]) else {
             throw ShotError.noPNGData
         }
         try data.write(to: URL(fileURLWithPath: path))
-    }
-
-    /// Render every sublayer that is not the root, because `render(in:)` on a
-    /// parent does not recurse into children that are hidden or offscreen and
-    /// an `NSSplitViewItem` keeps its content in a sibling it manages.
-    @MainActor
-    private static func walkLayers(_ layer: CALayer?, into context: CGContext, scale: CGFloat) {
-        guard let layer else { return }
-        for sub in layer.sublayers ?? [] {
-            if !sub.isHidden {
-                sub.render(in: context)
-            }
-            walkLayers(sub, into: context, scale: scale)
-        }
     }
 
     /// Let layout, async loads and redraws finish before anything is measured.
@@ -129,74 +116,94 @@ enum ShotRenderer {
     /// **Async, and that is the whole point.** The first version called
     /// `RunLoop.current.run(until:)`, which BLOCKS the thread it is on. Inside
     /// a `Task { @MainActor in }` that is a deadlock: the task holds the main
-    /// actor, the run loop never gets a turn to drain the actor's queue, and
-    /// the client calls the task is waiting on never complete. The `--audit`
-    /// mode hung on the first page with no output at all, which is what a
-    /// deadlock looks like from the outside.
-    ///
-    /// `Task.sleep` YIELDS the actor instead, so the queue drains, the socket
-    /// read completes, the redraw lands, and the measurement is of a settled
-    /// tree. A capture taken at t=0 catches the window before Auto Layout has
-    /// run and the answer is a frame of zeros — which is why there is a settle
-    /// at all rather than none.
+    /// actor, the run loop never drains its queue, and the client calls the
+    /// task is waiting on never complete. The audit hung on its first page
+    /// with no output at all, which is what a deadlock looks like from outside.
     @MainActor
     static func settle(_ seconds: Double = 1.2) async {
         try? await Task.sleep(for: .seconds(seconds))
     }
 
-    /// Capture every page the daemon serves, plus the states worth seeing.
+    /// Capture every page the daemon serves.
     @MainActor
-    static func captureAll(
-        client: any CoreClient,
-        out: String
-    ) async throws -> [String] {
-        try FileManager.default.createDirectory(
-            atPath: out, withIntermediateDirectories: true
-        )
+    static func captureAll(client: any CoreClient, out: String) async throws -> [String] {
+        try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
 
         let shell = ShellWindowController(client: client)
         shell.showWindow(nil)
         shell.window?.makeKeyAndOrderFront(nil)
         await settle(1.5)
 
-        guard let content = shell.window?.contentView else {
+        // The PAGE VIEW, not the window's content view: the content view is
+        // the whole window including the sidebar, and a page is what this is a
+        // picture of. The audit runs on the same view for the same reason —
+        // measuring the window compared every page's switch against the nav
+        // rail's own outline view, which cannot happen to a person.
+        guard let pageView = shell.pageController?.view else {
             throw ShotError.noContentView
         }
 
         var written: [String] = []
-
-        // Every page, named by its own id so a filename is traceable back to
-        // `core.pages`.
         let pages = (try? await client.pages()) ?? []
         for page in pages {
             shell.show(page)
-            await settle(1.0)
-            let path = "\(out)/\(page.id.replacingOccurrences(of: ".", with: "-")).png"
-            try capture(content, to: path)
+            await settle(0.9)
+            let name = page.id.replacingOccurrences(of: ".", with: "-")
+            let path = "\(out)/\(name).png"
+            try capture(pageView, to: path)
             written.append(path)
         }
-
         return written
     }
-
 }
 
 enum ShotError: Error, CustomStringConvertible {
-    case noBitmapRep(NSRect)
-    case noContext
-    case noPNGData
     case noContentView
+    case noPDF
+    case noPDFPage
+    case noContext
+    case noImage
+    case noPNGData
 
     var description: String {
         switch self {
-        case .noBitmapRep(let rect):
-            return "the view would not make a bitmap of itself at \(rect) — a view with no drawn content"
-        case .noContext:
-            return "the bitmap would not make a graphics context, so nothing can be drawn into it"
-        case .noPNGData:
-            return "the bitmap did not encode as PNG"
         case .noContentView:
             return "the window has no content view, so there is nothing to draw"
+        case .noPDF:
+            return "the view produced no PDF — a view with nothing drawn in it"
+        case .noPDFPage:
+            return "the PDF has no first page"
+        case .noContext:
+            return "the bitmap would not make a graphics context"
+        case .noImage:
+            return "the graphics context produced no image"
+        case .noPNGData:
+            return "the image did not encode as PNG"
         }
+    }
+}
+
+extension NSView {
+    /// Every view at or below this one, breadth-first.
+    static func allViews(_ view: NSView?) -> [NSView] {
+        guard let view else { return [] }
+        var out: [NSView] = [view]
+        var queue: [NSView] = view.subviews
+        while let next = queue.first {
+            queue.removeFirst()
+            out.append(next)
+            queue.append(contentsOf: next.subviews)
+        }
+        return out
+    }
+}
+
+
+extension NSView {
+    /// Turn off layer backing for this view and everything below it, so a
+    /// capture reaches the drawing rather than a cached bitmap.
+    func setLayersOff() {
+        wantsLayer = false
+        for sub in subviews { sub.setLayersOff() }
     }
 }

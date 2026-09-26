@@ -201,99 +201,123 @@ final class UnsupportedView: NSView {
 
 /// A card: the one shape in this app that earns a radius.
 ///
-/// The content view is pinned on all four edges, which is what makes the box
-/// take its height from the content. Without that an `NSBox` has no intrinsic
-/// size at all and collapses to zero — a card that is present, correctly
-/// configured, and not drawn, which is a failure mode with no visual symptom
-/// other than absence.
+/// **An `NSView` with a layer, not an `NSBox`.** An NSBox inserts a
+/// material-capable host view as its own subview, and content added
+/// afterwards sits behind that host. On screen the host is a transparent
+/// material so nothing is lost; in a bitmap and in a PDF it is an
+/// `NSVisualEffectView` that composites against the window server, has
+/// nothing to composite against, and draws opaque. Every page rendered
+/// with its title, its description and two holes exactly where the cards
+/// were, and the two fixes before this one — `boxType = .custom`, then
+/// bringing the content to the front — did not touch it, because the host
+/// view is inserted by the BOX and not by the box type.
 ///
-/// `NSBox` rather than a drawn view, because AppKit's box is what a group of
-/// rows in a settings pane IS, and it draws the separator, the background and
-/// the corner as one thing that the system maintains. The React shell had this
-/// as four CSS properties, which meant the hairlines between rows and the edge
-/// around them were drawn by different rules and could disagree about where the
-/// corner was.
-class Card: NSBox {
+/// A plain view with a corner radius draws a fill and a stroke and nothing
+/// else, which is what a card is: a settings pane's card is flat
+/// `controlBackgroundColor` on a hairline, not glass. Vibrancy on a card is
+/// also the "glass everywhere" tell the antislop rules name — a surface that
+/// pretends to be see-through so that elevation reads as depth when there is
+/// no depth behind it.
+class Card: NSStackView {
     init(title: String? = nil) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        boxType = .custom
-        fillColor = Palette.cardBackground
-        borderColor = Palette.hairline
-        borderWidth = 1
-        cornerRadius = Radius.card
-        titlePosition = .noTitle
-
-        // The padding, and the height that follows from it.
+        orientation = .vertical
+        // `.leading`, NOT `.width`.
         //
-        // `NSBox` has no `contentInsets` — a custom box's content view fills it
-        // edge to edge, which is why the card measured 1px tall for a while
-        // despite having a border, a fill and a radius: it had no content
-        // size of its own and nothing was pinning any.
+        // `.width` was supposed to make the card take the height of its rows
+        // and it does — but it also leaves each child at the child's own
+        // width and places it on the cross axis, so a 301pt stack of labels
+        // sat at x=489 inside an 810pt card. Every line in every card was
+        // right-aligned in a card that fills, which is a card that is
+        // technically laid out and completely unreadable.
         //
-        // So the padding and the pinning are here, in one place, rather than
-        // at each of the call sites. Three sites each set `contentView` and
-        // constrained the card in half a dozen ways, and a fourth page that
-        // forgot one of them would have produced a card that was configured
-        // correctly and drew nothing — a failure whose only symptom is
-        // absence, and which no assertion can see without walking the tree.
-    }
-
-    /// Put a view inside, padded, and make the card as tall as it is.
-    ///
-    /// The view is added as a SUBVIEW rather than through `contentView`,
-    /// because `contentView` on a custom box is not a sizing relationship: it
-    /// fills the box edge to edge and does not tell the box how big the box
-    /// should be. Pinning it on all four edges is what does — and the box then
-    /// takes the stack's height, which is the stack's rows' heights plus the
-    /// insets.
-    func setContent(_ view: NSView) {
-        let padded = NSStackView(views: [view])
-        padded.orientation = .vertical
-        padded.alignment = .leading
-        padded.edgeInsets = NSEdgeInsets(
+        // `.leading` with a `.fill` distribution stretches the child to the
+        // card's width and keeps its rows at the left, which is what a
+        // settings card is.
+        alignment = .leading
+        distribution = .fill
+        // The padding is ON the card rather than around it, and that is the
+        // fix as much as the padding is: an inner stack with `edgeInsets`
+        // measures its insets above its own origin, which put the content at
+        // y=-162 in a card whose frame said 0.
+        edgeInsets = NSEdgeInsets(
             top: Gap.row, left: Gap.group,
             bottom: Gap.row, right: Gap.group
         )
-        padded.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(padded)
-
-        NSLayoutConstraint.activate([
-            padded.leadingAnchor.constraint(equalTo: leadingAnchor),
-            padded.trailingAnchor.constraint(equalTo: trailingAnchor),
-            padded.topAnchor.constraint(equalTo: topAnchor),
-            padded.bottomAnchor.constraint(equalTo: bottomAnchor),
-            // The width is the card's, not the content's: a vertical stack
-            // otherwise takes its width from the widest child, which makes a
-            // card exactly as wide as its longest label.
-            padded.widthAnchor.constraint(equalTo: widthAnchor),
-        ])
     }
 
-    /// A card is the width of the pane it sits in, not the width of its
-    /// longest label.
+    /// The fill and the hairline, drawn in `draw(_:)` rather than set on the
+    /// layer.
     ///
-    /// This is a constraint at the USE site rather than inside the card,
-    /// because a vertical `NSStackView` takes its width from its widest child
-    /// and a card that did not override that would be a card sized to its
-    /// content — the same mistake the React shell made in the other
-    /// direction, where a fixed `minmax(0, 220px)` label column left ~170px of
-    /// void beside a 50px label. The rule is: the container decides the width,
-    /// the content decides the height.
-    func fillWidth() {
-        translatesAutoresizingMaskIntoConstraints = false
-        // Stated, not negotiated. A `.width`-aligned stack honours each row's
-        // own intrinsic width when it has one, and a card holding a stack of
-        // labels always does — so the card came out 337px in an 850px pane and
-        // sat at x=493, right-aligned. Declaring the width here is what makes
-        // "a card is the width of the pane" true rather than a hope.
-        translatesAutoresizingMaskIntoConstraints = false
-        let fill = widthAnchor.constraint(equalToConstant: 0)
-        fill.isActive = false
+    /// A layer's `backgroundColor` is a property the compositor reads, and a
+    /// PDF context is not a compositor: `dataWithPDF(inside:)` asks each view
+    /// to DRAW, and a view whose only fill lives on its layer has nothing to
+    /// draw. Every page came out with its title, its description and two holes
+    /// exactly where the cards were, for two reasons stacked — the NSBox host
+    /// view on top, and then the layer fill underneath it.
+    ///
+    /// `draw(_:)` is the path a print job takes and the path a PDF takes, so
+    /// this is the one that renders in both.
+    public override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+                                xRadius: Radius.card, yRadius: Radius.card)
+        Palette.cardBackground.setFill()
+        path.fill()
+        Palette.hairline.setStroke()
+        path.lineWidth = 1
+        path.stroke()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("Card is created in code") }
+
+    /// Put a view inside, padded, and make the card as tall as it is.
+    /// The card IS the stack.
+    ///
+    /// The first arrangement wrapped the content in a second
+    /// `NSStackView` with `edgeInsets`, pinned it to the card on four edges,
+    /// and left the card itself to work out its own height. It never could:
+    /// a `.leading`-aligned vertical stack takes the height of its first
+    /// child, that child is another stack that does the same, and the chain
+    /// bottoms out at a leaf that reports the height of nothing. The card
+    /// measured 0, `edgeInsets` added 40pt ABOVE its own origin, and the
+    /// content was laid out at y=-162 — below the card, below the control
+    /// that holds it, outside the clip view.
+    ///
+    /// So every page rendered with its title, its description and a hole
+    /// exactly where the cards go, and the audit could not see it: the
+    /// card's frame WAS 162pt, and its content was outside the frame. A
+    /// measurement of a frame says nothing about what is inside it.
+    ///
+    /// `Card` is a stack now, and the padding is on it rather than around it.
+    /// One coordinate space, one alignment, and the height is the sum of the
+    /// rows.
+    func setContent(_ view: NSView) {
+        // `view` is already a vertical stack in most cases; adopting it means
+        // the card's height IS the content's height, with no intermediate
+        // view to mis-measure.
+        //
+        // The child is aligned LEADING, and that is the other half of the
+        // card's own `.width`: the card's alignment is what makes the card
+        // take the height of its rows, and the child's is what puts those
+        // rows at the LEFT of a card that now fills 810pt. With `.width`
+        // down here they stretched to the card's width and the text sat at
+        // the trailing edge, which is a card that fills and is unreadable.
+        if let stack = view as? NSStackView {
+            stack.alignment = .leading
+            // And the stack STRETCHES to the card's width. A `.width`-
+            // aligned card does not resize its child — it leaves the child at
+            // the child's own width and places it on the cross axis, which is
+            // why a 301pt stack sat at x=489 in an 810pt card. A settings
+            // card fills its pane and its content starts at the left edge.
+            stack.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            stack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+        view.translatesAutoresizingMaskIntoConstraints = false
+        addArrangedSubview(view)
+        setHuggingPriority(.defaultLow, for: .vertical)
+    }
 }
 
 /// A row: a label on the left, a value on the right, one shared edge.
@@ -345,4 +369,20 @@ class RowView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("RowView is created in code") }
+}
+
+extension NSView {
+    /// The first `Card` at or below this view, breadth-first. Used by
+    /// `--audit` to print the constraint chain on a card, which is how the
+    /// "renders as a hole" defect was traced: the card was 162pt tall and
+    /// sitting at y=-162, below a row whose own height was zero.
+    func firstCard() -> Card? {
+        var queue: [NSView] = [self]
+        while let view = queue.first {
+            queue.removeFirst()
+            if let card = view as? Card { return card }
+            queue.append(contentsOf: view.subviews)
+        }
+        return nil
+    }
 }
