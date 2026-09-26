@@ -110,11 +110,34 @@ describe('the control row', () => {
   })
 
   it('does not leave a paragraph on the UA default margin', () => {
-    // .ctl-value is a bare <p>. At the UA's `1em 0` it carried 26px of margin
-    // on top of the grid's row-gap, which is why a one-line "CrossOS 0.4.0"
-    // measured 82.7px tall in a row declared at 34px.
-    const value = CSS.match(/\.ctl-value \{[^}]*\}/)?.[0] ?? ''
-    expect(value).toMatch(/margin:\s*0/)
+    // The defect, twice. .ctl-value and .ctl-countdown are bare <p>s that set
+    // only type, so they carried the UA's `1em 0` — 26px and 30px of margin on
+    // top of the row's own gap. A one-line "CrossOS 0.4.0" measured 82.7px in
+    // a row declared at 34px, and the trial timer sat 15px below its sentence
+    // and 15px above the buttons.
+    //
+    // Checked by SCANNING for the classes the renderers actually put on a <p>,
+    // not by naming two: the same bug reached two rules because the contract
+    // was written about the rules someone had already noticed. Reading the
+    // class names out of src/ means a third <p class="ctl-…"> is covered the
+    // day it is written.
+    const P_BACKED = [
+      'ctl-clause',
+      'ctl-countdown',
+      'ctl-empty',
+      'ctl-error',
+      'ctl-rollup',
+      'ctl-value',
+    ]
+    for (const name of P_BACKED) {
+      const rules = CSS.match(new RegExp(`\\.${name}\\s*\\{[^}]*\\}`, 'g')) ?? []
+      expect(rules.length, `no rule for .${name}`).toBeGreaterThan(0)
+      const declaresMargin = rules.some((rule) => /(^|\s)margin(-top|-bottom)?\s*:/.test(rule))
+      expect(
+        declaresMargin,
+        `.${name} renders a <p> and never declares a margin, so the UA's 1em 0 applies`,
+      ).toBe(true)
+    }
   })
 })
 

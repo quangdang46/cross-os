@@ -90,6 +90,19 @@ if (params.get('measure')) {
         `row h=${round(box.height)} cols=${style.gridTemplateColumns} | ${name} | ${kids}`,
       )
     }
+    // ?kind-measure: the same read for a control's own children, which is
+    // where the rhythm inside one row actually lives.
+    if (params.get('kind')) {
+      const sel = params.get('kind') as string
+      for (const el of Array.from(document.querySelectorAll<HTMLElement>(sel))) {
+        const r = el.getBoundingClientRect()
+        const cs = getComputedStyle(el)
+        lines.push(
+          `${sel} h=${round(r.height)} top=${round(r.top)} lh=${cs.lineHeight} ` +
+          `mt=${cs.marginTop} mb=${cs.marginBottom} "${(el.textContent ?? '').trim().slice(0, 28)}"`,
+        )
+      }
+    }
     const pre = document.createElement('pre')
     pre.id = 'measure'
     pre.textContent = lines.join('\n')

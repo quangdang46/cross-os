@@ -1780,6 +1780,10 @@ body {
 }
 
 .ctl-error {
+  /* A bare <p> again: the UA's `1em 0` put thirteen pixels above an alert that
+     the row's own gap already separates it by, and thirteen below, on top of
+     whatever the reader has to act on next. */
+  margin: 0;
   color: var(--danger);
   font-weight: 600;
   overflow-wrap: anywhere;
@@ -1848,6 +1852,12 @@ body {
 
 /* Tabular digits: a countdown must not reflow its own width on every tick. */
 .ctl-countdown {
+  /* margin: 0 for the same reason .ctl-value has it, and it is worth 30px on
+     a 21.8px box. This is a bare <p> with only type set on it, so it was
+     carrying the UA's `1em 0` on top of the row's own gap — the trial timer
+     sat 15px below its sentence and 15px above the buttons, which is where the
+     gap that looked like a missing element on the Safety page came from. */
+  margin: 0;
   font-variant-numeric: tabular-nums;
   font-size: 15px;
   font-weight: 600;
