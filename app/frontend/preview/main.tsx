@@ -74,6 +74,16 @@ if (want) {
   }, 400)
 }
 
+// ?focus=<selector> puts the keyboard where a keyboard user's would be, so the
+// focus ring can be looked at rather than assumed.
+const focusTarget = params.get('focus')
+if (focusTarget) {
+  setTimeout(() => {
+    const el = document.querySelector<HTMLElement>(focusTarget)
+    el?.focus()
+  }, 600)
+}
+
 // ?measure=1 reports the geometry of every control row, so "the edges do not
 // line up" is a number rather than an impression. The report is written into
 // the document so a headless --dump-dom run can read it back.

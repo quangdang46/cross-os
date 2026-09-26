@@ -29,6 +29,23 @@ intercepts exactly that seam. A fixture cannot quietly become the app's backend.
 | `?audit=1` | Writes the palette actually in force — every distinct background, ink, radius, font size and weight on the page, with the selector that produced each — into `<pre id="audit">`. |
 | `?flat=1` | Drops the `@supports (color: AccentColor)` block, so the designed hex palette is visible. Chrome reports `AccentColor` as supported while resolving none of its keywords, which collapses the whole palette to the initial value. |
 | `?dark=1` | Forces the dark media query to match, so both appearances can be compared from one machine set to light. |
+| `?comfortable=1` | Applies `[data-density='comfortable']`, the roomier row rhythm. |
+| `?contrast=1` | Forces `prefers-contrast: more`. |
+| `?measure=1&kind=<sel>` | As `?measure=1`, plus one line per element matching `<sel>` with its box, computed line-height and margins. This is how the trial timer was found carrying the UA's `1em 0`. |
+| `?focus=<selector>` | Focuses one element. Note this does **not** engage `:focus-visible` on a `<button>` — a programmatic `.focus()` is not a keyboard interaction, so the shot shows no ring and proves nothing. Use `tabshot.sh`. |
+
+## Focus, honestly
+
+```bash
+./preview/tabshot.sh "http://127.0.0.1:5299/preview/index.html?state=ready&page=Keyboard&flat=1" ring 14
+# ctl-toggle | outline=2px solid rgb(10, 102, 255) offset=2px
+# /tmp/crossos-shots/ring.png
+```
+
+`tabshot.sh` dispatches a real `Tab` key over CDP and reports the active element's
+computed outline plus a screenshot. This is the only way to see a focus ring:
+`:focus-visible` deliberately does not match a programmatic focus, so the
+`?focus=` param is a trap for exactly the check it looks like it can do.
 
 ## Screenshots
 
@@ -38,7 +55,16 @@ intercepts exactly that seam. A fixture cannot quietly become the app's backend.
 ```
 
 1100x720 at 2x — the window size from `app/main.go:85`, so what comes out is
-the window as a person meets it.
+the window as a person meets it. For the narrow branch, pass the width to Chrome
+directly; `shots.sh` is fixed at the real window size on purpose.
+
+## What the four media queries cost to check
+
+`comfortable` density, `prefers-contrast`, `prefers-reduced-motion` and the
+`max-width: 40em` collapse are all declared and none of them had ever run. The
+collapse was broken: its reset was `.ctl > :not(.ctl-head)` at (0,2,0) and the
+catch-all it had to undo is eight `:not()` deep at (0,9,0), so a one-column
+grid kept conjuring a second column. The other three behave.
 
 ## Reading a measurement
 
