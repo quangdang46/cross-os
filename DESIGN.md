@@ -12,6 +12,13 @@
 > shell renders whatever the Go Host serves. No rule, class or component below
 > may be keyed on a page id, a control id or a plugin id. Hierarchy comes from
 > an *optional* schema field (§4.3), never from a lookup table in TypeScript.
+>
+> **On the line numbers.** Every `style.css:N` citation was verified against the
+> working tree on 2026-09-26 and all 48 resolve to the rule named beside them.
+> That file was being edited concurrently while this was written — `.ctl-toggle`
+> alone moved 20 lines mid-session — so treat the numbers as anchors to the
+> *rules*, not as permanent addresses. Where a number matters, the rule's CSS
+> selector is named with it.
 
 ---
 
@@ -687,7 +694,7 @@ Four changes, each load-bearing:
 2. **`--control-col: 200px` with `justify-self: end`.** Every switch, select and
    button in a card now shares a right edge. The current 220px label column does
    the opposite — the *labels* align and the controls scatter.
-3. **`align-items: center`, not `baseline`** (`style.css:511`). A 22px switch
+3. **`align-items: center`, not `baseline`** (`style.css:509`). A 22px switch
    baseline-aligned against 13px text sits visibly high.
 4. **`.row--wide` and `.row--stack`.** `Ctrl+Alt+Delete delay` is a number field;
    it wants 320px, not 200px. A rule clause is a sentence; it stacks. The current
@@ -741,10 +748,11 @@ with no colour perception at all (`style.css:591`). Three deltas:
 
 1. **38px, not 40px.** 38×22 is the macOS switch; 40px is not a size anything
    on the platform uses, and it is why the control reads as slightly custom. The
-   knob geometry is already correct — the current 16px knob at `left: 2px`
-   travelling 18px in a 38px content box (`style.css:365-372`, `383-390`,
-   `border-box` at `:53-55`) leaves a symmetric 2px gap at each end — so only
-   the track width changes, and the knob keeps travelling 16px.
+   knob geometry is already correct — the 16px knob at `left: 2px`
+   (`style.css:592-596`) travelling 18px (`:613`) in a 38px content box
+   (`border-box` at `:170`, `width: 40px` at `:579`) leaves a symmetric 2px gap
+   at each end — so only the track width changes, and the knob keeps travelling
+   16px.
 2. **A resting knob shadow** (`0 1px 2px rgba(0,0,0,.20)`). macOS switches have
    one; without it the knob reads as a hole punched in the track.
 3. **A `--line-strong` resting border**, not `--line`. The current border is
