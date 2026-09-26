@@ -85,7 +85,6 @@ public actor SpiedCoreClient: CoreClient {
 // Both are cases where a refactor that looks like tidying reintroduces a
 // defect, which is why each has a name and a reason rather than just an
 // assertion.
-
 @MainActor func runClientSuite() async throws {
     suite("Footgun 1 — status is ONE round trip")
 
@@ -240,6 +239,75 @@ public actor SpiedCoreClient: CoreClient {
         )
         expect(!running.isIdle, "state active is not")
         expectEqual(running.remainingMS, 30_000, "remaining_ms decodes")
+
+    suite("The nav, as the daemon serves it")
+
+    do {
+        // The fifteen core pages, in the order the nav will draw them. This is the
+        // assertion that a Swift client can see the product at all: before
+        // `core.pages` existed the page list lived in the shell process, so a
+        // client in another language got an empty nav and the Go suite stayed
+        // green.
+        let daemonJSON = """
+        [{"ID":"core.home","Title":"Home","Group":"home","Symbol":"house","Order":0,
+          "FirstRun":false,"Visibility":"true","Actions":null,
+          "Schema":{"type":"page","description":"What CrossOS is doing right now.",
+                    "controls":[{"kind":"homeSummary","id":"status"},
+                                {"kind":"checklist","id":"readiness"}]}},
+         {"ID":"core.onboard","Title":"Welcome","Group":"home","Symbol":"sparkles","Order":0,
+          "FirstRun":true,"Visibility":"true","Actions":null,
+          "Schema":{"type":"page","firstRun":true,
+                    "controls":[{"kind":"wizard","id":"onboard","steps":["Welcome"]}]}}]
+        """
+        let pages = try Page.decodeList(
+            try JSONDecoder().decode(JSONValue.self, from: Data(daemonJSON.utf8))
+        )
+
+        expectEqual(pages.count, 2, "two pages decoded")
+        // PascalCase keys, because they are Go's exported field names and the
+        // binding generator emitted them verbatim. This is not a typo to "fix" —
+        // the React bindings carried the same hazard and service.ts:12-17 exists
+        // as a comment about it.
+        expectEqual(pages[0].id, "core.home", "ID decodes")
+        expectEqual(pages[0].title, "Home", "Title decodes")
+        expectEqual(pages[0].group, "home", "Group decodes")
+        expectEqual(pages[0].symbol, "house", "Symbol decodes")
+        expect(!pages[0].firstRun, "FirstRun is false where the daemon says false")
+        expect(pages[1].firstRun, "FirstRun is true where the daemon says true")
     }
 
+    do {
+        // A control is a kind plus the fields that kind reads — NOT 28 typed
+        // payloads. The Go side builds them with map[string]any, so typing all 28
+        // here would be 28 things to keep in step with builders that are
+        // themselves untyped.
+        let daemonJSON = """
+        {"controls":[{"kind":"checklist","id":"readiness","source":"core:readiness",
+                      "items":["keyboard","windows","finder"],"note":"Each line says what to do."}]}
+        """
+        let value = try JSONDecoder().decode(JSONValue.self, from: Data(daemonJSON.utf8))
+        let schema = PageSchema.decode(value.objectValue ?? [:])
+
+        expectEqual(schema.controls.count, 1, "one control")
+        expectEqual(schema.controls[0].kind, "checklist", "kind decodes")
+        expectEqual(schema.controls[0].id, "readiness", "id decodes")
+        expectEqual(schema.controls[0].source, "core:readiness", "source decodes")
+        // `items` is the page's own subset AND its own order. A shell that
+        // re-sorted them would be answering a different question than the one
+        // asked, so the order is preserved exactly.
+        expectEqual(schema.controls[0].items, ["keyboard", "windows", "finder"], "items keep their order")
+    }
+
+    do {
+        // A missing field draws a default rather than failing the page. A page
+        // that fails to decode is a blank window with no clue which side is at
+        // fault — which is the failure `UnsupportedControl` exists to avoid.
+        // The assertion that matters is the accessor's behaviour on absent fields.
+        let bare = Control(kind: "note", id: "")
+        expectEqual(bare.label, "", "a missing label is empty, not absent")
+        expectEqual(bare.items.count, 0, "a missing items list is empty")
+        expectEqual(bare.steps.count, 0, "a missing steps list is empty")
+        expect(bare.link("aboutLink") == nil, "a missing link is nil")
+    }
+}
 }

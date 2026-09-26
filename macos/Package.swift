@@ -19,10 +19,21 @@ let package = Package(
     products: [
         .library(name: "CrossOSCore", targets: ["CrossOSCore"]),
         .executable(name: "crossos-probe", targets: ["crossos-probe"]),
+        .executable(name: "CrossOS", targets: ["CrossOSApp"]),
     ],
     targets: [
         .target(
             name: "CrossOSCore",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        // The app. AppKit, no SwiftUI: the closest analogue in this ecosystem
+        // is Rectangle, 31,065 lines of Swift with zero `import SwiftUI`, and
+        // the surface this app needs — a source list, a stack of rows, a
+        // borderless key window for the switcher — is what AppKit draws
+        // natively. A webview was the thing being replaced.
+        .executableTarget(
+            name: "CrossOSApp",
+            dependencies: ["CrossOSCore"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         // The probe is a thin CLI over the client: every RPC the UI can make,

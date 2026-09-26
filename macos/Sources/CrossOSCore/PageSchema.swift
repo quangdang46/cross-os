@@ -167,6 +167,18 @@ extension Page {
     }
 
     private static func decodeSchema(_ object: [String: JSONValue]) -> PageSchema {
+        PageSchema.decode(object)
+    }
+}
+
+extension PageSchema {
+    /// Decode a body from a plain object.
+    ///
+    /// Public because the tests live in a separate executable target, and this
+    /// is the second thing in the port that must behave identically to the Go
+    /// that built the bytes — after `Wire`, and for the same reason: it is a
+    /// transcription, and a transcription is what needs a test.
+    public static func decode(_ object: [String: JSONValue]) -> PageSchema {
         let known: Set<String> = ["type", "description", "controls"]
         return PageSchema(
             type: object["type"]?.stringValue,
@@ -174,11 +186,7 @@ extension Page {
             controls: (object["controls"]?.arrayValue ?? []).compactMap { row in
                 guard let fields = row.objectValue,
                       let kind = fields["kind"]?.stringValue else { return nil }
-                return Control(
-                    kind: kind,
-                    id: fields["id"]?.stringValue ?? "",
-                    payload: fields
-                )
+                return Control(kind: kind, id: fields["id"]?.stringValue ?? "", payload: fields)
             },
             extra: object.filter { !known.contains($0.key) }
         )
