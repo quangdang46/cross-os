@@ -96,6 +96,12 @@ if (params.get('measure')) {
   setTimeout(() => {
     const round = (n: number) => Math.round(n * 10) / 10
     const lines: string[] = []
+    lines.push(
+      `VIEWPORT innerWidth=${window.innerWidth} innerHeight=${window.innerHeight} ` +
+      `rootFont=${getComputedStyle(document.documentElement).fontSize} ` +
+      `narrow=${window.matchMedia('(max-width: 40em)').matches} ` +
+      `40em=${40 * parseFloat(getComputedStyle(document.documentElement).fontSize)}px`,
+    )
     for (const row of Array.from(document.querySelectorAll<HTMLElement>('.ctl'))) {
       const box = row.getBoundingClientRect()
       const style = getComputedStyle(row)

@@ -152,13 +152,22 @@
   --level-card: var(--sp-6);      /* 20px between cards                     */
   --level-page: 28px;             /* page title to first card               */
 
-  /* ---- density (7.3). COMPACT IS THE DEFAULT: a window-management utility is
-     used for long stretches, and 44px rows over 40 rows is 1,760px of scroll.
-     The attribute is written by the daemon; the shell has no storage of its
-     own, and Service is its only persistence seam. */
-  --row-min-height: 34px;
-  --control-height: 24px;
-  --nav-min-height: 26px;
+  /* ---- density (7.3) ------------------------------------------------------
+     A window-management utility is used for long stretches, which is why there
+     is a density attribute at all — but 34px is not a COMPACT setting, it is a
+     web form. Every native settings row in the references is 44-48px: Meetup,
+     Opera, TextNow, Google TV, Linear, Slite. Ten pixels of row is the
+     difference between a list a finger can hit and a table a mouse can point
+     at, and at 34px the eye reads the whole card as a spreadsheet.
+
+     So the two densities are 42 and 52 rather than 34 and 44: compact is still
+     the default and still roughly a third tighter than comfortable, but the
+     floor is a row a person can actually use. The attribute is written by the
+     daemon; the shell has no storage of its own, and Service is its only
+     persistence seam. */
+  --row-min-height: 42px;
+  --control-height: 28px;
+  --nav-min-height: 30px;
   --page-pad-x: var(--sp-5);     /* 16px compact / 24px comfortable */
 
   /* ---- type (3.2) ----
@@ -183,7 +192,7 @@
   --fs-body:         1rem;       /* 13px   / 400  — labels, values, inputs */
   --fs-body-strong:  1rem;       /* 13px   / 590  — a changed/dangerous row  */
   --fs-card:         1.154rem;   /* 15px   / 600  / -.01em — card title      */
-  --fs-page:         1.538rem;   /* 20px   / 600  / -.02em — page title      */
+  --fs-page:         1.846rem;   /* 24px   / 600  / -.02em — page title      */
   --fs-display:      2.154rem;   /* 28px   / 600  / -.02em — wizard, About  */
   --fs-mono:         0.923rem;   /* 12px   / 400  — .kbd, log lines, facts  */
   --lh-body:         1.45;
@@ -204,7 +213,7 @@
      menumate literals are still the ones nine rules read. */
   --r-xs: 4px;     /* .kbd, .badge      */
   --r-sm: 6px;     /* .btn, .input, .switch track */
-  --r-md: 8px;     /* .card, .list, .sheet — also the existing --radius-list */
+  --r-md: 10px;    /* .card, .list, .sheet — menumate's list-card corner */
   --r-lg: 10px;    /* .popover          */
   --r-full: 999px; /* .badge--pill, .dot */
 
@@ -464,10 +473,10 @@
  * the two have stopped being one scale.
  */
 :root[data-density='comfortable'] {
-  --row-pad-block: var(--sp-4);   /* 12px */
-  --row-min-height: 44px;
-  --control-height: 28px;
-  --nav-min-height: 30px;
+  --row-pad-block: var(--sp-5);   /* 16px */
+  --row-min-height: 52px;
+  --control-height: 30px;
+  --nav-min-height: 34px;
   --page-pad-x: var(--sp-7);      /* 24px */
 }
 
@@ -1542,16 +1551,19 @@ body {
   width: var(--field-w, 200px);
 }
 
-/* A row's SENTENCE gets its own line, under the chip and the label it belongs
-   to — which is the shape every list row in every reference has, and the one
-   ChecklistControl already draws on its `is-block` rows. Without it the three
-   spans of a readiness reason (what / next / the daemon's own line) are flex
-   items sitting SIDE BY SIDE with no separator, so the page read
-   "interceptionCrossOS needs permission…Security.adapter: tap refused" — four
-   sentences run into one. A full flex-basis is the whole fix: each takes a
-   line of its own, in the order the renderer wrote them. */
-.ctl-item > .ctl-value,
-.ctl-item > .ctl-empty {
+/* A row's SENTENCE gets its own line — but ONLY on a row that stacks. Scoped
+   to `is-block` and not to `.ctl-item`, because `.ctl-value` is two different
+   things: on a STACKING row (ChecklistControl's readiness line) it is a
+   sentence, and on a FIELD row (the behaviour matrix, the shortcut table, the
+   file-type list) it is a value sitting beside its label.
+
+   Written the other way it put the behaviour matrix's action, its scope and its
+   state word each on a line of their own: a three-field row became a
+   five-line card. The modifier is the whole distinction — `is-block` is how a
+   renderer says "this row stacks", and it is already the thing that opts the
+   row out of a flex line-up. */
+.ctl-item.is-block > .ctl-value,
+.ctl-item.is-block > .ctl-empty {
   flex: 1 1 100%;
   min-width: 0;
 }
@@ -2285,12 +2297,6 @@ body {
   flex-flow: row wrap;
   align-items: baseline;
   gap: 2px var(--sp-3);
-}
-
-/* The sentences, one per line, in the order the renderer wrote them. */
-.ctl-item.is-block > .ctl-value,
-.ctl-item.is-block > .ctl-empty {
-  flex: 1 1 100%;
 }
 
 .ctl-stages {

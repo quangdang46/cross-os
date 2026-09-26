@@ -121,6 +121,23 @@ describe('the control row', () => {
     expect(CSS).not.toMatch(/\.ctl:has\([^{]*\{\s*grid-template-columns/)
   })
 
+  it('stacks a row\'s sentence only on a row that stacks', () => {
+    // `.ctl-value` is two different things. On a STACKING row — Checklist
+    // Control's readiness line — it is a sentence and wants a line of its own,
+    // or three of them run into one paragraph. On a FIELD row — the behaviour
+    // matrix, the shortcut table, the file-type list — it is a value beside its
+    // label and wants to stay there.
+    //
+    // Written as a blanket `.ctl-item > .ctl-value { flex: 1 1 100% }` it gave
+    // every field row a full line per field, so the behaviour matrix's action,
+    // scope and state word each took a line of their own and a three-field row
+    // became a five-line card. `is-block` is how a renderer says "this row
+    // stacks", so the rule is scoped to it.
+    const live = CSS.replace(/\/\*[\s\S]*?\*\//g, '')
+    expect(live).not.toMatch(/\.ctl-item\s*>\s*\.ctl-value[^{]*\{[^}]*flex:\s*1 1 100%/)
+    expect(live).toMatch(/\.ctl-item\.is-block\s*>\s*\.ctl-value[^{]*\{[^}]*flex:\s*1 1 100%/)
+  })
+
   it('collapses to one column below 40em, at a specificity that can undo it', () => {
     // A one-column grid plus `grid-column: 2` does not stack — it CONJURES an
     // implicit second column, which is the whole thing the collapse exists to
