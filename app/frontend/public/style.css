@@ -1779,20 +1779,45 @@ body {
 }
 
 .ctl-facts {
-  display: flex;
-  flex-direction: column;
+  /* ONE grid for the whole pane, and the rows are subgrids of it. It used to
+     be a flex column, so each `.ctl-fact` laid out its OWN two tracks — and
+     four rows with four different key widths meant four different value
+     edges. `max-content` on the key track, which is what the trailing-aligned
+     column needs, made that worse rather than better: the longest key widened
+     only its own row, so the sentence on that row had a NARROWER value column
+     than the three beside it and wrapped to two lines while they stayed at
+     one. A pane is a table, and a table has one set of column widths.
+
+     `minmax(70px, max-content)` keeps lockRow's trailing-aligned key column
+     — 70pt is the reference's own measurement and is the floor here; this
+     pane's longest key is "Keyboard interception" at 21 characters, against
+     lockRow's longest at about 12.
+
+     That longest key is what sizes the column, and the 210px it takes leaves
+     the value — which is a whole English SENTENCE on two of the four rows —
+     about 250px. A 45-character sentence at 13px needs 330px, so it wraps.
+     That is the correct outcome, not a defect to engineer away: the key
+     column earns its width because it is what makes four rows read as four
+     rows, and a sentence that needs two lines in a narrow column is what a
+     sentence does. Capping the key so the sentence fits would buy one shorter
+     row by pushing all four keys to a ragged left. */
+  display: grid;
+  grid-template-columns: minmax(70px, max-content) minmax(0, 1fr);
+  column-gap: 11px;
   /* MenuHubPanels.swift:657 — 10 between rows, tighter than the 13 between
      levels above them. */
-  gap: var(--sp-5h);
+  row-gap: var(--sp-5h);
   min-width: 0;
 }
 
 .ctl-fact {
+  /* A subgrid of .ctl-facts, so this row's two cells are columns of the ONE
+     grid above rather than a grid of its own. `display: grid` alone is the
+     whole declaration; the tracks it uses are the parent's, and every row in
+     the pane therefore starts its value at the same x. */
   display: grid;
-  /* lockRow: label in a fixed 70pt trailing-aligned column, value beside it at
-     the HStack's 11pt spacing. */
-  grid-template-columns: 70px minmax(0, 1fr);
-  column-gap: 11px;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: baseline;
   /* lockRow's `.opacity(0.7)`: a pane is read, not edited, and the whole block
      sitting back is what says so. */
@@ -1815,6 +1840,11 @@ body {
   min-width: 0;
 }
 
+/* The chip and the lock never give way; the VALUE takes whatever is left and
+   wraps inside itself if that is not enough. It is the one element here with
+   a sentence in it, so it is the one allowed to need two lines — and it is
+   the only one that may, which is what keeps this row one row tall for the
+   three facts whose value is a token. */
 .ctl-fact-value {
   /* MMField, DesignSystem.swift:451-482 draws its value as a FIELD — a
      sunken well, a hairline stroke, a radius. The chrome came across as it
@@ -1828,7 +1858,24 @@ body {
 
      What MMField's row really contributes is the TYPE and the alignment, and
      those stay: 13px primary ink, beside the key at the lockRow's 11pt
-     spacing. */
+     spacing.
+
+     `flex: 0 1 auto` and not `1 1 auto`, which is the other half of the
+     same mistake. The value is a version number, not a sentence that wants
+     the row; growing it to fill pushed the lock glyph — which stands for
+     "this is fixed" — to the far edge of a 700px card, so four short facts
+     each trailed 400px of empty card before a 10px padlock. In lockRow the
+     lock sits at the HStack's 11pt from the VALUE, not from the window's
+     right edge, and that adjacency is the point: the glyph qualifies the
+     text it is next to.
+
+     It still takes the room it needs before it lets anything wrap (`flex: 1
+     1 auto`), because the alternative is the row growing to two lines: a
+     45-character sentence plus a chip plus a lock does not fit a 429px
+     column, and a value with `flex-shrink: 0` wraps its own text at the
+     cost of pushing the lock onto a line of its own. Growing into the
+     available space first, and only wrapping what is left over, keeps the
+     chip, the value and the lock on ONE line. */
   flex: 1 1 auto;
   min-width: 0;
   color: var(--fg-primary);

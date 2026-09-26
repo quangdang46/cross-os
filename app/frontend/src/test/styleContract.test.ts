@@ -245,7 +245,6 @@ describe('spacing', () => {
     'padding: 3px 0',                // MMField, without its inline padding
     'padding: 7px var(--sp-5h)',     // PackImportSheet.swift:253-254, the step row
     'padding: var(--sp-4h) 9px',     // a list row
-    'padding: 4px 9px',              // a list row, roomier
     'padding: 9px 11px',             // a list row with a hint under it
     'padding-right: 22px',           // room for a select's drawn chevron
     'row-gap: 13px',                 // the fact pane's own rhythm
