@@ -117,6 +117,23 @@ describe('the control row', () => {
     expect(narrow).toMatch(/\.ctl > :not\(\.ctl-head\):not\(\.ctl-toggle\)/)
   })
 
+  it('never lets a box collapse to a character column', () => {
+    // `overflow-wrap: anywhere` and `break-word` break a too-long word the same
+    // way, and differ in one thing that is invisible until it is catastrophic:
+    // `anywhere` also shrinks the element's MIN-CONTENT size, so a flex or grid
+    // child carrying it can be squeezed to a character or two by whatever sits
+    // beside it. That is what put the wizard's step name one letter per line
+    // (883.5px in a 720px window) and a switcher tile's title on two lines as
+    // "com.apple.Safar" / "i". Both needed their own floor to survive; this
+    // removes the cause for the next one.
+    const live = CSS.replace(/\/\*[\s\S]*?\*\//g, '')
+    const offenders = live.match(/[^}]*overflow-wrap:\s*anywhere[^}]*/g) ?? []
+    expect(
+      offenders,
+      `these still collapse:\n  ${offenders.map((r) => r.trim().split('{')[0].trim()).join('\n  ')}`,
+    ).toEqual([])
+  })
+
   it('is nestable', () => {
     // SchemaFormControl emits a .ctl inside a ControlFrame. The inner one
     // re-entered the grid inside the parent's content column and came out as

@@ -731,13 +731,22 @@ body {
  * 8.2. Paraphrasing it is where the meaning is lost: the daemon knows which
  * permission and which call failed, and the shell does not. */
 .callout-raw {
+  /* `break-word`, not `anywhere`, and every wrap in this file now says so.
+     The two break a too-long word the same way and differ in one thing that is
+     invisible until it is catastrophic: `anywhere` also shrinks the element's
+     MIN-CONTENT size, `break-word` does not, so a flex or grid child carrying
+     `anywhere` can be squeezed to a character or two by whatever sits beside
+     it. That is what turned the wizard's step name into one letter per line,
+     and again a switcher tile's title into "com.apple.Safar" / "i". Every
+     site here is prose or machine text in a box that already has a width; none
+     of them wants a box that can collapse. */
   margin: var(--sp-2) 0 0;
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--r-sm);
   background: var(--bg-sunken);
   color: var(--fg-secondary);
   font: var(--fs-mono)/1.45 var(--font);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .callout-actions {
@@ -833,7 +842,7 @@ body {
 .banner-detail p {
   margin: var(--sp-1) 0 0;
   font: var(--fs-mono)/1.45 var(--font);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .banner-actions {
@@ -1155,7 +1164,7 @@ body {
 .note-text {
   flex: 1;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .note-dismiss {
@@ -1351,7 +1360,7 @@ body {
      row's rhythm is the row-gap and the row padding, and nothing else. */
   margin: 0;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .ctl-head .ctl-value,
@@ -1747,7 +1756,7 @@ body {
   background: var(--bg-sunken);
   color: var(--fg-primary);
   font-size: 13px;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 /* MMField's `mono ? .system(size: 13, design: .monospaced)`. The stack is the
@@ -1770,7 +1779,7 @@ body {
   margin-top: 3px;
   font-size: 11px;
   color: var(--fg-secondary);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 /* MMGroup's footer, DesignSystem.swift:576-582 — one 11.5pt line under the
@@ -1791,7 +1800,7 @@ body {
   margin: 0;
   color: var(--danger);
   font-weight: 600;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .ctl-actions {
@@ -2042,7 +2051,7 @@ body {
 
 .ctl-step-label {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 /* The step row is TWO lines, not one: the step and its badges above, the
@@ -2339,7 +2348,7 @@ body {
   border-radius: 0 var(--radius-control) var(--radius-control) 0;
   color: var(--fg-primary);
   font-size: 12.5px;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 @media (max-width: 40em) {
@@ -2455,7 +2464,7 @@ body {
 
 .tl-msg {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   color: var(--fg-primary);
 }
 
