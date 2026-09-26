@@ -102,10 +102,21 @@ export function ControlFrame(props: {
  */
 
 /** The lock glyph, standing in for the SF Symbol `lock.fill` the reference
- *  draws at the end of every fact row. U+FE0E forces text presentation so a
- *  webview renders it monochrome instead of as a colour emoji, which is the
- *  same substitution the capture control already documents for its glyphs. */
-const LOCK = '\u{1F512}︎'
+ *  draws at the end of every fact row.
+ *
+ *  It was U+1F512 plus U+FE0E, relying on the text-presentation selector to
+ *  make the webview draw it monochrome. Chromium ignored the selector and
+ *  painted a full-colour yellow padlock — the only saturated non-accent colour
+ *  in a window that is otherwise three greys and one blue, sitting at the end of
+ *  every row on the summary screen. An inline SVG has no such negotiation with
+ *  the platform emoji font: it is `currentColor` and the hairline it draws is
+ *  the same hairline every other mark here is. */
+const LOCK = (
+  <svg viewBox="0 0 12 14" width="10" height="12" aria-hidden="true">
+    <rect x="1.5" y="6.5" width="9" height="6.5" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+    <path d="M3.75 6.5V4.25a2.25 2.25 0 0 1 4.5 0V6.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+  </svg>
+)
 
 export function FactList(props: { children: ReactNode }): ReactElement {
   return <div className="ctl-facts">{props.children}</div>

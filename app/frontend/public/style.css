@@ -37,11 +37,19 @@
  */
 
 :root {
-  /* ---- surfaces, back to front ---- */
-  --bg-window:    #ffffff;   /* the content plane                     */
-  --bg-sidebar:   #f5f5f7;   /* nav rail, footer, wells               */
+  /* ---- surfaces, back to front ----
+     FOUR tones, and each one is a step from the one behind it. The rule that
+     makes this a scale rather than a set: the content PLANE is a grey, a card
+     on it is white, and a well or a list card inside that card is a grey one
+     step further down. It was not that before — --bg-window and --bg-raised
+     were both #ffffff, so a card and the page behind it were the same colour
+     and the only thing separating them was a 0.5px hairline at 1.33:1. A card
+     that cannot be seen is not a card, and that is what made the form read as
+     one undifferentiated field of grey. */
+  --bg-window:    #f5f5f7;   /* the content plane                     */
+  --bg-sidebar:   #eaeaee;   /* the nav rail, a step behind the plane  */
   --bg-raised:    #ffffff;   /* cards sitting on the content plane    */
-  --bg-sunken:    #f5f5f7;   /* read-only fields, list cards           */
+  --bg-sunken:    #eeeef1;   /* wells: fields, chips, list cards      */
   --bg-hover:     rgba(0, 0, 0, .05);
   --bg-pressed:   rgba(0, 0, 0, .09);
   --bg-selected:  color-mix(in srgb, var(--accent) 12%, transparent);
@@ -51,7 +59,10 @@
   --fg-secondary: #6e6e73;   /* descriptions, hints, placeholders  5.07:1 */
   --fg-tertiary:  #86868b;   /* timestamps, caps, disabled ONLY  3.62:1 */
   --fg-onaccent:  #ffffff;
-  --fg-link:      #0a66ff;   /* 4.82:1, and it is not --accent reused as decoration */
+  /* --fg-link is DELETED. It was #0a66ff, declared again as #5b9bff for dark,
+     and read by no rule in this file — while being the one thing that would
+     have been a fourth blue had anything used it. A token nothing consumes is
+     a record of a decision that was never made. */
 
   /* ---- lines ----
      Alphas are ink over white and the three carry THREE different obligations,
@@ -99,6 +110,23 @@
   --sp-0: 0;    --sp-1: 2px;   --sp-2: 4px;   --sp-3: 8px;   --sp-4: 12px;
   --sp-5: 16px; --sp-6: 20px;  --sp-7: 24px;  --sp-8: 32px;  --sp-9: 40px;
   --sp-10: 56px;
+
+  /* The two HALF-STEPS, and they are here because the file already used them:
+     10px appeared in thirteen spacing declarations and 6px in ten, which is not
+     a coincidence but a rhythm nobody had written down. Both are a half-step
+     on the 4px grid, which is what 3.3 describes and what the token list above
+     could not express. Named here so the rhythm is a token rather than a
+     coincidence, and so the next rule reaches for --sp-5h instead of typing
+     10px a fourteenth time.
+
+     What is NOT here, deliberately: 3px, 7px, 9px, 11px and 14px. Those are
+     measurements taken from the reference applications — MMField's 9x4 padding,
+     PackImportSheet's 7x10 step row, lockRow's 11pt spacing — and rounding a
+     citation to the nearest rung would make this file's comments say something
+     false about the app it was measured from. A ported measurement is allowed
+     to be an odd number; it just has to say so, and these rules do. */
+  --sp-4h: 6px;   /* half-step under --sp-3 */
+  --sp-5h: 10px;  /* half-step under --sp-4 */
 
   /* Two composite rhythms carry the layout. A gap INSIDE one kind of thing is
      always smaller than the gap BETWEEN two kinds of thing, and that single
@@ -304,10 +332,67 @@
    documented above, and Apple's system red (#ff3b30 light) does not. Swapping
    them for the "more native" colour would make the app LESS readable. A
    deliberate contrast decision outranks a consistency one. */
+
+/* ORDER IS THE CONTRACT, and it is why the @supports block below sits AFTER the
+   dark one. All three token blocks target `:root` at the same specificity, so
+   the last one to touch a token wins. This block used to sit ABOVE the dark
+   one, which meant dark mode took the hardcoded `--accent: #5b9bff` while light
+   mode took the user's real AccentColor: the app followed System Settings in
+   one appearance and ignored it in the other, and a user whose accent is
+   graphite or purple saw a third colour wherever a literal survived.
+
+   The rule, stated so it is not undone: the dark block declares the hex
+   palette and THIS block, being last, overrides it wherever the OS can answer
+   better. A token the dark block declares and this one does not override is a
+   token the user's appearance will never reach — which is the bug, not a
+   feature. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* The same four-step ladder as the light block above, in dark: the plane,
+       the rail a step behind it, the card raised above the plane, the well one
+       step below the card. The rail is darker than the plane rather than
+       lighter because in a dark theme "further back" is less light, not more. */
+    --bg-window: #1e1e1e;
+    --bg-sidebar: #191919;
+    --bg-raised: #252528;      /* raised ABOVE the window plane */
+    --bg-sunken: #2a2a2c;
+    --bg-hover: rgba(255, 255, 255, .06);
+    --bg-pressed: rgba(255, 255, 255, .10);
+    --bg-selected: color-mix(in srgb, var(--accent) 12%, transparent);
+
+    --fg-primary: #f5f5f7;
+    --fg-secondary: #a1a1a6;   /* the light #6e6e73 would be 3.29:1 here */
+    --fg-tertiary: #8a8a8f;    /* 4.85:1 — timestamps and caps only     */
+    --fg-onaccent: #ffffff;
+
+    /* 33% is the 3:1 point on #1e1e1e, so --line-strong clears it with room */
+    --line-hairline: rgba(255, 255, 255, .12);   /* 1.44:1 — decorative  */
+    --line-default:  rgba(255, 255, 255, .22);   /* 2.07:1 — dividers    */
+    --line-strong:   rgba(255, 255, 255, .45);   /* 4.40:1 — control edge */
+
+    --accent: #5b9bff;
+    --accent-hover: #7aafff;
+    --accent-tint: color-mix(in srgb, var(--accent) 12%, transparent);
+    --accent-ring: color-mix(in srgb, var(--accent) 45%, transparent);
+
+    --ok: #4ade80;  --ok-fill: #30d158;  --ok-wash: rgba(48, 209, 88, .20);
+    --warn: #fbbf24;  --warn-fill: #d97706;  --warn-wash: rgba(217, 119, 6, .20);
+    --danger: #ff6f81;  --danger-fill: #ff453a;  --danger-wash: rgba(255, 69, 58, .20);
+    --live: #4ade80;  --live-fill: #30d158;  --live-wash: rgba(48, 209, 88, .20);
+
+    --elev-2: 0 1px 2px rgba(0, 0, 0, .5), 0 4px 12px rgba(0, 0, 0, .45);
+    --elev-3: 0 8px 32px rgba(0, 0, 0, .6), 0 2px 8px rgba(0, 0, 0, .5);
+
+    --sel-bg: #1f5fbf;
+    --badge-wash: rgba(245, 245, 247, 0.08); /* --fg-primary at 0.08, dark */
+  }
+}
+
 @supports (color: AccentColor) {
   :root {
     --fg-primary: CanvasText;
     --fg-secondary: GrayText;
+    --fg-tertiary: color-mix(in srgb, CanvasText 45%, transparent);
     /* ButtonBorder is macOS's own control boundary, and it is the token that
        OWES the 3:1 of 1.4.11, so it is the one that bridges to it. The two
        weaker lines have no system colour and keep deriving from --fg-primary,
@@ -316,10 +401,20 @@
        weaker ones at the same value; the obligation is what moves. */
     --line-strong: ButtonBorder;
     --line-hairline: color-mix(in srgb, ButtonBorder 70%, transparent);
-    --bg-window: Canvas;
-    --bg-sidebar: ButtonFace;  /* the rail's own colour today, kept bridged */
-    --bg-raised: ButtonFace;
-    --bg-sunken: ButtonFace;   /* NSColor.controlBackgroundColor vs windowBackgroundColor */
+
+    /* FOUR SURFACES, as in the hex block above. These three were all
+       ButtonFace, which made the card, the nested list inside it and the nav
+       rail one colour: the same grey then had to mean "rail", "card" and
+       "well" at once, and a card on a page of the same grey is not a card at
+       all. macOS has no system keyword for the grey behind grouped content, so
+       the plane is derived from the ink instead — which means it follows the
+       user's light/dark choice for free, because Canvas and CanvasText both
+       flip with it. Same ladder as the hex values, one percent of ink apart. */
+    --bg-window:  color-mix(in srgb, CanvasText 4%, Canvas);   /* the plane      */
+    --bg-sidebar: color-mix(in srgb, CanvasText 6%, Canvas);   /* the rail       */
+    --bg-raised:  Canvas;                                      /* cards          */
+    --bg-sunken:  color-mix(in srgb, CanvasText 7%, Canvas);   /* wells, lists   */
+
     --accent: AccentColor;
     --sel-bg: AccentColor;
     /* menumate's accentTint: the accent at 13% light / 26% dark
@@ -375,45 +470,6 @@
    corrects --fg-secondary from #98989d to #a1a1a6, because the rail and the
    list cards are --bg-sunken #2a2a2c and #98989d is 4.86:1 there against 5.57:1
    for the step. */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-window: #1e1e1e;
-    --bg-sidebar: #1c1c1e;
-    --bg-raised: #252528;      /* raised ABOVE the window plane */
-    --bg-sunken: #2a2a2c;
-    --bg-hover: rgba(255, 255, 255, .06);
-    --bg-pressed: rgba(255, 255, 255, .10);
-    --bg-selected: color-mix(in srgb, var(--accent) 12%, transparent);
-
-    --fg-primary: #f5f5f7;
-    --fg-secondary: #a1a1a6;   /* the light #6e6e73 would be 3.29:1 here */
-    --fg-tertiary: #8a8a8f;    /* 4.85:1 — timestamps and caps only     */
-    --fg-onaccent: #ffffff;
-    --fg-link: #5b9bff;
-
-    /* 33% is the 3:1 point on #1e1e1e, so --line-strong clears it with room */
-    --line-hairline: rgba(255, 255, 255, .12);   /* 1.44:1 — decorative  */
-    --line-default:  rgba(255, 255, 255, .22);   /* 2.07:1 — dividers    */
-    --line-strong:   rgba(255, 255, 255, .45);   /* 4.40:1 — control edge */
-
-    --accent: #5b9bff;
-    --accent-hover: #7aafff;
-    --accent-tint: color-mix(in srgb, var(--accent) 12%, transparent);
-    --accent-ring: color-mix(in srgb, var(--accent) 45%, transparent);
-
-    --ok: #4ade80;  --ok-fill: #30d158;  --ok-wash: rgba(48, 209, 88, .20);
-    --warn: #fbbf24;  --warn-fill: #d97706;  --warn-wash: rgba(217, 119, 6, .20);
-    --danger: #ff6f81;  --danger-fill: #ff453a;  --danger-wash: rgba(255, 69, 58, .20);
-    --live: #4ade80;  --live-fill: #30d158;  --live-wash: rgba(48, 209, 88, .20);
-
-    --elev-2: 0 1px 2px rgba(0, 0, 0, .5), 0 4px 12px rgba(0, 0, 0, .45);
-    --elev-3: 0 8px 32px rgba(0, 0, 0, .6), 0 2px 8px rgba(0, 0, 0, .5);
-
-    --sel-bg: #1f5fbf;
-    --badge-wash: rgba(245, 245, 247, 0.08); /* --fg-primary at 0.08, dark */
-  }
-}
-
 /* --- density (7.3) ----------------------------------------------------------
  *
  * Compact is the DEFAULT, declared in the token block above; this is the other
@@ -861,15 +917,22 @@ body {
 
 .sections {
   flex: none;
-  width: 250px; /* Karabiner SidebarStyle.swift:39 defaultWidth */
+  /* 232, not the 250 this had and not Karabiner's 250 (SidebarStyle.swift:35
+     defaultWidth), and the reason is arithmetic rather than taste. The rows
+     grew from 12px to --fs-body (13px) to carry a 16px icon column and a
+     trailing badge, and 232 is what fits icon + label + the "Start here"
+     badge with the rail's own slack still visible. At 250 the badge floated in
+     empty space and the rail read as unfinished at its right edge. */
+  width: 232px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   /* Top 12 and sides 10 are the reference's own numbers for this column
      (MenuHubScreen.swift:119 .padding(.top, 12) and :124
      .padding(.horizontal, 10)); the 8px this had was neither. The bottom 16 is
      CrossOS's own and stays: the space menumate leaves at the foot of a
      sidebar is its action bar (:128, :133), and this rail has no equivalent
      to put there. */
-  padding: 12px 10px 16px;
+  padding: var(--sp-4) var(--sp-5h) var(--sp-5);
   /* A 0.5pt hairline, not a 1px rule: MenuHubScreen.swift:67-69 draws the
      divider as `Rectangle().fill(MMColor.separator).frame(width: 0.5)`, and
      0.5 is the value the reference pins for a hairline everywhere else
@@ -878,7 +941,7 @@ body {
      --line-hairline, not --line-default: this separates the rail from the
      content plane and nothing depends on being able to see it do so. */
   border-right: 0.5px solid var(--line-hairline);
-  background: var(--bg-sunken);
+  background: var(--bg-sidebar);
 }
 
 /* The air between one group's last row and the next group's cap. In the
@@ -889,21 +952,22 @@ body {
    previewed menu, whereas these are nav sections, and the system settings
    rail Karabiner builds from `Section { } header:` (:131-140) draws none. */
 .nav-group + .nav-group {
-  margin-top: 10px;
+  margin-top: var(--sp-5h);
 }
 
 .nav-group-title {
   margin: 0;
-  /* Vertical padding is the reference's: 2pt above, 3pt below
-     (MenuHubScreen.swift:711 and :710). The 4px above is what this had. The
-     6px of SIDE padding is CrossOS's own and stays — the cap has to line up
-     with the row labels under it, and the reference's 14pt does not line up
-     with its own rows because a 13pt grip and a 17pt icon sit in front of
-     them (TierRow :735-786). */
-  padding: 2px 6px 3px;
-  font-size: 9.5px; /* :704 */
-  font-weight: 600; /* :704, .semibold */
-  letter-spacing: 0.04em; /* :705, .tracking(0.4) — 0.4pt at 9.5px is 0.042em */
+  /* 11px, not the 9.5pt the reference uses (:704). 9.5px is unreadable at 1x and
+     is the single reason all four groups read as "web app" rather than as a
+     macOS source list; 11px semibold with .05em is the convention every macOS
+     settings rail uses. The side padding is CrossOS's own and stays aligned to
+     the row labels under it — the reference's 14pt does not line up with its
+     own rows because a 13pt grip and a 17pt icon sit in front of them
+     (TierRow :735-786). */
+  padding: var(--sp-4) var(--sp-3) var(--sp-1);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
   /* UPPERCASE, and it is CrossOS's own: the reference sets no case at all
      (:703-706 sets size, weight, tracking and colour and nothing else), and
      Karabiner sets none either because `Section { } header:` (:138) hands the
@@ -912,42 +976,49 @@ body {
      at 9.5pt, and these are single daemon-supplied words, where a tracked
      caps treatment is the macOS source-list convention. Left as it shipped. */
   text-transform: uppercase;
-  /* --text-dim, not the reference's MMColor.label3. The reference does go one
-     step dimmer than its own body ink here (:706), and there is no CSS system
-     colour for tertiaryLabel — --text-dim already resolves to GrayText, the
-     secondary — so matching it exactly would mean a new token used once. */
-  color: var(--text-dim);
+  /* The tertiary tier, which is what a cap is: it names a group, it is never
+     the thing being read. --fg-tertiary is 3.62:1, and 3.1 confines that tier
+     to caps, timestamps and disabled ink — which is all this is. It was
+     --text-dim, one tier too strong, and at 9.5px that read as a label. */
+  color: var(--fg-tertiary);
 }
 
 /* The mark beside a section title. Decoration beside the word and never the
    signal — a screen reader gets the word alone, and a person who cannot
-   resolve the glyph still reads the section. It is a fixed width so every
-   title starts at the same column, which is the whole thing a mark earns its
-   place by: it identifies the section without moving the words. */
+   resolve the glyph still reads the section. It is a fixed 20px column so
+   every title starts at the same x, which is the whole thing a mark earns its
+   place by: it identifies the section without moving the words. 16px, because
+   the daemon's symbols are SF-Symbol-style characters and at the 1.1em this
+   had they rendered as a smudge. */
 .nav-group-mark {
-  display: inline-block;
-  width: 1.1em;
-  margin-right: 0.3em;
-  text-align: center;
-  color: var(--text-dim);
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  margin-right: var(--sp-1);
+  color: var(--fg-secondary);
+  font-size: 13px;
+  line-height: 1;
 }
 
 .section {
   appearance: none;
+  position: relative; /* the leading bar below is absolutely placed */
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  align-items: center;
+  gap: var(--sp-2);
   width: 100%;
+  min-height: var(--nav-min-height, 30px);
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--r-sm);
   background: transparent;
-  color: var(--text);
-  padding: 4px 6px;
+  color: var(--fg-primary);
+  padding: var(--sp-1) var(--sp-3);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-body);
+  line-height: 1.4;
   text-align: left;
   cursor: pointer;
-  transition: background-color 120ms ease;
+  transition: background var(--dur-fast) var(--ease-out);
 }
 
 .section-label {
@@ -973,68 +1044,133 @@ body {
    the same size were legible only by luck. */
 .section-flag {
   flex: none;
-  padding: 1.5px 7px;
-  border-radius: var(--radius-badge);
-  background: var(--badge-wash);
-  font-size: 10.5px;
+  padding: 1px var(--sp-2);
+  border-radius: var(--r-full);
+  background: var(--bg-sunken);
+  font-size: var(--fs-small);
   font-weight: 600;
   letter-spacing: 0.1px;
-  color: var(--text-dim);
+  color: var(--fg-secondary);
 }
 
-/* On the open page the marker keeps the on-accent ink and loses its wash: the
-   fill already says which page is open, and a grey chip sitting on the accent
-   would be a second, weaker claim. The reference greys the badge instead
-   (MenuHubScreen.swift:775 `tone: selected ? .gray : badge.1`), which paints
-   label2 text on the accent fill — this keeps the existing decision, which
-   hands the pairing to the OS in the @supports block above. */
+/* On the open page the marker keeps its own wash and loses nothing to the
+   fill, because the fill is now a 12% tint rather than a saturated block: a
+   grey chip still reads as a chip on a tint, and greying it out would make the
+   badge the only thing saying "Start here" on the page you are actually on. */
 .section.is-active .section-flag {
-  background: transparent;
-  color: inherit;
+  background: var(--bg-raised);
+  color: var(--fg-secondary);
 }
 
-/* The active page is marked three ways, not one: the fill, aria-current in the
-   markup, and the weight below. */
+/* The active page is marked three ways, not one: a 12% accent TINT plus a 3px
+   leading bar, aria-current in the markup, and the weight below.
+
+   The tint replaces the full-saturation accent fill this had. Fifteen
+   saturated pills down a rail is the loudest thing in the app and it is why
+   the rail read as a web sidebar; a tint still reads as selected, and the bar
+   is what survives greyscale and prefers-contrast: more, where the tint is
+   the first thing to flatten out. The reference paints the selected row with
+   MMColor.accent behind on-accent ink (MenuHubScreen.swift:790-794) and that
+   is a TierRow inside a previewed menu where one row is selected at a time —
+   not a fifteen-row navigation rail, where the same treatment repeated is a
+   different object. */
 .section.is-active {
-  background: var(--sel-bg);
-  color: #fff; /* on-accent ink: see the contrast note on --sel-bg */
-  font-weight: 600;
+  background: var(--bg-selected);
+  color: var(--fg-primary);
+  font-weight: 590;
+}
+
+.section.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  border-radius: 0 var(--r-full) var(--r-full) 0;
+  background: var(--accent);
+  transform: translateY(-50%);
 }
 
 .section:not(.is-active):hover {
-  background: var(--bg);
+  background: var(--bg-hover);
 }
 
-/* --- page body ------------------------------------------------------------- */
+/* --- page body ------------------------------------------------------------- *
+ *
+ * The scroll container and the measure are two elements, not one. `.form`
+ * scrolls; `.page` inside it is the 760px document column. Collapsing them
+ * would mean centring the scroll content, and a centred measure in a 1100px
+ * window leaves two dead gutters that read as a web page with a max-width.
+ */
 
 .form {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: 16px 20px 24px;
+  overscroll-behavior: contain;
+  /* No top padding. The first thing in the scroll area is the page title at
+     --sp-5 below the status strip; a band of nothing above a heading is
+     exactly what makes a settings pane read as a web page. */
+  padding-bottom: var(--sp-9);
 }
 
+/* 760px, LEFT-aligned. Not centred: this is a document pane, and the 232px
+   rail plus 760px of measure is 992 of an 1100px window (app/main.go:85), so
+   the right gutter is where a scrollbar and a resized window put themselves.
+   Centring would make the column float between two equal voids and detach it
+   from the rail it belongs to. */
+.page {
+  max-width: 760px;
+  padding: var(--sp-5) var(--page-pad-x, var(--sp-7)) 0;
+}
+
+.page-header {
+  margin-bottom: var(--sp-6);
+}
+
+/* The page title, which is the fix for the one thing this stylesheet got most
+   wrong: it used to be a 12px uppercase cap, byte-identical in treatment to
+   the section caps and the sidebar caps, so nothing on screen said which of
+   the fifteen pages you were on except a blue row in the rail. 20px semibold
+   is the smallest size that reads as a title rather than as a label. */
+.page-title {
+  margin: 0;
+  font-size: var(--fs-page);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: var(--lh-tight);
+  color: var(--fg-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The cap that is genuinely a cap: a label over a group of rows inside a
+   surface. The page title above took the 12px-uppercase job away from it, so
+   this is free to be the tertiary tier it always was. */
 .group-title {
-  margin: 0 0 8px;
-  font-size: 12px;
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-cap);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-dim);
+  letter-spacing: 0.05em;
+  color: var(--fg-tertiary);
 }
 
 .page-desc {
-  margin: -4px 0 12px;
-  color: var(--text-dim);
-  font-size: 12px;
-  max-width: 62ch;
+  margin: var(--sp-1) 0 0;
+  color: var(--fg-secondary);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  max-width: 68ch;
 }
 
 .note {
   display: flex;
   align-items: baseline;
-  gap: 10px;
-  margin: 10px 0 0;
+  gap: var(--sp-5h);
+  margin: var(--sp-5h) 0 0;
   color: var(--text-dim);
   font-size: 12px;
 }
@@ -1071,29 +1207,158 @@ body {
  * ctl-value or an input carries the value, ctl-actions holds the buttons.
  * Rows stack to one column at 40em, which is where a 1280px window at 200%
  * zoom lands, so the label never squeezes its control off the edge.
+ *
+ * THE ROW LIVES INSIDE A CARD (5.5). What this had was a border-bottom drawn
+ * edge to edge across the entire content width, forever: twelve controls were
+ * twelve identical horizontal lines with no grouping anywhere, which is what
+ * makes a form read as a wall. The hairline is still here — it is what
+ * separates one row from the next — but it now sits inside a card, so between
+ * cards there is --sp-5 of whitespace and no line at all. That is the whole
+ * structural fix in DESIGN.md, and the gap inside one kind of thing being
+ * smaller than the gap between two kinds of thing is what stops the wall.
  */
 
-.ctl {
-  display: grid;
-  grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
-  align-items: baseline;
-  gap: 4px 12px;
-  padding: 7px 0;
-  border-bottom: 1px solid var(--line);
+.card {
+  margin: 0 0 var(--sp-5);
+  background: var(--bg-raised);
+  /* --elev-1 is the 0.5pt hairline, and a card outline is decorative: nothing
+     depends on being able to see where the card ends, because the rows inside
+     it carry the structure. */
+  border: var(--elev-1);
+  border-radius: var(--r-md);
+  /* Keeps the row hairlines inside the radius instead of letting the last one
+     run square across the card's bottom corners. */
+  overflow: clip;
 }
 
+/* THE ROW, and it is two tracks with no label column at all.
+
+   It used to be `minmax(0, 220px) minmax(0, 1fr)` — a fixed 220px gutter for
+   the label and everything else beside it. That is the shape that put a hole
+   in the middle of every form: a label like "version" is about 50px of text in
+   a 220px column, so ~170px of nothing sat between the label and its value,
+   and the value's left edge moved whenever a label was long enough to matter.
+   The whole card read as a page of text with a stripe of empty space down the
+   middle of it.
+
+   There is no such stripe in Linear's preferences, Slite's, Buffer's or Dropbox
+   Dash's — the four closest real examples of a desktop settings window, and
+   all four agree: the label (with its description under it) takes the room it
+   needs on the LEFT, and the control sits alone on ONE shared right edge. The
+   label column is not sized at all. `auto` on the second track is what
+   produces that shared edge: every switch, field, select and button in a card
+   is right-aligned to the same line, without any of them knowing about the
+   others. */
+.ctl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  /* TWO ROWS on the left track, one on the right. The label and its sentence
+     stack — `label` over `what this is` — while the control sits on the first
+     row at the shared right edge. That is the arrangement Linear, Slite, Buffer
+     and Dropbox Dash all use, and it is the one that survives a long sentence:
+     put the sentence in the right column and a max-content track claims the
+     whole width, the label's 1fr collapses to nothing, and the two overlap. */
+  grid-template-rows: auto auto;
+  /* centre, not baseline: a 22px switch baseline-aligned against 13px text
+     sits visibly high in its own row, which is the tell that a row was laid
+     out by aligning text rather than by aligning things. */
+  align-items: center;
+  column-gap: var(--sp-5);
+  row-gap: var(--sp-1);
+  min-height: var(--row-min-height, 34px);
+  padding: var(--row-pad-block, var(--sp-3)) var(--sp-5);
+  border-bottom: 0.5px solid var(--line-hairline);
+}
+
+.ctl:last-child {
+  border-bottom: 0;
+}
+
+/* The label block, left track, first row. It is a flex row because a control
+   that renders a label AND a note beside it puts them side by side;
+   `min-width: 0` is what lets that note wrap instead of pushing the control
+   off the row. */
 .ctl-head {
+  grid-column: 1;
+  grid-row: 1;
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--sp-2);
+  min-width: 0;
 }
 
-/* Everything after the label belongs in the value column. A control that
-   renders more than one thing (an empty state plus a note, a note plus a list)
-   then stacks on the right instead of wrapping under the label. */
-.ctl > :not(.ctl-head) {
+/* THE SENTENCE, left track, under the label it belongs to — which is where
+   every reference puts it. It is a sentence, not a value: a 1fr track a long
+   paragraph can grow into, never a right-hand column it competes for width
+   with the control.
+
+   NO explicit row. Two of these in one row (a sentence plus the daemon's own
+   line under it) both pinned to `grid-row: 2` land on top of each other; left
+   to the auto-placement cursor they stack in DOM order, which is the order
+   the renderer wrote them in. */
+.ctl > .ctl-value,
+.ctl > .ctl-empty {
+  grid-column: 1;
+  min-width: 0;
+}
+
+/* THE CONTROLS, right track, first row. This is the whole of the second column,
+   and it is an explicit list of the things a renderer can hand a row as an
+   operable value — which is the same explicitness the class-name contract in
+   controls/common.tsx asks for.
+
+   The old arrangement decided the same thing with `:has(> .ctl-toggle),
+   :has(> .ctl-input), :has(> .ctl-select)`, which reshaped the WHOLE grid per
+   row: a card could hold a 220px-label row beside a 1fr-label row, so the label
+   edge jumped between two rows a reader was meant to see as one list. Deciding
+   per CHILD rather than per ROW is what makes the right edge the only edge
+   there is. */
+.ctl > .ctl-toggle,
+.ctl > .ctl-input,
+.ctl > .ctl-select,
+.ctl > .ctl-chip {
   grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  min-width: 0;
+}
+
+/* A field and a select take a real width — a text field only as wide as its
+   content is a field you cannot find. The switch does NOT: it is a fixed
+   40x22 track, and stretching it would draw a 200px pill, which is not a
+   switch and not a control anybody has seen. */
+.ctl > .ctl-input,
+.ctl > .ctl-select {
+  width: var(--field-w, 200px);
+}
+
+/* EVERYTHING ELSE IS CONTENT, and content spans the row. A list, a card set, a
+   tile grid, a stepper, a fact pane, a button group: none of those is a value
+   that belongs opposite a label, and every one of them used to be pinned into a
+   column already sharing the card with a 220px hole. This rule is what makes a
+   content row full width, and it is why the layout has no gutter at all.
+
+   .ctl-actions is in the SPANNING set, not the right-hand one. A group of
+   three buttons is not one value — it is three, and a row whose second column
+   held all three left 67px for the label and wrapped "Save rule" onto two
+   lines. It is listed here rather than in the rule above because leaving it out
+   of BOTH lists sends it to auto-placement, which finds column 1 row 1 already
+   taken by the label and drops it into column 2 — which is the bug, arriving
+   by a different road. */
+.ctl > :not(.ctl-head):not(.ctl-toggle):not(.ctl-input):not(.ctl-select):not(.ctl-chip):not(.ctl-value):not(.ctl-empty) {
+  grid-column: 1 / -1;
+}
+
+/* A row INSIDE a row. SchemaFormControl is the one renderer that emits a .ctl
+   inside a ControlFrame, and the inner one used to re-enter this grid inside
+   the parent's second column — a 220px label gutter in a 192px box, so the
+   plugin's own fields were crushed into a tall narrow ribbon. A nested row is
+   already inside a card; it needs no label track of its own. */
+.ctl .ctl {
+  grid-template-columns: minmax(0, 1fr);
+  border-bottom: 0;
+  padding-inline: 0;
 }
 
 .ctl-label {
@@ -1102,6 +1367,12 @@ body {
 
 .ctl-value {
   color: var(--text);
+  /* margin: 0, and it is worth 26px a row. This is a bare <p>, so it was
+     carrying the UA's `1em 0` — thirteen above and thirteen below, on top of
+     the grid's own row-gap. That is why a one-line "CrossOS 0.4.0" measured
+     82.7px tall in a 34px row: two thirds of it was paragraph margin. The
+     row's rhythm is the row-gap and the row padding, and nothing else. */
+  margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -1210,13 +1481,54 @@ body {
   overflow: hidden;
 }
 
+/* A row INSIDE a list card — the behaviour matrix, the shortcut table, the
+   file-type list, seventeen renderers in all. It is a flex row so a renderer
+   can hand it any number of fields, which is also how a trailing toggle ended
+   up on a line of its own in two of the three behaviour-matrix rows and beside
+   the text in the third: `flex-wrap: wrap` with no flex basis anywhere lets
+   every child shrink, so the row packs itself differently depending on how long
+   the words in it happen to be.
+
+   The trailing control is the one thing that must not move, so it is pinned to
+   the row's end and never shrinks. Everything before it keeps wrapping. */
 .ctl-item {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 4px 12px;
-  padding: 6px 9px;
+  padding: var(--sp-4h) 9px;
+  min-width: 0;
+}
+
+/* The divider belongs to the LIST, not to the row. A .ctl-item used on its own
+   — KeymapEditor's search row is one — is a form field, and a rule under a
+   single field stops a third of the way across the card and says nothing. It is
+   the row's place in a stack that the rule is drawing, so it is drawn by the
+   stack. */
+.ctl-list > .ctl-item {
   border-bottom: 0.5px solid var(--hairline);
+}
+
+.ctl-list > .ctl-item:last-child {
+  border-bottom: 0;
+}
+
+/* The control that ends the row. `margin-left: auto` is what puts it on the
+   shared right edge that the .ctl grid sets up one level up, and `flex: none`
+   is what stops it being the thing that gives way. */
+.ctl-item > .ctl-toggle,
+.ctl-item > .ctl-input,
+.ctl-item > .ctl-select,
+.ctl-item > .ctl-chip.is-state {
+  flex: none;
+  margin-left: auto;
+}
+
+/* The words in a row: they wrap against each other, never against the control. */
+.ctl-item > .ctl-label,
+.ctl-item > .ctl-value,
+.ctl-item > .ctl-chip,
+.ctl-item > .kbd {
   min-width: 0;
 }
 
@@ -1273,7 +1585,7 @@ body {
 .ctl-live {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-4h);
   color: var(--live);
   font-size: 11px;
   white-space: nowrap;
@@ -1318,10 +1630,13 @@ body {
   border-color: var(--danger);
 }
 
+/* Never italic. Italic grey is the universal "unfinished app" tell — it is
+   the one treatment that reads as a placeholder rather than as a decision, and
+   it was on the one element a person sees when a list is legitimately empty.
+   Criterion 13 asks for zero italic in the app and this was the last one. */
 .ctl-empty {
-  margin: 4px 0;
-  color: var(--text-dim);
-  font-style: italic;
+  margin: 0;
+  color: var(--fg-secondary);
 }
 
 /* --- the detail pane -------------------------------------------------------
@@ -1384,7 +1699,7 @@ body {
   flex-direction: column;
   /* MenuHubPanels.swift:657 — 10 between rows, tighter than the 13 between
      levels above them. */
-  gap: 10px;
+  gap: var(--sp-5h);
   min-width: 0;
 }
 
@@ -1462,7 +1777,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-top: 6px;
+  margin-top: var(--sp-4h);
   font-size: 11.5px;
   color: var(--text-dim);
 }
@@ -1477,7 +1792,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-4h);
 }
 
 .ctl-actions button,
@@ -1492,7 +1807,7 @@ body {
   border-radius: var(--radius);
   background: var(--bg);
   color: var(--text);
-  padding: 3px 10px;
+  padding: 3px var(--sp-5h);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
@@ -1595,7 +1910,7 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px; /* :235 HStack(spacing: 8) */
-  padding: 7px 10px; /* :253-254 */
+  padding: 7px var(--sp-5h); /* :253-254 */
   border-bottom: 0.5px solid var(--hairline); /* :257, over --hairline */
   font-size: 12px; /* :247 .font(.system(size: 12)) */
 }
@@ -1676,10 +1991,18 @@ body {
 .ctl-step-button {
   appearance: none;
   display: flex;
-  flex: 1;
+  /* flex-basis 0 (the old `flex: 1`) made this the one item on the line with
+     nothing to lose by shrinking, so the chips and the reason paragraph beside
+     it took the space and the LABEL was left at a character or two — where
+     `overflow-wrap: anywhere` then broke "Pick a Windows profile" into one
+     letter per line and the row grew to 883px. The basis is the button's own
+     content now, and the min-width is the floor that keeps it there: a step
+     name is a phrase, not a word, and no number of chips should be able to
+     squeeze it into a column. */
+  flex: 1 1 auto;
   align-items: center;
   gap: 8px;
-  min-width: 0;
+  min-width: var(--step-name-min, 12rem);
   min-height: 22px;
   padding: 0;
   border: 0;
@@ -1708,6 +2031,23 @@ body {
 .ctl-step-label {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* The step row is TWO lines, not one: the step and its badges above, the
+   daemon's reason for why the step is not done below. The reason is a full
+   basis so it can never share a line with the badges and squeeze them — it is
+   a sentence about the step, and the one fact here that is allowed to wrap. */
+.ctl-step > .ctl-value,
+.ctl-step > .ctl-empty {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+/* A badge is a fixed label, so it never shrinks: three of them plus the step
+   name are the row's whole content, and which of them gives way is not a
+   question the layout should be answering. */
+.ctl-step > .ctl-chip {
+  flex: none;
 }
 
 /* THE ROLLUP, in the reference's position: one line under the list it counts
@@ -1741,7 +2081,7 @@ body {
 
 .ctl-tile-grid {
   position: relative;
-  margin: 6px 0 0;
+  margin: var(--sp-4h) 0 0;
   max-width: 100%;
   overflow: visible;
 }
@@ -1753,7 +2093,7 @@ body {
   align-items: flex-start;
   gap: 4px;
   overflow: hidden;
-  padding: 10px 12px;
+  padding: var(--sp-5h) 12px;
   /* A tile is a button with a custom shape, so its edge owes the same 3:1 as
      any other control boundary. It matters more here than elsewhere: the tile
      grid is a flat plane with no rules and no card behind it, so the border is
@@ -1808,7 +2148,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-4h);
   min-height: 100%;
   padding: 12px;
 }
@@ -1823,7 +2163,7 @@ body {
 
 .ctl-cards {
   display: grid;
-  gap: 10px;
+  gap: var(--sp-5h);
   margin: 4px 0 0;
   padding: 0;
   list-style: none;
@@ -1853,7 +2193,7 @@ body {
 }
 
 .ctl-caps {
-  margin: 6px 0 8px;
+  margin: var(--sp-4h) 0 8px;
   padding: 0;
   list-style: none;
 }
@@ -1862,7 +2202,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 10px;
+  gap: 4px var(--sp-5h);
   padding: 2px 0;
   min-width: 0;
 }
@@ -1889,7 +2229,7 @@ body {
 }
 
 .ctl-stages {
-  margin: 6px 0 2px;
+  margin: var(--sp-4h) 0 2px;
   padding: 0 0 0 4px;
   list-style: none;
   border-left: 2px solid var(--line);
@@ -1898,7 +2238,7 @@ body {
 .ctl-stage {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  gap: 10px;
+  gap: var(--sp-5h);
   padding: 2px 0 2px 8px;
   min-width: 0;
 }
@@ -1935,7 +2275,7 @@ body {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-4h);
   min-width: 0;
 }
 
@@ -1950,7 +2290,7 @@ body {
    way the spec's own example is. */
 .ctl-clause {
   margin: 8px 0 4px;
-  padding: 7px 10px;
+  padding: 7px var(--sp-5h);
   border-left: 2px solid var(--accent);
   background: var(--bg-sunken);
   border-radius: 0 var(--radius) var(--radius) 0;
@@ -2010,7 +2350,7 @@ body {
 }
 
 .tl-cap {
-  margin: 0 0 6px;
+  margin: 0 0 var(--sp-4h);
   font-size: 11px;
 }
 
@@ -2024,7 +2364,7 @@ body {
 .tl-row {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  gap: 10px;
+  gap: var(--sp-5h);
   padding: 3px 0;
   border-bottom: 1px solid var(--line);
 }
@@ -2053,13 +2393,13 @@ body {
 
 .about {
   display: flex;
-  gap: 12px;
+  gap: var(--sp-3);
   align-items: baseline;
-  padding: 9px 20px;
-  border-top: 1px solid var(--line);
-  background: var(--bg-sunken);
-  color: var(--text-dim);
-  font-size: 11px;
+  margin-top: var(--sp-7);
+  padding: var(--sp-4) 0 0;
+  border-top: var(--elev-1);
+  color: var(--fg-tertiary);
+  font-size: var(--fs-meta);
 }
 
 .version {

@@ -8,6 +8,7 @@
     "build:dev": "tsc && vite build --minify false --mode development",
     "build": "tsc && vite build --mode production",
     "preview": "vite preview",
+    "shell": "vite --config preview/vite.config.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
