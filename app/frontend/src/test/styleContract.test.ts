@@ -56,6 +56,33 @@ describe('the token cascade', () => {
   })
 })
 
+describe('the retired vocabulary', () => {
+  it('has no rule reading an alias', () => {
+    // Sixteen names were kept alive as aliases so the fifty-odd rules reading
+    // them kept working while the semantic tokens were introduced. The block is
+    // deleted and the rules renamed. An alias is a second name for one fact,
+    // and that is how they drift: --line was one value doing three jobs, so a
+    // resting input was reading the same token as a decorative divider and sat
+    // at 1.51:1 while the file claimed a 3:1 tier existed.
+    const ALIASES = ['--text', '--text-dim', '--line', '--bg', '--hairline', '--done', '--radius']
+    const rules = CSS.replace(/\/\*[\s\S]*?\*\//g, '')
+    for (const alias of ALIASES) {
+      expect(rules, `a rule still reads var(${alias})`).not.toContain(`var(${alias})`)
+    }
+  })
+
+  it('keeps --sel-bg, which is a token and not an alias', () => {
+    // It starts as the accent but is not the accent: a user accent is not
+    // guaranteed dark enough for the white text on it, so dark mode takes a
+    // step darker of its own. It belongs in the token block, which is where it
+    // went when the alias block was deleted.
+    expect(CSS).toMatch(/--sel-bg:\s*var\(--accent\)/)
+    expect(CSS.slice(at('@media (prefers-color-scheme: dark)'), at('@supports (color: AccentColor)'))).toMatch(
+      /--sel-bg:\s*#/,
+    )
+  })
+})
+
 describe('the control row', () => {
   it('has no label gutter', () => {
     // The defect: `minmax(0, 220px) minmax(0, 1fr)`, a fixed 220px label column
