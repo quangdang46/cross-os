@@ -1526,9 +1526,22 @@ body {
 
 /* The words in a row: they wrap against each other, never against the control. */
 .ctl-item > .ctl-label,
-.ctl-item > .ctl-value,
 .ctl-item > .ctl-chip,
 .ctl-item > .kbd {
+  min-width: 0;
+}
+
+/* A row's SENTENCE gets its own line, under the chip and the label it belongs
+   to — which is the shape every list row in every reference has, and the one
+   ChecklistControl already draws on its `is-block` rows. Without it the three
+   spans of a readiness reason (what / next / the daemon's own line) are flex
+   items sitting SIDE BY SIDE with no separator, so the page read
+   "interceptionCrossOS needs permission…Security.adapter: tap refused" — four
+   sentences run into one. A full flex-basis is the whole fix: each takes a
+   line of its own, in the order the renderer wrote them. */
+.ctl-item > .ctl-value,
+.ctl-item > .ctl-empty {
+  flex: 1 1 100%;
   min-width: 0;
 }
 
@@ -2224,8 +2237,31 @@ body {
  * the stages at all.
  */
 
+/* A row whose content STACKS: a chip, a label, and then one to three
+   sentences. It was `display: block`, which makes its children inline — and
+   three inline <span>s with no separator between them concatenate into one
+   run of text. A readiness row read "Keyboard interceptionCrossOS needs
+   permission to see the keys you press…Security.adapter: tap refused": four
+   sentences, one line, no gaps, and the chip's own label welded to the first
+   word of the explanation.
+   A column flex is the same intent — one thing per line — with the row's
+   rhythm coming from the gap rather than from margins nobody set. */
 .ctl-item.is-block {
-  display: block;
+  display: flex;
+  /* Wrapping, not a column: the chip and the label it qualifies belong on ONE
+     line — "Ready  Keyboard interception" is one statement, and splitting them
+     put a 30px pill above its own label with nothing beside it. The sentences
+     below are the things that get a line each, which is what the full-basis
+     rule under this one is for. */
+  flex-flow: row wrap;
+  align-items: baseline;
+  gap: 2px var(--sp-3);
+}
+
+/* The sentences, one per line, in the order the renderer wrote them. */
+.ctl-item.is-block > .ctl-value,
+.ctl-item.is-block > .ctl-empty {
+  flex: 1 1 100%;
 }
 
 .ctl-stages {

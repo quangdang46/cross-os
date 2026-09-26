@@ -442,9 +442,30 @@ describe('the panel', () => {
 
       const tiles = Array.from(container.querySelectorAll<HTMLElement>('.ctl-tile'))
       // 8 + 300 + 8 + 300 fits inside the 720px panel, and a third 300pt tile
-      // would cross it — so the third wraps, at the starting x of its row.
+      // would cross it — so the third wraps onto a row of its own. Each row is
+      // then CENTERED in the panel, which is what centeringOffsets exists for
+      // and what its own tests above pin: row one is 8+300+8+300+8 = 624 wide,
+      // so it starts 48px in; row two is 8+300+8 = 316 wide, so it starts 202px
+      // in. The short row sits under the middle of the PANEL, not under the
+      // middle of the tiles.
+      //
+      // This assertion used to expect ['8px','316px','8px'] — rows packed from
+      // the left edge — and it passed for the wrong reason. The offsets were
+      // real and computed, but they were being added to `top` instead of to
+      // `left`, so the tiles sat below the grid they were in and the card's
+      // overflow: clip hid all three. A DOM test that only checks `left` cannot
+      // see that, because `left` was the one number that was right.
       expect(tiles.map((tile) => tile.style.width)).toEqual(['300px', '300px', '300px'])
-      expect(tiles.map((tile) => tile.style.left)).toEqual(['8px', '316px', '8px'])
+      expect(tiles.map((tile) => tile.style.left)).toEqual(['56px', '364px', '210px'])
+      // And the one that actually caught it: a tile must sit INSIDE the grid it
+      // belongs to, not below it.
+      const grid = container.querySelector<HTMLElement>('.ctl-tile-grid') as HTMLElement
+      const gridHeight = Number.parseFloat(grid.style.height)
+      for (const tile of tiles) {
+        expect(
+          Number.parseFloat(tile.style.top) + Number.parseFloat(tile.style.height),
+        ).toBeLessThanOrEqual(gridHeight)
+      }
       const first = Number.parseFloat(tiles[0].style.top)
       const third = Number.parseFloat(tiles[2].style.top)
       expect(third).toBeGreaterThan(first)

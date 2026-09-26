@@ -413,10 +413,25 @@ export function SwitcherPanelControl(props: ControlProps): ReactElement {
   // Which row each tile landed on, so a tile is centered with its own row
   // instead of the rows being searched again for every tile.
   const rowOf = placed.rows.flatMap((row, at) => row.map(() => at))
-  // The DOM's left edge. In RTL the reference's x is measured from widthMax, so
-  // the origin CSS wants is its mirror across the panel.
-  const leftOf = (origin: TileOrigin, width: number): number =>
-    isLeftToRight ? origin.x : PANEL_MAX_WIDTH - origin.x - width
+  // The DOM's left edge, INCLUDING the row's centering offset.
+  //
+  // It used to leave the offset out here and add it to `top` instead, which is
+  // the one thing that cannot be right: centeringOffsets returns a distance
+  // along the WRITING DIRECTION, and the writing direction is horizontal
+  // (MenuHubPanels.swift:27-45 centers a column, it does not indent a row
+  // downward). The tiles landed at `top: 157` inside a grid the panel sized to
+  // 148 — below their own container — and the card's `overflow: clip`, which is
+  // what keeps the row hairlines inside its radius, took the rest. The page
+  // showed an empty panel with three windows in it.
+  //
+  // In RTL the offset subtracts: the row has to move back toward the right edge,
+  // and `leftOf` has already mirrored the origin across the panel.
+  const leftOf = (origin: TileOrigin, width: number, at: number): number => {
+    const shift = offsets[at] ?? 0
+    return isLeftToRight
+      ? origin.x + shift
+      : PANEL_MAX_WIDTH - origin.x - width - shift
+  }
 
   /**
    * Raising a tile is the same write a release of the chord performs, so a
@@ -494,8 +509,10 @@ export function SwitcherPanelControl(props: ControlProps): ReactElement {
                 key={key}
                 className={row.selected ? 'ctl-tile is-selected' : 'ctl-tile'}
                 style={{
-                  left: leftOf(placed.origins[position], width),
-                  top: placed.origins[position].y + offsets[at],
+                  left: leftOf(placed.origins[position], width, at),
+                  // The vertical position is the grid's own arithmetic and
+                  // nothing else. See leftOf for what used to be added here.
+                  top: placed.origins[position].y,
                   // Until a tile has been measured it is left to its own
                   // content, because "a tile's own width is its own" is the
                   // width the CONTENT asks for — pinning it to the fallback

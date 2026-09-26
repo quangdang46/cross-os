@@ -667,6 +667,19 @@ export function WizardControl(props: ControlProps): ReactElement {
                   from readinessRows() and a step that said the reason one way
                   and the row another would be this file's own two-answers bug
                   with the rows a screen apart. */}
+              {/* The reason a step is not done — on EVERY unfinished step, not
+                  only the one the reader has open. That is the point of the
+                  list: a person on step 1 can see that step 4 is waiting on a
+                  permission they have not granted yet, without clicking
+                  through to find out. (An earlier revision showed it for the
+                  current step only, to make the list shorter; renderers.test.tsx
+                  asserts both non-current reasons are on screen, and it is
+                  right — the list's job is to say what is blocking ALL of it.)
+
+                  The list was tall because `.ctl-item.is-block` was
+                  `display: block`, which left its sentences inline and welded
+                  together. They are one per line now, which is both correct and
+                  the same height. */}
               {mark?.detail ? <StepReason detail={mark.detail} /> : null}
             </li>
           )
