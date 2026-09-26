@@ -1499,8 +1499,20 @@ body {
 /* The words in a row: they wrap against each other, never against the control. */
 .ctl-item > .ctl-label,
 .ctl-item > .ctl-chip,
+.ctl-item > .ctl-kbd,
 .ctl-item > .kbd {
   min-width: 0;
+}
+
+/* A field inside a row is the same width as a field beside one. Left to flex it
+   takes whatever the label did not, so a row set with a long label and a row
+   set with a short one drew fields of different widths and the editor read as
+   scattered rather than as a grid: "Zone ID, row 1" was 270px, "Name, row 1"
+   245px, "X, row 1" 275px, on three different lines. */
+.ctl-item > .ctl-input,
+.ctl-item > .ctl-select {
+  flex: none;
+  width: var(--field-w, 200px);
 }
 
 /* A row's SENTENCE gets its own line, under the chip and the label it belongs
