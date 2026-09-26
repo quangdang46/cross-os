@@ -47,3 +47,7 @@ core/crossos
 app/app
 app/crossos-shell
 .crossos/
+
+# SwiftPM build output (macos/ — the native AppKit shell)
+macos/.build/
+macos/.swiftpm/
