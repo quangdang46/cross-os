@@ -126,3 +126,37 @@ br sync --flush-only             # Sync changes to issues.jsonl
 ```
 <!-- end-bv-agent-instructions -->
 
+## Housekeeping
+
+**Do not delete `tmp/research/`.** It is 667M of reference repos (Karabiner-
+Elements, Amethyst, Amethyst, Karabiner, ...) that the design rationale in
+`app/frontend/public/style.css` cites by file and line — `MenuHubPanels.swift:637`,
+`Karabiner-Elements/.../ComplexModificationsView.swift:175-177`,
+`DesignSystem.swift:451-482`. It is gitignored, so it costs disk and nothing
+else, and deleting it makes every one of those citations unverifiable. It is
+already excluded from "clean up build artifacts" sweeps.
+
+**Do clean, at the end of any session that created them:**
+
+```bash
+rm -rf /tmp/crossos-shots /tmp/crossos-shots-cdp /tmp/webkit-probe
+```
+
+Those are the only files the preview harness writes (see `app/frontend/preview/`).
+Leaving them behind has bitten twice: 26M of Chrome profiles, and a full disk
+(`ENOSPC` mid-edit) on a machine whose data volume was at 97%.
+
+**Worktrees.** This project uses `.claude/worktrees/<name>` on its own branches.
+When a worktree's work is merged, remove it rather than leaving it:
+
+```bash
+git worktree list                        # what exists
+git log --oneline main..<branch>         # MUST be empty before removal
+git -C .claude/worktrees/<name> status   # MUST be clean before removal
+git worktree remove .claude/worktrees/<name>
+git branch -D <branch>
+```
+
+Check both before removing. An agent worktree holding unmerged commits is
+ordinary, not a bug.
+
