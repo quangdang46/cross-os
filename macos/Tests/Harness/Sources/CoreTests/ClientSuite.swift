@@ -30,6 +30,14 @@ public actor SpiedCoreClient: CoreClient {
     private var appsAnswer: [AppRow] = []
     private var profilesAnswer: [ProfileRow] = []
     private var storedRuleState = false
+    private var shortcutsAnswer: [JSONValue] = []
+    private var zonesAnswer: [ZoneRow] = []
+    private var userRulesAnswer: [UserRuleRow] = []
+    private var commandsAnswer: [CommandRow] = []
+    private var pluginMetaAnswer: [PluginMetaRow] = []
+    private var tracesAnswer: [TraceRow] = []
+    private var fileTypesAnswer: [FileTypeRow] = []
+    private var trialAnswer = TrialState(plugin: "", state: "none", remainingMS: 0, timeoutMS: 0)
 
     public init() {}
 
@@ -129,6 +137,111 @@ public actor SpiedCoreClient: CoreClient {
         // request would make the one assertion this exists for — that a
         // refusal is reported rather than reconciled with the row — untestable.
         return storedRuleState
+    }
+
+    public func applyProfile(id: String) async throws -> JSONValue {
+        record("core.profileApply")
+        return .object(["message": .string("Applied \(id).")])
+    }
+
+    public func deactivateProfile(id: String) async throws -> JSONValue {
+        record("core.profileDeactivate")
+        return .object(["message": .string("Reverted \(id).")])
+    }
+
+    public func setPluginEnabled(id: String, enabled: Bool) async throws {
+        record("plugin.setEnabled")
+    }
+
+    public func setFileType(entry: FileTypeRow, enabled: Bool) async throws -> [FileTypeRow] {
+        record("core.setFileType")
+        return fileTypesAnswer
+    }
+
+    public func shortcuts() async throws -> [JSONValue] {
+        record("config.getShortcuts")
+        return shortcutsAnswer
+    }
+
+    public func setShortcuts(_ rows: [JSONValue]) async throws -> Int {
+        record("config.setShortcuts")
+        return rows.count
+    }
+
+    public func zones() async throws -> [ZoneRow] {
+        record("config.getZones")
+        return zonesAnswer
+    }
+
+    public func setZones(_ zones: [ZoneRow]) async throws -> Int {
+        record("config.setZones")
+        return zones.count
+    }
+
+    public func userRules() async throws -> [UserRuleRow] {
+        record("config.getUserRules")
+        return userRulesAnswer
+    }
+
+    public func appsForRules() async throws -> [AppRow] {
+        record("core.apps")
+        return appsAnswer
+    }
+
+    public func commands() async throws -> [CommandRow] {
+        record("core.commands")
+        return commandsAnswer
+    }
+
+    public func pluginMeta() async throws -> [PluginMetaRow] {
+        record("core.pluginMeta")
+        return pluginMetaAnswer
+    }
+
+    public func traces() async throws -> [TraceRow] {
+        record("core.traces")
+        return tracesAnswer
+    }
+
+    public func clearTraces() async throws -> [TraceRow] {
+        record("core.tracesClear")
+        tracesAnswer = []
+        return tracesAnswer
+    }
+
+    public func fileTypes() async throws -> [FileTypeRow] {
+        record("core.fileTypes")
+        return fileTypesAnswer
+    }
+
+    public func trialState() async throws -> TrialState {
+        record("safety.trialState")
+        return trialAnswer
+    }
+
+    public func beginTrial() async throws -> String {
+        record("safety.beginTrial")
+        return "started"
+    }
+
+    public func confirmTrial() async throws -> String {
+        record("safety.confirmTrial")
+        return "kept"
+    }
+
+    public func rollbackTrial() async throws -> String {
+        record("safety.rollbackTrial")
+        return "reverted"
+    }
+
+    public func panicStop() async throws -> JSONValue {
+        record("safety.panicStop")
+        return .object(["stopped": .array([.string("interception")])])
+    }
+
+    public func resume() async throws -> JSONValue {
+        record("safety.resume")
+        return .object(["resumed": .bool(true)])
     }
 }
 

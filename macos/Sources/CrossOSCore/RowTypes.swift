@@ -180,3 +180,161 @@ public struct ProfileCapabilityRow: Codable, Sendable, Equatable {
         case alreadyOn = "already_on"
     }
 }
+
+// MARK: - zones
+
+/// One zone (`config.getZones`) — a rectangle a window can be moved to.
+///
+/// The geometry is four numbers because the daemon sends four numbers, and a
+/// `CGRect` here would be a conversion this repo owns on both sides of the
+/// wire for no gain: the values arrive in the daemon's coordinate space and go
+/// back in it.
+public struct ZoneRow: Codable, Sendable, Equatable {
+    public var id: String
+    public var name: String
+    public var x: Double
+    public var y: Double
+    public var w: Double
+    public var h: Double
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, x, y, w, h
+    }
+
+    public init(id: String, name: String, x: Double, y: Double, w: Double, h: Double) {
+        self.id = id
+        self.name = name
+        self.x = x
+        self.y = y
+        self.w = w
+        self.h = h
+    }
+}
+
+// MARK: - user rules
+
+/// One user rule (`config.getUserRules`).
+///
+/// `modifiers`, `app_modes` and `app_ids` are nullable because a rule that
+/// applies to everything says nothing about apps, and an empty array would be
+/// a claim that it applies to NO apps — which is a different rule. `chord` is
+/// the rendered form of `key` plus `modifiers`, the same string the matrix
+/// draws, so a recorded key and the rule claiming it read alike on one screen.
+public struct UserRuleRow: Codable, Sendable, Equatable {
+    public var id: String
+    public var key: String
+    public var modifiers: [String]?
+    public var appModes: [String]?
+    public var appIDs: [String]?
+    public var deviceID: String
+    public var capability: String
+    public var parameters: [String: JSONValue]?
+    public var emit: Bool
+    public var chord: String
+    public var action: String
+    public var priority: Int
+    public var specificity: Int
+    public var scope: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, key, modifiers
+        case appModes = "app_modes"
+        case appIDs = "app_ids"
+        case deviceID = "device_id"
+        case capability, parameters, emit, chord, action
+        case priority, specificity, scope
+    }
+}
+
+// MARK: - traces
+
+/// One recorded decision, as columns (`core.traces`).
+///
+/// `core.eventLogs` flattens these same traces into `"winner action params=…"`
+/// strings; the stages, the physical event, the focused app and the rules that
+/// lost are all still in here, which is the whole reason the Activity page uses
+/// this and not the log.
+public struct TraceRow: Codable, Sendable, Equatable {
+    public var at: String
+    public var decision: String
+    public var event: TraceEvent
+    public var context: TraceContext
+    public var winner: String
+    public var losers: [String]?
+    public var intent: String
+    public var action: String
+
+    enum CodingKeys: String, CodingKey {
+        case at, decision, event, context, winner, losers, intent, action
+    }
+}
+
+/// The physical input. `keyCode` is the Windows virtual-key code the recorder
+/// sends; the chord is rendered the way the matrix renders a rule's binding.
+public struct TraceEvent: Codable, Sendable, Equatable {
+    public var keys: String
+    public var source: String
+    public var device: String?
+    public var keyCode: Int
+
+    enum CodingKeys: String, CodingKey {
+        case keys, source, device
+        case keyCode = "key_code"
+    }
+}
+
+/// What had focus when the key arrived.
+public struct TraceContext: Codable, Sendable, Equatable {
+    public var appID: String
+    public var appMode: String
+    public var windowID: String?
+    public var winClass: String?
+
+    enum CodingKeys: String, CodingKey {
+        case appID = "app_id"
+        case appMode = "app_mode"
+        case windowID = "window_id"
+        case winClass = "win_class"
+    }
+}
+
+// MARK: - file types and plugins
+
+/// One row of the Explorer's file-type catalog (`core.fileTypes`).
+///
+/// Identity is `(ext, baseName)`, not the display name, and reorder needs a
+/// COMPLETE permutation of ids — a partial list is a list the daemon cannot
+/// apply and this repo would have to detect. `builtIn` is why a row cannot be
+/// deleted rather than merely not restored.
+public struct FileTypeRow: Codable, Sendable, Equatable {
+    public var ext: String
+    public var baseName: String
+    public var displayName: String
+    public var template: String
+    public var enabled: Bool
+    public var builtIn: Bool
+    public var menuTitle: String
+
+    enum CodingKeys: String, CodingKey {
+        case ext
+        case baseName = "baseName"
+        case displayName = "displayName"
+        case template, enabled
+        case builtIn = "builtIn"
+        case menuTitle = "menuTitle"
+    }
+}
+
+/// One plugin's manifest facts (`core.pluginMeta`).
+///
+/// `reason` is present only when `loaded` is false, and it says why. A plugin
+/// listed without a reason is a plugin with nothing for the person to act on,
+/// so the two travel together.
+public struct PluginMetaRow: Codable, Sendable, Equatable {
+    public var id: String
+    public var name: String
+    public var version: String
+    public var permissions: [String]?
+    public var loaded: Bool
+    public var reason: String?
+}

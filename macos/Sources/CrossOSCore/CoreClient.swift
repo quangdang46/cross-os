@@ -28,6 +28,76 @@ public protocol CoreClient: Sendable {
     /// The daemon's recent log lines (`core.eventLogs`).
     func eventLogs() async throws -> [String]
 
+    /// Apply a profile (`core.profileApply`).
+    ///
+    /// The way BACK out is `core.profileDeactivate`, and both live on this
+    /// protocol for the same reason: a page that can only turn a profile on is
+    /// a half-feature. The store records what the profile overwrote, and
+    /// without a way to put it back the person who applied one has neither a
+    /// door nor a way to find out that a door should exist.
+    func applyProfile(id: String) async throws -> JSONValue
+    func deactivateProfile(id: String) async throws -> JSONValue
+
+    /// Switch a plugin on or off (`plugin.setEnabled`).
+    ///
+    /// It scans `plugin.list` first to fail closed on an unknown id, so a typo
+    /// is a refusal rather than a silent no-op (bridge.go:294-300).
+    func setPluginEnabled(id: String, enabled: Bool) async throws
+
+    /// Set one file type (`core.setFileType`).
+    ///
+    /// The answer is the WHOLE catalog, not the row. A partial answer would
+    /// leave the table showing a row the daemon has already replaced, and the
+    /// next poll would have no way to tell which of the two is true.
+    func setFileType(entry: FileTypeRow, enabled: Bool) async throws -> [FileTypeRow]
+
+    /// The shortcut table (`config.getShortcuts`). Untyped on the Go side
+    /// (`[]map[string]any`), so it comes back as `JSONValue` and the view
+    /// narrows it — the seven untyped methods the React side handles with
+    /// `wire.ts` helpers, and the reason `JSONValue` exists.
+    func shortcuts() async throws -> [JSONValue]
+
+    /// Replace the shortcut table (`config.setShortcuts`). Answers the count
+    /// it accepted, which is not the count it was given: a table with a
+    /// duplicate chord accepts fewer rows than it was sent, and a caller that
+    /// assumed they matched would report success for a partial write.
+    func setShortcuts(_ rows: [JSONValue]) async throws -> Int
+
+    /// Zones (`config.getZones`) and the editor that places them.
+    func zones() async throws -> [ZoneRow]
+    func setZones(_ zones: [ZoneRow]) async throws -> Int
+
+    /// The user-rule table (`config.getUserRules`).
+    func userRules() async throws -> [UserRuleRow]
+
+    /// Installed apps for the rule builder's app picker (`core.apps`).
+    func appsForRules() async throws -> [AppRow]
+
+    /// Command-palette entries (`core.commands`). Commands arrive from
+    /// plugins, so a new command must show up with no shell change.
+    func commands() async throws -> [CommandRow]
+
+    /// Plugin manifest facts (`core.pluginMeta`).
+    func pluginMeta() async throws -> [PluginMetaRow]
+
+    /// The trace timeline (`core.traces`) and the erase behind its clear
+    /// button.
+    func traces() async throws -> [TraceRow]
+    func clearTraces() async throws -> [TraceRow]
+
+    /// The file-type catalog (`core.fileTypes`).
+    func fileTypes() async throws -> [FileTypeRow]
+
+    /// The trial in flight (`safety.trialState`) and its three transitions.
+    func trialState() async throws -> TrialState
+    func beginTrial() async throws -> String
+    func confirmTrial() async throws -> String
+    func rollbackTrial() async throws -> String
+
+    /// Panic stop and the way back (`safety.panicStop`, `safety.resume`).
+    func panicStop() async throws -> JSONValue
+    func resume() async throws -> JSONValue
+
     /// The behaviour matrix (`config.getMatrix`).
     func matrix() async throws -> [MatrixRow]
 
@@ -424,6 +494,121 @@ public actor LiveCoreClient: CoreClient {
 
     public func profiles() async throws -> [ProfileRow] {
         try decode([ProfileRow].self, from: await call("core.profiles"), method: "core.profiles")
+    }
+
+    public func applyProfile(id: String) async throws -> JSONValue {
+        try await call("core.profileApply", .object(["id": .string(id)]))
+    }
+
+    public func deactivateProfile(id: String) async throws -> JSONValue {
+        try await call("core.profileDeactivate", .object(["id": .string(id)]))
+    }
+
+    public func setPluginEnabled(id: String, enabled: Bool) async throws {
+        // The scan first, because `plugin.setEnabled` on an unknown id is a
+        // success that did nothing — and a plugin page whose switch works
+        // visually while the plugin is not there is the exact failure the
+        // React bridge closed with the same check.
+        let known = try await plugins()
+        guard known.contains(where: { $0.id == id }) else {
+            throw CoreError.rpc(code: -32602, message: "no such plugin: \(id)", method: "plugin.setEnabled")
+        }
+        _ = try await call(
+            "plugin.setEnabled",
+            .object(["id": .string(id), "enabled": .bool(enabled)])
+        )
+    }
+
+    public func setFileType(entry: FileTypeRow, enabled: Bool) async throws -> [FileTypeRow] {
+        let params = JSONValue.object([
+            "ext": .string(entry.ext),
+            "baseName": .string(entry.baseName),
+            "enabled": .bool(enabled),
+        ])
+        return try decode([FileTypeRow].self, from: await call("core.setFileType", params), method: "core.setFileType")
+    }
+
+    public func shortcuts() async throws -> [JSONValue] {
+        try decode([JSONValue].self, from: await call("config.getShortcuts"), method: "config.getShortcuts")
+    }
+
+    public func setShortcuts(_ rows: [JSONValue]) async throws -> Int {
+        let params = JSONValue.array(rows)
+        let raw = try await call("config.setShortcuts", params)
+        return raw.intValue ?? 0
+    }
+
+    public func zones() async throws -> [ZoneRow] {
+        try decode([ZoneRow].self, from: await call("config.getZones"), method: "config.getZones")
+    }
+
+    public func setZones(_ zones: [ZoneRow]) async throws -> Int {
+        let data = try JSONEncoder().encode(zones)
+        let rows = try JSONDecoder().decode([JSONValue].self, from: data)
+        let raw = try await call("config.setZones", .array(rows))
+        return raw.intValue ?? 0
+    }
+
+    public func userRules() async throws -> [UserRuleRow] {
+        try decode([UserRuleRow].self, from: await call("config.getUserRules"), method: "config.getUserRules")
+    }
+
+    public func appsForRules() async throws -> [AppRow] {
+        try decode([AppRow].self, from: await call("core.apps"), method: "core.apps")
+    }
+
+    public func commands() async throws -> [CommandRow] {
+        try decode([CommandRow].self, from: await call("core.commands"), method: "core.commands")
+    }
+
+    public func pluginMeta() async throws -> [PluginMetaRow] {
+        try decode([PluginMetaRow].self, from: await call("core.pluginMeta"), method: "core.pluginMeta")
+    }
+
+    public func traces() async throws -> [TraceRow] {
+        try decode([TraceRow].self, from: await call("core.traces"), method: "core.traces")
+    }
+
+    /// The erase behind the Activity page's clear button.
+    ///
+    /// It answers with the rows that REMAIN, not a count. That is deliberate
+    /// (bridge.go:228-231): a count after a clear is a number that cannot be
+    /// wrong, so it is the answer that hides a clear that did not happen, and
+    /// the table that re-renders from it is the thing that would show the
+    /// truth.
+    public func clearTraces() async throws -> [TraceRow] {
+        try decode([TraceRow].self, from: await call("core.tracesClear"), method: "core.tracesClear")
+    }
+
+    public func fileTypes() async throws -> [FileTypeRow] {
+        try decode([FileTypeRow].self, from: await call("core.fileTypes"), method: "core.fileTypes")
+    }
+
+    public func trialState() async throws -> TrialState {
+        try decode(TrialState.self, from: await call("safety.trialState"), method: "safety.trialState")
+    }
+
+    public func beginTrial() async throws -> String {
+        let raw = try await call("safety.beginTrial", .object([:]))
+        return raw.stringValue ?? ""
+    }
+
+    public func confirmTrial() async throws -> String {
+        let raw = try await call("safety.confirmTrial", .object([:]))
+        return raw.stringValue ?? ""
+    }
+
+    public func rollbackTrial() async throws -> String {
+        let raw = try await call("safety.rollbackTrial", .object([:]))
+        return raw.stringValue ?? ""
+    }
+
+    public func panicStop() async throws -> JSONValue {
+        try await call("safety.panicStop", .object([:]))
+    }
+
+    public func resume() async throws -> JSONValue {
+        try await call("safety.resume", .object([:]))
     }
 
     public func setRuleEnabled(ruleID: String, enabled: Bool) async throws -> Bool {
