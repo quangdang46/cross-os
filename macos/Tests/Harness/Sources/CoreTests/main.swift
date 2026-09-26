@@ -10,4 +10,5 @@
 
 try await runWireSuite()
 try await runClientSuite()
+try await runGeometrySuite()
 report()

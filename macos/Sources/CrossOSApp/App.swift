@@ -17,6 +17,11 @@ struct CrossOSApp {
         // not evidence that it drew anything, and the previous shell's defects
         // were all invisible in a passing test suite and visible only by
         // looking. Printing the tree is looking, in a form CI can read.
+        if CommandLine.arguments.contains("--geometry") {
+            probeGeometry()
+            exit(0)
+        }
+
         if CommandLine.arguments.contains("--describe") {
             app.setActivationPolicy(.accessory)
             let delegate = AppDelegate()
@@ -91,5 +96,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         shell?.stopPolling()
+    }
+}
+
+// A geometry probe, for the same reason `--describe` exists: the switcher's
+// grid is arithmetic over widths, and arithmetic is worth checking without a
+// window in front of it. The expected values live in the test suite, which is
+// the place a number that somebody will later argue about belongs.
+extension CrossOSApp {
+    static func probeGeometry() {
+        let cases: [(String, [CGFloat], CGFloat, CGFloat, CGFloat)] = [
+            ("3x300 @720", [300, 300, 300], 100, 8, 720),
+            ("3x300 @640", [300, 300, 300], 100, 8, 640),
+            ("300+300+84 @720", [300, 300, 84], 100, 8, 720),
+            ("900 @720", [900], 100, 8, 720),
+            ("3x210 pad0 @640", [210, 210, 210], 100, 0, 640),
+            ("3x210 pad8 @640", [210, 210, 210], 100, 8, 640),
+            ("3x215 pad0 @640", [215, 215, 215], 100, 0, 640),
+            ("empty", [], 100, 8, 720),
+            ("6x119.5 @720", [119.5, 119.5, 119.5, 119.5, 119.5, 119.5], 100, 8, 720),
+        ]
+        for (name, widths, height, padding, maxWidth) in cases {
+            let g = tileGrid(.init(
+                widths: widths, tileHeight: height,
+                padding: padding, widthMax: maxWidth
+            ))
+            print("\(name): rows=\(g.rows.count) maxX=\(g.maxX) maxY=\(g.maxY)")
+        }
     }
 }
