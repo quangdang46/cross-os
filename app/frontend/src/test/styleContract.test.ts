@@ -46,6 +46,25 @@ describe('the token cascade', () => {
     expect(new Set(surfaces).size).toBeGreaterThanOrEqual(3)
   })
 
+  it('derives the control boundary from ink, because ButtonBorder is white', () => {
+    // --line-strong OWES the 3:1 of WCAG 1.4.11: it is the boundary of an
+    // operable control. It was bridged to `ButtonBorder`, and ButtonBorder
+    // reads `rgb(255, 255, 255)` in WebKit — measured on the real engine
+    // against a bare `background: ButtonBorder` element, so the number is the
+    // colour and not a composite. This app's controls are white, so the
+    // boundary was 1.00:1 against the surface it exists to make findable, and
+    // invisible: the defect the token was introduced to fix, reintroduced by
+    // the block that introduced it.
+    //
+    // Asserted here because the stylesheet is the only place it can be caught:
+    // jsdom loads no stylesheet, Chrome claims to support `AccentColor` and
+    // resolves none of it, and the value is correct-looking in every one of
+    // those. It is only wrong in the engine that ships.
+    const bridged = CSS.slice(at('@supports (color: AccentColor)'), at('@media (prefers-contrast'))
+    expect(bridged).not.toMatch(/--line-strong:\s*ButtonBorder/)
+    expect(bridged).toMatch(/--line-strong:\s*color-mix\(in srgb, CanvasText \d+%/)
+  })
+
   it('bridges all three ink tiers to the OS', () => {
     // --fg-tertiary was never in the @supports block, so timestamps and caps
     // kept a hardcoded hex while the ink around them followed the appearance.

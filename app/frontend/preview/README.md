@@ -72,6 +72,35 @@ computed outline plus a screenshot. This is the only way to see a focus ring:
 `:focus-visible` deliberately does not match a programmatic focus, so the
 `?focus=` param is a trap for exactly the check it looks like it can do.
 
+## The real engine
+
+Everything above is Chrome. The app ships in a WKWebView, and Chrome is not it:
+Chrome REPORTS supporting `AccentColor` and resolves none of its keywords, so
+the whole palette there collapses to the initial value. That is a property of
+Chrome, not of the app, and it is why `?flat=1` exists.
+
+`preview/webkit-probe.swift` reads the resolved values out of a real WKWebView —
+the same engine the shipped window uses — with no screenshot and no pixels:
+
+```bash
+swiftc -O preview/webkit-probe.swift -o /tmp/webkit-probe
+/tmp/webkit-probe "http://127.0.0.1:5299/preview/index.html?state=ready&page=Home"
+/tmp/webkit-probe "…page=Shortcuts" --contrast      # WCAG 1.4.11, live elements
+/tmp/webkit-probe "…page=Home" --dark
+```
+
+**What it can and cannot settle.** It found the one defect no other harness
+could: `--line-strong` was bridged to `ButtonBorder`, which reads
+`rgb(255, 255, 255)` in WebKit, so every input, select and button in the
+shipped app had a white border on a white card — 1.00:1 where 1.4.11 asks 3:1.
+Chrome never showed it, because Chrome never resolved the keyword at all.
+
+It CANNOT settle dark mode. Setting `NSApplication.appearance` flips
+`prefers-color-scheme` but the CSS system colour keywords do not follow it in a
+headless process: a bare `background: Canvas` reads white in both. A control
+page (`_probe.html`, which the probe prefers over its own token list) is the
+check — when it disagrees with the app, the probe is wrong, not the app.
+
 ## Screenshots
 
 ```bash

@@ -365,14 +365,27 @@
     --fg-primary: CanvasText;
     --fg-secondary: GrayText;
     --fg-tertiary: color-mix(in srgb, CanvasText 45%, transparent);
-    /* ButtonBorder is macOS's own control boundary, and it is the token that
-       OWES the 3:1 of 1.4.11, so it is the one that bridges to it. The two
-       weaker lines have no system colour and keep deriving from --fg-primary,
-       which now resolves to CanvasText, so they follow the user's appearance
-       too. The old file bridged --line, which was doing this job and two
-       weaker ones at the same value; the obligation is what moves. */
-    --line-strong: ButtonBorder;
-    --line-hairline: color-mix(in srgb, ButtonBorder 70%, transparent);
+    /* --line-strong OWES the 3:1 of WCAG 1.4.11, because it is the boundary of
+       an operable control: a resting input, a select, a button, a switch track.
+       It is derived from the ink rather than bridged to ButtonBorder, and that
+       is a correction, not a preference.
+
+       ButtonBorder reads `rgb(255, 255, 255)` in WebKit — measured on the real
+       engine, against a bare `background: ButtonBorder` element so the number
+       is the colour and not a composite (preview/webkit-probe.swift). A
+       control on this app is white, so a white boundary is 1.00:1 against the
+       surface it is supposed to be findable on, and the border is invisible:
+       the exact defect the token was introduced to fix, reintroduced by the
+       block that introduced the token. ButtonBorder is macOS's boundary for
+       controls on a NATURAL-coloured control face, and this app's controls are
+       its own white.
+
+       Fifty per cent of the ink is the hex block's own 3.27:1 tier, so the two
+       themes now state the same obligation and the bridged one clears it with
+       room. The other two tiers never needed a system colour and still do not
+       have one. */
+    --line-strong: color-mix(in srgb, CanvasText 50%, transparent);
+    --line-hairline: color-mix(in srgb, CanvasText 14%, transparent);
 
     /* FOUR SURFACES, as in the hex block above. These three were all
        ButtonFace, which made the card, the nested list inside it and the nav
