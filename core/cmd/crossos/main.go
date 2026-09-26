@@ -885,6 +885,11 @@ func (c *Core) methods() map[string]ipc.Handler {
 		// The wizard's one write, beside its read: the derived steps cannot
 		// record that the user is finished, so the flag gets its own method.
 		"core.onboardingComplete": c.handleOnboardingComplete,
+		// The settings-page list, served. Until this existed the page list
+		// lived in the shell process, so the daemon could not say what pages
+		// it offered and a client in another language could not see any of
+		// them. See pages.go.
+		"core.pages": c.handleCorePages,
 		"core.apps":               c.handleApps,
 		// The Alt+Tab switcher (ws-3): the list the switcher page draws, the
 		// bounded long-poll it waits on, and the focus a commit performs.

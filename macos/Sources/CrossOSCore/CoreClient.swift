@@ -28,10 +28,21 @@ public protocol CoreClient: Sendable {
     /// The daemon's recent log lines (`core.eventLogs`).
     func eventLogs() async throws -> [String]
 
-    // The rest of the surface, as the pages need it. Added in phase 2 with the
-    // pages that call them — a method nothing calls is a method nothing tests,
-    // which is the exact defect `TestEveryRegisteredKindIsReachable` exists to
-    // catch on the renderer side.
+    /// The settings pages the daemon is serving, in the order the nav will
+    /// draw them.
+    ///
+    /// This used to be a shell-local memoized seed with no RPC behind it
+    /// (`app/backend/service.go:32-35`), which meant a client in another
+    /// language could not see a single page — the fifteen core ones lived in
+    /// Go constants in `app/backend/pages.go` and were never sent anywhere.
+    /// They now live beside the plugin API (`core/pkg/pluginapi/pages.go`) and
+    /// the daemon serves them as `core.pages`.
+    func pages() async throws -> [Page]
+
+    // The rest of the surface, as the pages need it. Added with the pages that
+    // call them — a method nothing calls is a method nothing tests, which is
+    // the exact defect `TestEveryRegisteredKindIsReachable` exists to catch on
+    // the renderer side.
 }
 
 // MARK: - Errors
@@ -356,5 +367,9 @@ public actor LiveCoreClient: CoreClient {
 
     public func eventLogs() async throws -> [String] {
         try decode([String].self, from: await call("core.eventLogs"), method: "core.eventLogs")
+    }
+
+    public func pages() async throws -> [Page] {
+        try Page.decodeList(await call("core.pages"))
     }
 }

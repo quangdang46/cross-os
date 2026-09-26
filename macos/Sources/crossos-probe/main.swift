@@ -33,6 +33,14 @@ func emit(_ value: some Encodable) {
     print(String(decoding: data, as: UTF8.self))
 }
 
+/// Pad to a column, so a list of pages reads as a table in a terminal instead
+/// of a ragged list.
+extension String {
+    func padded(_ width: Int) -> String {
+        count >= width ? self : self + String(repeating: " ", count: width - count)
+    }
+}
+
 /// Print the error the way a person needs to read it: the description carries
 /// the daemon's own message and the method that failed, and a socket error on
 /// a machine where nothing is running should say so rather than showing an
@@ -63,6 +71,23 @@ do {
 
     case "events":
         emit(try await client.eventLogs())
+
+    case "pages":
+        // The list a nav is built from. Summarised rather than dumped: fifteen
+        // pages with their whole schemas is a wall of JSON, and what a person
+        // checking this wants is the order, the group each sits in, and which
+        // page a fresh profile lands on.
+        let pages = try await client.pages()
+        for page in pages {
+            let kinds = (page.schema?.controls ?? []).map(\.kind).joined(separator: ",")
+            let flags = [
+                page.firstRun ? "firstRun" : nil,
+                page.symbol.isEmpty ? nil : "symbol=\(page.symbol)",
+            ].compactMap { $0 }.joined(separator: " ")
+            print("\(page.id.padded(22)) group=\(page.group.padded(11)) order=\(page.order) \(flags)")
+            print("  controls: \(kinds.isEmpty ? "(none)" : kinds)")
+        }
+        print("\n\(pages.count) pages")
 
     case "wait":
         // The long-poll, with the budget it will really respect. `triggered:

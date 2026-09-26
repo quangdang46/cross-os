@@ -22,6 +22,7 @@ public actor SpiedCoreClient: CoreClient {
     private var readinessAnswer: [ReadinessRow] = []
     private var eventLogsAnswer: [String] = []
     private var triggerAnswer = SwitcherTrigger(triggered: false)
+    private var pagesAnswer: [Page] = []
 
     public init() {}
 
@@ -35,6 +36,7 @@ public actor SpiedCoreClient: CoreClient {
     public func setReadiness(_ value: [ReadinessRow]) { readinessAnswer = value }
     public func setEventLogs(_ value: [String]) { eventLogsAnswer = value }
     public func setTrigger(_ value: SwitcherTrigger) { triggerAnswer = value }
+    public func setPages(_ value: [Page]) { pagesAnswer = value }
 
     public func count(of method: String) -> Int {
         callLog.filter { $0 == method }.count
@@ -70,6 +72,11 @@ public actor SpiedCoreClient: CoreClient {
     public func eventLogs() async throws -> [String] {
         record("core.eventLogs")
         return eventLogsAnswer
+    }
+
+    public func pages() async throws -> [Page] {
+        record("core.pages")
+        return pagesAnswer
     }
 }
 
