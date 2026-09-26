@@ -239,8 +239,9 @@ describe('spacing', () => {
   // citation changes with it and this list loses its entry.
   const PORTED = [
     'padding: 1px var(--sp-2)',      // a chip's own vertical padding
-    'padding: 1px 8px',              // ditto
+    'padding: 1px 7px',              // ditto
     'padding: 3px 7px',              // MMField, DesignSystem.swift:451-482
+    'padding: 3px var(--sp-4)',      // ditto — the button, block axis only
     'padding: 3px 0',                // MMField, without its inline padding
     'padding: 7px var(--sp-5h)',     // PackImportSheet.swift:253-254, the step row
     'padding: var(--sp-4h) 9px',     // a list row

@@ -808,8 +808,15 @@ body {
 }
 
 .btn--primary {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--accent-hover);
+  /* The same bevel, over the accent: a percent of white at the top and the
+     accent's own hover step at the bottom. An accent button with a flat fill
+     next to bevelled neutrals is the most common way a native button set stops
+     looking native. */
+  background: linear-gradient(
+    color-mix(in srgb, var(--accent) 88%, #fff),
+    var(--accent)
+  );
   color: var(--fg-onaccent);
   font-weight: 600;
 }
@@ -821,6 +828,10 @@ body {
 .btn--ghost {
   border-color: transparent;
   background: none;
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--bg-sunken);
 }
 
 .btn--sm {
@@ -1612,14 +1623,22 @@ body {
   color: var(--fg-secondary);
 }
 
+/* A chip is a CAPSULE, and a small one. It was a 1px-bordered grey pill at
+   11px, which is the web badge every framework ships — bigger than the text it
+   sits beside, ringed rather than filled, and carrying a border that competes
+   with the row's own. macOS draws these as a soft filled capsule with no
+   border, tighter than the text around it and in the SECONDARY tone, so they
+   read as a qualifier rather than as an object. */
 .ctl-chip {
   display: inline-block;
-  padding: 1px 8px;
-  border: 1px solid var(--line-default);
+  padding: 1px 7px;
+  border: 0;
   border-radius: 999px;
-  background: var(--bg-sunken);
+  background: var(--badge-wash);
   color: var(--fg-secondary);
   font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
   white-space: nowrap;
 }
 
@@ -1797,17 +1816,21 @@ body {
 }
 
 .ctl-fact-value {
-  /* MMField, DesignSystem.swift:451-482 — MMColor.field maps to
-     --bg-sunken, and its 9x4 padding, control radius and hairline stroke come
-     across as they are. The 150pt width does NOT: this panel's value column is
-     fluid, because its values are a version, a sentence and a permission
-     error rather than three equal tokens. */
+  /* MMField, DesignSystem.swift:451-482 draws its value as a FIELD — a
+     sunken well, a hairline stroke, a radius. The chrome came across as it
+     is; the field itself should not have. MMField IS an editable form, and a
+     field on screen is the promise that it can be edited. This is a fact
+     pane: a version, a permission sentence, an error string. Nothing here is
+     editable, and the stroke sat at --line-default (2.35:1) around a
+     read-only value on a white card — so the pane read as a column of text
+     inputs, which is the clearest possible signal that a control is missing
+     the editor's intent behind it.
+
+     What MMField's row really contributes is the TYPE and the alignment, and
+     those stay: 13px primary ink, beside the key at the lockRow's 11pt
+     spacing. */
   flex: 1 1 auto;
   min-width: 0;
-  padding: 4px 9px;
-  border: 1px solid var(--line-default);
-  border-radius: var(--radius-control);
-  background: var(--bg-sunken);
   color: var(--fg-primary);
   font-size: 13px;
   overflow-wrap: break-word;
@@ -1867,25 +1890,38 @@ body {
 .ctl-actions button,
 .ctl-button {
   appearance: none;
-  min-height: 26px;
+  min-height: 28px;
   /* A button's own extent is a control boundary, so --line-strong (1.4.11).
      Every button in the shell is this one rule, which is why P0 can move the
      whole set in a single line: DESIGN.md §1 row 8 wants three tiers, and the
      tiering lands on top of this one. */
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-control);
-  background: var(--bg-window);
+  /* The VERTICAL GRADIENT is the tell. A macOS push button is a bevelled slab
+     lit from above — an inset white highlight on the top edge over a fill that
+     is a shade darker at the bottom — and a flat fill is the single clearest
+     sign of a control drawn in CSS rather than drawn by a control kit. It is
+     two stops a percent apart, so it reads as a bevel at a glance and as a
+     flat colour to anyone looking for it. */
+  background: linear-gradient(var(--bg-raised), var(--bg-window));
   color: var(--fg-primary);
-  padding: 3px var(--sp-5h);
+  padding: 3px var(--sp-4);
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
-  transition: background-color 120ms ease;
+  /* `background-image`, not `background-color`: the fill is a gradient, and a
+     gradient is an image — transitioning the colour property transitions
+     nothing here and the hover would snap instead of easing. The property
+     name changed when the fill did, and the two have to move together. */
+  transition: background-image 120ms ease;
 }
 
-.ctl-actions button:hover,
-.ctl-button:hover {
-  background: var(--bg-sunken);
+.ctl-actions button:hover:not(:disabled),
+.ctl-button:hover:not(:disabled) {
+  /* Darken the BOTTOM stop rather than replacing both, so the bevel the button
+     now has survives the hover. A flat hover fill over a bevelled button is
+     what makes a hover read as the button being replaced. */
+  background: linear-gradient(var(--bg-raised), var(--bg-sunken));
 }
 
 /* --- the disabled state ----------------------------------------------------
