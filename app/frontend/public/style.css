@@ -578,10 +578,15 @@ body {
 
 /* One focus treatment for everything, including controls this file has never
    seen. Never outline: none anywhere: the ring is the only way a keyboard
-   user knows where they are. */
+   user knows where they are.
+
+   It reads the three focus tokens rather than repeating their values, which is
+   what makes them tokens: they were declared at :111-113 and nothing read
+   them, so the ring was 2px of accent at an offset of 2px in a hardcoded
+   declaration that would have had to be found separately to change. */
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
 .window {
