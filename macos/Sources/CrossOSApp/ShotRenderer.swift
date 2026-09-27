@@ -204,11 +204,33 @@ enum ShotRenderer {
     /// controls with cells too, and both draw the wrong thing through this
     /// path: an image view draws a placeholder frame, a table view draws its
     /// scroller chrome over its own rows.
+    ///
+    /// **A button inside a table's row is skipped**, and the render is what
+    /// showed why: an `NSTableRowView` reports the frame of the ROW, so a
+    /// checkbox in the last column drew a 700pt-wide box at the row's own x —
+    /// a stripe down the middle of the table, sitting where the scrollbar is.
+    /// The table's own rows come through `dataWithPDF` instead, which is why
+    /// the matrix's chords and actions are legible and its column of
+    /// checkboxes is a column of boxes somewhere else.
+    ///
+    /// So this collects the buttons that are not inside a table, which is
+    /// every button on a settings page and none of a table cell — and the
+    /// table's checkboxes render from their row, at the row's position, by
+    /// AppKit rather than by this file.
     @MainActor
     private static func collectCells(
         _ node: NSView,
         root: NSView
     ) -> [(NSCell, NSRect)] {
+        // A button inside a table's row reports the ROW's frame, so drawing it
+        // from here paints a stripe where the row is rather than a checkbox
+        // where the column is. Those are AppKit's to draw, and the row's own
+        // content arrives through `dataWithPDF` — which is why the matrix's
+        // chords and actions are legible and its column of checkboxes was a
+        // column of boxes somewhere else.
+        if node is NSTableView || node is NSTableRowView || node is NSOutlineView {
+            return []
+        }
         var out: [(NSCell, NSRect)] = []
         if let button = node as? NSButton, let cell = button.cell {
             out.append((cell, button.convert(button.bounds, to: root)))

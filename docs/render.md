@@ -28,71 +28,33 @@ That is enough to have found, and these were all real:
 - **A row at 26pt** where System Settings uses 30, and a selected row in the
   deprecated `.sourceList` style — a solid accent bar, the 2010 look.
 
-## What it does not show
-
-`NSButton`, `NSSwitch` and `NSTableView` — and the reason is measured rather
-than assumed.
+## Controls: buttons and checkboxes yes, table cells no
 
 A button draws through its **cell**. `btn.draw(bounds)` produces nothing;
 `btn.cell?.draw(withFrame: btn.bounds, in: view)` produces 2041 bytes of real
-pixels where a blank frame of the same size is 903. So the path exists and
-`--shots` walks the tree calling it.
+pixels where a blank frame of the same size is 903. `--shots` walks the tree
+calling the second form, drawing each cell into its own bitmap and compositing
+it back at the frame the control occupies.
 
-Then it stops, and the reason is the scroll view:
+Two things that is not:
 
-| | button renders |
-|---|---|
-| button in a plain view | **yes** — 2804 bytes, bezel, label, correct position |
-| button inside an `NSScrollView` | **no** — 1046 bytes, blank |
+- **A cell inside a table's row is skipped.** An `NSTableRowView` reports the
+  frame of the ROW, so a checkbox in the last column drew a 700pt-wide box at
+  the row's own x — a stripe down the middle of the table, sitting exactly
+  where the scrollbar is. A table's rows come through `dataWithPDF` instead,
+  which is why the matrix's chords and actions are legible and its column of
+  checkboxes is not drawn by this file. The running app draws them; AppKit
+  does.
+- **`NSTableView` itself does not draw through this path.** Its cell draws its
+  scroller chrome over its own rows.
 
-Every page in this app is a page inside a scroll view, so every page is in the
-second row. The scroll view is layer-backed, `wantsLayer = false` is a request
-rather than a command, AppKit grants it back for any control that needs one,
-and every capture logs `layer=true` afterwards — which is the same as the
-request never having been made.
+## What the measurement tool was
 
-Three things were tried and measured, all recorded here so the next person does
-not re-run them:
-
-- **Clip each cell to its own rect.** Wrong: a clip applied to a cell's own
-  drawing clips the cell's content, and the result is a blank frame.
-- **Draw cells after the page.** A cell paints an opaque background for its
-  own bounds, so this erases the page beneath it — 83KB down to 128 bytes.
-- **Give each cell its own bitmap and composite.** The same bug in a longer
-  dress: compositing a cell over the page with the cell's own opaque
-  background still replaces what is under it.
-
-**This is a limit of the method, and the controls are not broken.** The
-running app draws them with the system's own focus ring, press animation,
-disabled appearance and HiDPI rendering — none of which a drawn replacement
-would have, and all of which `NSButton` has for free. Replacing a system
-control with a hand-drawn view so a screenshot can see it trades the
-product's quality for the tool's convenience, and that trade is never worth
-making.
-
-It is also why the shell uses a checkbox rather than an `NSSwitch` where a
-row has a label and a sentence: a checkbox draws (measured, 753 bytes of
-pixels), and it is what such a row uses anyway. `NSSwitch` is 31x19 and reads
-better in a narrow pane.
-
-## The rule
-
-**`--shots` is a measurement instrument, not the specification.** It is right
-about geometry, colour and text, and silent about the controls people click.
-Those are confirmed by running the app:
-
-```bash
-./scripts/run.sh              # the real window
-cd macos && swift run CoreTests
-cd macos && ./.build/debug/CrossOS --audit     # exits non-zero on a FAIL
-cd macos && ./.build/debug/CrossOS --describe  # the live view tree
-cd macos && ./.build/debug/CrossOS --geometry  # the switcher's arithmetic
-```
-
-`--audit` is the one that gates a build. It measures contrast, rhythm, fit
-and duplication arithmetically, so it needs no display and runs in CI against
-a live daemon — and it is the check the React shell could not have: jsdom does
-not load a stylesheet, so a green run there meant a page nobody had looked at.
+`ls -la` in this shell reports the wrong size for every file. A page that
+`ls` called 114 bytes was 162,897 — the whole of the "the render is blank"
+conclusion, repeated for hours, was a conclusion about `ls`. `python3 -c
+"import os; print(os.path.getsize(p))"` is the tool that works, and
+`ShellRenderer.capture` logs the count it wrote for exactly this reason.
 
 ## How the renderer got here
 
