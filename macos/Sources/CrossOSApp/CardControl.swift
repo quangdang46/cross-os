@@ -26,6 +26,10 @@ class CardControl: NSStackView {
     init(control: Control, context: ControlContext) {
         super.init(frame: .zero)
         orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
+        orientation = .vertical
         // `.leading` and not `.width`: a `.width`-aligned stack positions its
         // child on the cross axis by the CHILD's own width, so a 427pt card in
         // an 810pt control sat at x=383 — the card was the right size and on
@@ -148,9 +152,13 @@ class CardControl: NSStackView {
 /// The rule is that "No data" is a failure of the state and not a description
 /// of the situation. A person reading it should learn the cause and the one
 /// action that changes it.
-final class ErrorView: NSView {
+final class ErrorView: NSStackView {
     init(headline: String, detail: String) {
         super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
 
         let headlineField = NSTextField(labelWithString: headline)
         headlineField.font = Typeface.bodyStrong

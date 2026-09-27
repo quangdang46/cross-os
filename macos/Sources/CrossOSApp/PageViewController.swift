@@ -227,9 +227,13 @@ public final class PageViewController: NSViewController {
 /// page that declared nothing is a daemon-side fact somebody can act on, and
 /// naming it is the difference between a report they can file and one they
 /// cannot.
-final class EmptyStateView: NSView {
+final class EmptyStateView: NSStackView {
     init(headline: String, detail: String) {
         super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
 
         let headlineField = NSTextField(labelWithString: headline)
         headlineField.font = Typeface.bodyStrong

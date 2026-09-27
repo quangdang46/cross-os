@@ -279,66 +279,43 @@ final class ObserveToggleView: CardControl {
 }
 
 @MainActor
-private final class ObserveBody: NSView {
+/// The Observe page's one toggle, and what the recorder is keeping.
+///
+/// A `RowView` and not a bespoke view: the label and its sentence on the left,
+/// the switch on the right, and the row is a stack so it measures itself from
+/// the two of them. The mode sentence is what makes this page safe to read —
+/// a toggle that says "records key events, nothing else" tells a person what
+/// the product will keep about them, and a bare switch labelled "Record what
+/// CrossOS sees" does not.
+private final class ObserveBody: NSStackView {
     init(state: ObserveStateRow) {
         super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
 
         let toggle = NSSwitch()
         toggle.state = state.observe ? .on : .off
-        toggle.setContentHuggingPriority(.required, for: .horizontal)
 
-        let title = NSTextField(labelWithString: "Record what CrossOS sees")
-        title.font = Typeface.body
-
-        // What the mode BUYS, not what it is. `mode` is reported rather than
-        // settable on purpose — a page that could set it would be a second,
-        // quieter way to decide what a product that watches every keystroke
-        // keeps — so the copy has to say what each one is for.
-        let detail = NSTextField(labelWithString: Self.describe(mode: state.mode))
-        detail.font = Typeface.caption
-        detail.textColor = Palette.secondaryInk
-        detail.lineBreakMode = .byWordWrapping
-        detail.maximumNumberOfLines = 0
-        detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let row = NSStackView(views: [title, toggle])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = Gap.group
-
-        let column = NSStackView(views: [row, detail])
-        column.orientation = .vertical
-        column.alignment = .leading
-        column.spacing = Gap.tight
-        column.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(column)
-        NSLayoutConstraint.activate([
-            column.leadingAnchor.constraint(equalTo: leadingAnchor),
-            column.trailingAnchor.constraint(equalTo: trailingAnchor),
-            column.topAnchor.constraint(equalTo: topAnchor),
-            // The BOTTOM pin, and its absence is why three plugin rows
-            // overlapped by 14pt each in the first audit run.
-            //
-            // A view pinned leading/trailing/top and nothing else has no
-            // height: Auto Layout is free to give it zero and let the
-            // content overflow, and the content does — the switch on row two
-            // lands on top of the switch on row one. The audit named it as
-            // "NSSwitch and NSSwitch overlap by 54x14 [window A x=306 y=-11 |
-            // window B x=306 y=-21]", and the ten points between them were
-            // the ten points each row claimed for itself and none of them
-            // gave back.
-            column.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
-        ])
+        let row = RowView(
+            label: "Record what CrossOS sees",
+            detail: Self.describe(mode: state.mode),
+            control: toggle
+        )
+        addArrangedSubview(row)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("ObserveBody is created in code") }
 
-    /// Say what the mode does, in the daemon's words where they exist.
+    /// Say what the mode DOES, in the daemon's words where they exist.
     ///
-    /// A mode named without its consequence is a number. "Records key events
-    /// only" tells somebody what the product will keep about them, which is
-    /// the only reason the field is reported rather than settable.
+    /// A mode named without its consequence is a number. "Records key events,
+    /// nothing else" tells somebody what the product will keep about them,
+    /// which is the only reason the field is reported rather than settable —
+    /// a page that could set it would be a second, quieter way to decide what
+    /// a product that watches every keystroke keeps.
     static func describe(mode: String) -> String {
         switch mode {
         case "keys": return "Records which keys were pressed, and nothing else."

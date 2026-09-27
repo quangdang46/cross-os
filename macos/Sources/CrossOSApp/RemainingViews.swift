@@ -123,9 +123,13 @@ final class ZoneEditorView: CardControl {
 
 /// One zone: a name and four numbers.
 @MainActor
-private final class ZoneRowView: NSView {
+private final class ZoneRowView: NSStackView {
     init(zone: ZoneRow, onChange: @escaping (ZoneRow) -> Void) {
         super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
 
         var current = zone
         let name = NSTextField(string: zone.name)

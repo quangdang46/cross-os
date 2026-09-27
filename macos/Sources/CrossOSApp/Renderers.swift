@@ -163,9 +163,13 @@ enum Kind: String {
 /// Not a blank. A row that names the kind, so a page carrying a control from a
 /// newer plugin produces a visible and explicable gap rather than a hole in
 /// the middle of the page.
-final class UnsupportedView: NSView {
+final class UnsupportedView: NSStackView {
     init(kind: String, id: String) {
         super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
 
         let headline = NSTextField(labelWithString: id.isEmpty
             ? "Unsupported control: \(kind)"
@@ -223,6 +227,10 @@ final class UnsupportedView: NSView {
 class Card: NSStackView {
     init(title: String? = nil) {
         super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
         translatesAutoresizingMaskIntoConstraints = false
         orientation = .vertical
         // `.leading`, NOT `.width`.
@@ -330,12 +338,38 @@ class Card: NSStackView {
 /// 50px label. Here the value is pinned to the row's trailing edge with a
 /// constraint and the label takes the rest, so a short label and a long one
 /// both land on the same line and neither reserves space for the other.
-class RowView: NSView {
+/// One row of a settings card: a label, a sentence about it, and a control on
+/// the right.
+///
+/// **The shape every reference agrees on.** Linear, Devin, Langdock, Fabric,
+/// Mistral, Plain: the label is set at the left with its explanation directly
+/// beneath in a lighter weight, the control sits alone on the shared right
+/// edge, and a hairline separates one row from the next. The row is 44pt
+/// because the label and its sentence need it — a single line is a web row, and
+/// a row whose description is where the sentence is has no room for one.
+///
+/// A stack, because a plain `NSView` holding a pinned column measures the
+/// column's absence rather than its content — which is how six other views in
+/// this app rendered as nothing.
+class RowView: NSStackView {
     let label = NSTextField(labelWithString: "")
     let detail = NSTextField(labelWithString: "")
 
-    init(label text: String, detail subtitle: String = "") {
+    /// The control on the right. A row with no control is a heading, and a
+    /// heading is not a row.
+    var trailing: NSView?
+
+    init(label text: String, detail subtitle: String = "", control: NSView? = nil) {
         super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
+        orientation = .horizontal
+        alignment = .firstBaseline
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
+        self.trailing = control
 
         label.stringValue = text
         label.font = Typeface.body
@@ -354,19 +388,23 @@ class RowView: NSView {
             detail.maximumNumberOfLines = 0
         }
 
-        let column = NSStackView(views: subtitle.isEmpty ? [label] : [label, detail])
-        column.orientation = .vertical
-        column.alignment = .leading
-        column.spacing = 1
-        column.translatesAutoresizingMaskIntoConstraints = false
+        // The label and its sentence on the LEFT, the control on the right, and
+        // a gap between them that the row fills. That is the whole row: a
+        // settings row is two texts and a control, and the two texts are a
+        // column because a sentence describes the word above it.
+        let texts = NSStackView(views: subtitle.isEmpty ? [label] : [label, detail])
+        texts.orientation = .vertical
+        texts.alignment = .leading
+        texts.spacing = 1
+        texts.translatesAutoresizingMaskIntoConstraints = false
+        texts.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        texts.widthAnchor.constraint(greaterThanOrEqualToConstant: 200).isActive = true
+        addArrangedSubview(texts)
+        if let control {
+            control.setContentHuggingPriority(.required, for: .horizontal)
+            addArrangedSubview(control)
+        }
 
-        addSubview(column)
-        NSLayoutConstraint.activate([
-            column.leadingAnchor.constraint(equalTo: leadingAnchor),
-            column.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            column.topAnchor.constraint(equalTo: topAnchor),
-            column.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
     }
 
     @available(*, unavailable)
@@ -398,7 +436,7 @@ extension NSView {
 /// registry did not know, and the shell said so in words rather than leaving a
 /// hole: "finder — unsupported control: menuList". Naming the gap is right;
 /// leaving it there once the daemon serves the data is not.
-final class MenuListView: NSView, TableContent {
+final class MenuListView: NSStackView, TableContent {
     let columns: [(String, CGFloat)] = [("Item", 260), ("Source", 180)]
     /// Filled by the async load below, so it cannot be a `let`: a control
     /// whose data arrives from the daemon has to be able to change once, and
@@ -411,6 +449,10 @@ final class MenuListView: NSView, TableContent {
         self.service = context.service
         self.note = context.note
         super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
 
         let card = Card()
         let column = NSStackView()

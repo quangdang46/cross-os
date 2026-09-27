@@ -48,9 +48,13 @@ final class ProfileListView: CardControl {
 }
 
 @MainActor
-private final class ProfileCard: NSView {
+private final class ProfileCard: NSStackView {
     init(profile: ProfileRow, service: any CoreClient, note: @escaping @Sendable (String) -> Void) {
         super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
 
         let title = NSTextField(labelWithString: profile.label)
         title.font = Typeface.bodyStrong
@@ -189,7 +193,7 @@ final class FileTypeListView: CardControl {
 }
 
 @MainActor
-private final class FileTypeTable: NSView, TableContent {
+private final class FileTypeTable: NSStackView, TableContent {
     let columns: [(String, CGFloat)] = [
         ("Name", 180), ("Extension", 110), ("Menu title", 180), ("On", 44)
     ]
@@ -203,6 +207,10 @@ private final class FileTypeTable: NSView, TableContent {
         self.service = service
         self.note = note
         super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
         let table = TableView(content: self)
         addSubview(table)
         NSLayoutConstraint.activate([
@@ -291,7 +299,7 @@ final class PipelineTraceView: CardControl {
 }
 
 @MainActor
-private final class TraceTable: NSView, TableContent {
+private final class TraceTable: NSStackView, TableContent {
     let columns: [(String, CGFloat)] = [
         ("When", 150), ("Chord", 120), ("Decision", 200), ("App", 160)
     ]
@@ -304,6 +312,10 @@ private final class TraceTable: NSView, TableContent {
         self.service = service
         self.note = note
         super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
 
         let table = TableView(content: self)
         addSubview(table)
@@ -381,9 +393,13 @@ final class PluginListView: CardControl {
 }
 
 @MainActor
-private final class PluginRow: NSView {
+private final class PluginRow: NSStackView {
     init(meta: PluginMetaRow, isOn: Bool, service: any CoreClient, note: @escaping @Sendable (String) -> Void) {
         super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
 
         let toggle = NSSwitch()
         toggle.state = isOn ? .on : .off
