@@ -69,6 +69,15 @@ do {
     case "readiness":
         emit(try await client.readiness())
 
+    case "matrix":
+        emit(try await client.matrix())
+
+    case "profiles":
+        emit(try await client.profiles())
+
+    case "pluginMeta":
+        emit(try await client.pluginMeta())
+
     case "zones":
         emit(try await client.zones())
 

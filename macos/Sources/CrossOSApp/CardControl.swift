@@ -16,7 +16,7 @@ import CrossOSCore
 /// its visual weight with a state is an error people learn to skip — and the
 /// row that actually matters is the one that would be skipped.
 @MainActor
-class CardControl: NSView {
+class CardControl: NSStackView {
     private let heading = NSTextField(labelWithString: "")
     private let subtitle = NSTextField(labelWithString: "")
     private let bodyStack = NSStackView()
@@ -25,6 +25,13 @@ class CardControl: NSView {
 
     init(control: Control, context: ControlContext) {
         super.init(frame: .zero)
+        orientation = .vertical
+        // `.leading` and not `.width`: a `.width`-aligned stack positions its
+        // child on the cross axis by the CHILD's own width, so a 427pt card in
+        // an 810pt control sat at x=383 — the card was the right size and on
+        // the wrong half of the page. The width is stated below instead.
+        alignment = .leading
+        distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
 
         heading.stringValue = control.label.isEmpty ? control.id : control.label
@@ -56,41 +63,19 @@ class CardControl: NSView {
         self.card = card
         self.cardColumn = column
 
-        addSubview(card)
-        NSLayoutConstraint.activate([
-            card.leadingAnchor.constraint(equalTo: leadingAnchor),
-            card.trailingAnchor.constraint(equalTo: trailingAnchor),
-            card.topAnchor.constraint(equalTo: topAnchor),
-            // The card's HEIGHT, which is the whole control: a control that
-            // draws a card is as tall as the card, and without this the
-            // control is 0pt tall and the card is laid out below it at
-            // y=-162, outside the clip view, so it is neither on screen nor
-            // in a render of the page.
-            //
-            // The audit caught the same shape on eight row views that pinned
-            // leading/trailing/top and nothing else. This one was invisible to
-            // it for a different reason: the card has a height, so the row did
-            // not read as collapsed, and the symptom was a page that rendered
-            // with its title, its description and a hole where the content
-            // goes.
-            // Not a fixed height — the card sizes itself to its content, and
-            // the bottom pin is what lets the CONTROL take the card's height
-            // rather than the other way round.
-        ])
-
-        // HUG, which is a priority and not a constraint.
+        // ARRANGED, and that word is the whole fix.
         //
-        // A `.leading`-aligned vertical stack gives a row the height it
-        // measured, and this control measured zero because the card's own
-        // height came through a padding stack that nothing was holding. A
-        // `bottomAnchor <= bottomAnchor` permits zero and does not create a
-        // height; four attempts to fix it with constraints all left the card
-        // at y=-162, below the row and outside the clip view, which is why
-        // every page rendered with a title, a description and a hole.
-        //
-        // Hugging the content vertically is the constraint Auto Layout
-        // actually applies here, and it is one line.
-        setContentHuggingPriority(.defaultLow, for: .vertical)
+        // `addSubview` on a view that is not a stack adds a subview: it is
+        // positioned and it draws, and nothing measures it. The card was
+        // correctly 0pt tall on every page that used this class — a table, a
+        // checkbox, anything — and its content was laid out below that frame,
+        // outside the clip view, so the page rendered with its title, its
+        // description and a hole where the control goes. The audit could not
+        // see it because the card's frame was 0 and its content was below it.
+        addArrangedSubview(card)
+        // Fill the pane. The card is the content of this control, and a
+        // settings card is the width of the pane it sits in.
+        card.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
     }
 
     @available(*, unavailable)

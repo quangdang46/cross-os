@@ -152,19 +152,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // they are measured once and printed under their own heading — they
         // are not a per-page finding and printing them as one would be a
         // number repeated fifteen times.
-        let systemFindings = Audit.contrastMatrix() + Audit.rhythmAudit()
-        if let pageView = shell.pageController?.view {
-            print("SHOT CONSTRAINTS")
-            for v in [pageView, pageView.firstCard(), pageView.firstCard()?.superview].compactMap({ $0 }) {
-                print("  \(type(of: v)) frame=\(v.frame) huggingV=\(v.contentHuggingPriority(for: .vertical))")
-                for c in v.constraints {
-                    let a = (c.firstItem as? NSView).map { "\(type(of: $0))" } ?? "nil"
-                    let b = (c.secondItem as? NSView).map { "\(type(of: $0))" } ?? "nil"
-                    print("    \(c.relation.rawValue) \(a).\(c.firstAttribute.rawValue) -> \(b).\(c.secondAttribute.rawValue) p=\(c.priority.rawValue) active=\(c.isActive)")
-                }
-            }
-        }
+        // `--explain <pageID>` instead of a full render, so a page that comes
+        // out blank can be asked what it actually built.
+        let explainTarget: String? = {
+            guard let flag = CommandLine.arguments.first(where: { $0.hasPrefix("--explain=") })
+            else { return nil }
+            return String(flag.dropFirst("--explain=".count))
+        }()
 
+        let systemFindings = Audit.contrastMatrix() + Audit.rhythmAudit()
         var findings = systemFindings
         print("design system")
         AuditPrinter.emitPage("design system", findings: systemFindings)
@@ -172,6 +168,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         for page in pages {
             shell.show(page)
+            // `--explain <pageID>` prints that page's live view tree. Three
+            // defects in this port had the same shape — a container that
+            // measured zero and laid its content out below its own frame —
+            // and the tree is how each was told apart from the next.
+            if let only = explainTarget {
+                if page.id == only {
+                    print("TREE \(page.id)")
+                    ViewTree.describe(shell.pageController?.view ?? NSView(), indent: 0)
+                }
+                continue
+            }
             await ShotRenderer.settle(0.9)
             // The CONTENT PANE, not the window. `contentView` is the whole
             // window including the sidebar, and the sidebar has an outline
