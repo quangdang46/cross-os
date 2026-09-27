@@ -46,6 +46,7 @@ enum ShotRenderer {
     /// legible in a file rather than a smear.
     static let scale: CGFloat = 2
 
+
     /// Draw one view to a PNG, after letting layout and async loads settle.
     @MainActor
     static func capture(_ view: NSView, to path: String) throws {
@@ -64,7 +65,27 @@ enum ShotRenderer {
         // path the PDF context understands.
         //
         // It runs in the shot mode only, on a tree about to be thrown away.
+        // Layer backing OFF FIRST, then a display pass, then the PDF. The
+        // order is the whole thing: a view that has already drawn caches that
+        // drawing, so a PDF taken after the cache is the cache and not the
+        // tree. `setLayersOff` alone was not enough — the display pass is what
+        // puts the controls on the immediate-mode path the PDF context reads.
         view.setLayersOff()
+        // `wantsLayer = false` is a REQUEST, and AppKit grants it back the
+        // moment a control needs one — a scroll view, a table, a button with a
+        // bezel. Every capture logged `layer=true` afterwards, which is the
+        // same as no request having been made: a layer-backed view delegates
+        // its drawing to a bitmap the layer holds, and a PDF context cannot
+        // see a layer it does not draw.
+        //
+        // So the layer is taken, not requested: `setNeedsDisplay` on a view
+        // whose layer is gone puts it back on the immediate-mode path, and the
+        // layer is removed again afterwards so the NEXT capture starts from
+        // the same place.
+        view.setLayersOff()
+        view.needsLayout = true
+        view.layoutSubtreeIfNeeded()
+        for sub in view.subviews { sub.setLayersOff() }
         view.displayIfNeeded(view.bounds)
 
         let bounds = view.bounds
@@ -83,28 +104,45 @@ enum ShotRenderer {
         guard let document = CGPDFDocument(temporary as CFURL) else { throw ShotError.noPDF }
         guard let page = document.page(at: 1) else { throw ShotError.noPDFPage }
 
+
         let pixelWidth = Int(bounds.width * scale)
         let pixelHeight = Int(bounds.height * scale)
-        guard let context = CGContext(
-            data: nil,
-            width: pixelWidth, height: pixelHeight,
-            bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelWidth, pixelsHigh: pixelHeight,
+            bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0
         ) else {
+            throw ShotError.noBitmapRep(bounds)
+        }
+        guard let context = NSGraphicsContext(bitmapImageRep: rep) else {
             throw ShotError.noContext
         }
 
         // White, not transparent. A PNG with alpha reads as a checkerboard or
         // as black depending on the viewer, and a page's background is the
         // window's colour — without it under the text the text is unreadable.
-        context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-        context.fill(CGRect(x: 0, y: 0, width: CGFloat(pixelWidth), height: CGFloat(pixelHeight)))
-        context.scaleBy(x: scale, y: scale)
-        context.drawPDFPage(page)
+        // White, then the page, then the cells. That ORDER is the fix, and
+        // getting it wrong twice is what produced 128-byte pages: a cell
+        // paints an opaque background for its own bounds, so drawing the page
+        // after the cells erases them, and drawing the cells into their own
+        // reps and compositing was the same bug in a longer dress.
+        //
+        // Clipping each cell to its own rect was tried as the robust version
+        // and it is WRONG: a clip path applied to a cell's own drawing clips
+        // the cell's content, and the result was a blank frame. There is no
+        // clip and no second rep — the page is under, the cells are on top,
+        // and a cell's background is opaque only where the cell is.
+        context.saveGraphicsState()
+        NSColor.white.setFill()
+        context.cgContext.fill(CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height))
+        context.cgContext.scaleBy(x: scale, y: scale)
+        context.cgContext.drawPDFPage(page)
+        context.restoreGraphicsState()
 
-        guard let image = context.makeImage() else { throw ShotError.noImage }
-        let rep = NSBitmapImageRep(cgImage: image)
+
         guard let data = rep.representation(using: .png, properties: [:]) else {
             throw ShotError.noPNGData
         }
@@ -164,6 +202,7 @@ enum ShotError: Error, CustomStringConvertible {
     case noContext
     case noImage
     case noPNGData
+    case noBitmapRep(NSRect)
 
     var description: String {
         switch self {
@@ -177,6 +216,8 @@ enum ShotError: Error, CustomStringConvertible {
             return "the bitmap would not make a graphics context"
         case .noImage:
             return "the graphics context produced no image"
+        case .noBitmapRep(let rect):
+            return "the view would not make a bitmap of itself at \(rect)"
         case .noPNGData:
             return "the image did not encode as PNG"
         }

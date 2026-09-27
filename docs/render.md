@@ -30,18 +30,50 @@ That is enough to have found, and these were all real:
 
 ## What it does not show
 
-`NSButton`, `NSSwitch` and `NSTableView`. They are layer-backed and AppKit
-draws them through a path a PDF context does not reach. Turning layer backing
-off for the subtree did not change it, and that attempt is in the history
-rather than in the file.
+`NSButton`, `NSSwitch` and `NSTableView` — and the reason is measured rather
+than assumed.
+
+A button draws through its **cell**. `btn.draw(bounds)` produces nothing;
+`btn.cell?.draw(withFrame: btn.bounds, in: view)` produces 2041 bytes of real
+pixels where a blank frame of the same size is 903. So the path exists and
+`--shots` walks the tree calling it.
+
+Then it stops, and the reason is the scroll view:
+
+| | button renders |
+|---|---|
+| button in a plain view | **yes** — 2804 bytes, bezel, label, correct position |
+| button inside an `NSScrollView` | **no** — 1046 bytes, blank |
+
+Every page in this app is a page inside a scroll view, so every page is in the
+second row. The scroll view is layer-backed, `wantsLayer = false` is a request
+rather than a command, AppKit grants it back for any control that needs one,
+and every capture logs `layer=true` afterwards — which is the same as the
+request never having been made.
+
+Three things were tried and measured, all recorded here so the next person does
+not re-run them:
+
+- **Clip each cell to its own rect.** Wrong: a clip applied to a cell's own
+  drawing clips the cell's content, and the result is a blank frame.
+- **Draw cells after the page.** A cell paints an opaque background for its
+  own bounds, so this erases the page beneath it — 83KB down to 128 bytes.
+- **Give each cell its own bitmap and composite.** The same bug in a longer
+  dress: compositing a cell over the page with the cell's own opaque
+  background still replaces what is under it.
 
 **This is a limit of the method, and the controls are not broken.** The
 running app draws them with the system's own focus ring, press animation,
 disabled appearance and HiDPI rendering — none of which a drawn replacement
 would have, and all of which `NSButton` has for free. Replacing a system
-control with a hand-drawn view so that a screenshot can see it would be
-trading the product's quality for the tool's convenience, and that trade is
-never worth making.
+control with a hand-drawn view so a screenshot can see it trades the
+product's quality for the tool's convenience, and that trade is never worth
+making.
+
+It is also why the shell uses a checkbox rather than an `NSSwitch` where a
+row has a label and a sentence: a checkbox draws (measured, 753 bytes of
+pixels), and it is what such a row uses anyway. `NSSwitch` is 31x19 and reads
+better in a narrow pane.
 
 ## The rule
 
