@@ -51,7 +51,7 @@ extension TableContent {
 
 /// An `NSTableView` wired to a `TableContent`.
 @MainActor
-final class TableView: NSView {
+final class TableView: NSStackView {
     private let table = NSTableView()
     private let scroll = NSScrollView()
     private let content: TableContent
@@ -83,10 +83,15 @@ final class TableView: NSView {
         scroll.drawsBackground = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
-        addSubview(scroll)
+        addArrangedSubview(scroll)
         NSLayoutConstraint.activate([
-            scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+            // The WIDTH, stated rather than inherited. The height has been
+            // right all along — `rows=11 → 312` and the scroll view measured
+            // 0x312, which is zero WIDE and 312 tall. A `.width`-aligned
+            // stack stretches its child to the stack's width, and the stack's
+            // width came from a chain of levels that each stated theirs except
+            // this one.
+            scroll.widthAnchor.constraint(equalTo: widthAnchor),
             scroll.topAnchor.constraint(equalTo: topAnchor),
             // A table has no intrinsic height: its CONTENT's height is not the
             // VIEW's height, and an unconstrained scroll view collapses to

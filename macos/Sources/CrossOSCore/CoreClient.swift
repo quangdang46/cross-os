@@ -97,6 +97,13 @@ public protocol CoreClient: Sendable {
     /// The file-type catalog (`core.fileTypes`).
     func fileTypes() async throws -> [FileTypeRow]
 
+    /// The Finder menu items (`core:finderMenu`).
+    ///
+    /// Untyped on the Go side — `[]map[string]any` — so it comes back as
+    /// `JSONValue` and the view narrows it. One of the seven untyped methods
+    /// `JSONValue` exists for.
+    func finderMenu() async throws -> [JSONValue]
+
     /// The trial in flight (`safety.trialState`) and its three transitions.
     func trialState() async throws -> TrialState
     func beginTrial(plugin: String) async throws -> String
@@ -595,6 +602,10 @@ public actor LiveCoreClient: CoreClient {
 
     public func fileTypes() async throws -> [FileTypeRow] {
         try decode([FileTypeRow].self, from: await call("core.fileTypes"), method: "core.fileTypes")
+    }
+
+    public func finderMenu() async throws -> [JSONValue] {
+        try decode([JSONValue].self, from: await call("core.finderMenu"), method: "core.finderMenu")
     }
 
     public func trialState() async throws -> TrialState {

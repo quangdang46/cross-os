@@ -44,6 +44,7 @@ struct Renderers: Sendable {
         register(.checklist) { ChecklistView(control: $0, context: $1) }
         register(.wizard) { WizardView(control: $0, context: $1) }
         register(.note) { control, _ in NoteView(control: control) }
+        register(.menuList) { control, context in MenuListView(control: control, context: context) }
         register(.version) { control, _ in NoteView(control: control) }
         register(.button) { control, context in ButtonRowView(control: control, context: context) }
 
@@ -130,6 +131,7 @@ enum Kind: String {
     case wizard
     case note
     case version
+    case menuList
     case button
     case matrix
     case overrides
@@ -384,5 +386,77 @@ extension NSView {
             queue.append(contentsOf: view.subviews)
         }
         return nil
+    }
+}
+
+// MARK: - menuList
+
+/// The Finder menu: what a file can be done with.
+///
+/// A `TableContent` and a table like the others, because it IS a list and the
+/// list is the thing. It was the one kind on the Explorer's page that the
+/// registry did not know, and the shell said so in words rather than leaving a
+/// hole: "finder — unsupported control: menuList". Naming the gap is right;
+/// leaving it there once the daemon serves the data is not.
+final class MenuListView: NSView, TableContent {
+    let columns: [(String, CGFloat)] = [("Item", 260), ("Source", 180)]
+    /// Filled by the async load below, so it cannot be a `let`: a control
+    /// whose data arrives from the daemon has to be able to change once, and
+    /// this is the one place it does.
+    private var entries: [JSONValue] = []
+    private let service: any CoreClient
+    private let note: @Sendable (String) -> Void
+
+    init(control: Control, context: ControlContext) {
+        self.service = context.service
+        self.note = context.note
+        super.init(frame: .zero)
+
+        let card = Card()
+        let column = NSStackView()
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = Gap.row
+        column.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(column)
+
+        // Filled by the load below; the card is added either way so a failure
+        // reads as a sentence in a card rather than as a page that lost its
+        // shape.
+        Task { await load(into: column, context: context) }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("MenuListView is created in code") }
+
+    var rowCount: Int { entries.count }
+
+    func text(row: Int, column: Int) -> String {
+        let item = entries[row].objectValue ?? [:]
+        switch column {
+        case 0: return item["title"]?.stringValue ?? item["label"]?.stringValue ?? "(unnamed)"
+        default: return item["source"]?.stringValue ?? item["bundle"]?.stringValue ?? ""
+        }
+    }
+
+    private func load(into column: NSStackView, context: ControlContext) async {
+        do {
+            let items = try await context.service.finderMenu()
+            entries = items
+            let table = TableView(content: self)
+            table.translatesAutoresizingMaskIntoConstraints = false
+            column.addArrangedSubview(table)
+            NSLayoutConstraint.activate([
+                table.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+                table.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+                table.widthAnchor.constraint(equalTo: column.widthAnchor),
+            ])
+        } catch {
+            column.addArrangedSubview(ErrorView(
+                headline: "Could not read the Finder menu.",
+                detail: "\(error)"
+            ))
+        }
+        await MainActor.run { self.needsLayout = true }
     }
 }

@@ -163,7 +163,7 @@ final class HomeSummaryView: NSStackView {
 /// the key column is as wide as the widest key and no wider — which is the
 /// thing the 70pt fixed track and its `max-content` replacement both got
 /// wrong in different directions.
-final class FactRow: NSView {
+final class FactRow: NSStackView {
     enum Badge {
         case healthy(String)
         case unhealthy(String)
@@ -565,9 +565,16 @@ final class WizardView: NSStackView {
 // MARK: - Small controls
 
 /// A note: text and nothing else.
-final class NoteView: NSView {
+final class NoteView: NSStackView {
     init(control: Control) {
         super.init(frame: .zero)
+        // A stack, so it takes its height from the column it holds. As an
+        // NSView it measured 16pt and the text inside it measured 4pt, which
+        // reads as an empty label and is a collapsed one.
+        orientation = .vertical
+        alignment = .leading
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
 
         let label = NSTextField(labelWithString: control.label)
         label.font = Typeface.body
@@ -605,7 +612,7 @@ final class NoteView: NSView {
 }
 
 /// A button row, wired to a capability id.
-final class ButtonRowView: NSView {
+final class ButtonRowView: NSStackView {
     init(control: Control, context: ControlContext) {
         super.init(frame: .zero)
 

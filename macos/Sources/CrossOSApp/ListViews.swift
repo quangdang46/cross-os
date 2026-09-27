@@ -31,7 +31,7 @@ final class MatrixView: CardControl {
 }
 
 @MainActor
-private final class MatrixTable: NSView, TableContent {
+private final class MatrixTable: NSStackView, TableContent {
     let columns: [(String, CGFloat)] = [("Chord", 150), ("Action", 180), ("Where", 140), ("On", 44)]
     private let entries: [MatrixRow]
     private let service: any CoreClient
@@ -46,13 +46,11 @@ private final class MatrixTable: NSView, TableContent {
         self.service = service
         self.note = note
         super.init(frame: .zero)
-        addSubview(TableView(content: self))
-        NSLayoutConstraint.activate([
-            subviews[0].leadingAnchor.constraint(equalTo: leadingAnchor),
-            subviews[0].trailingAnchor.constraint(equalTo: trailingAnchor),
-            subviews[0].topAnchor.constraint(equalTo: topAnchor),
-            subviews[0].bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
+        addArrangedSubview(TableView(content: self))
     }
 
     @available(*, unavailable)
@@ -125,13 +123,21 @@ final class OverridesView: CardControl {
 }
 
 @MainActor
-private final class OverridesTable: NSView, TableContent {
+private final class OverridesTable: NSStackView, TableContent {
     let columns: [(String, CGFloat)] = [("App", 180), ("Action", 200), ("Chord", 140), ("On", 44)]
     private let overrides: [OverrideRow]
 
     init(rows: [OverrideRow]) {
         self.overrides = rows
         super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
+        orientation = .vertical
+        alignment = .width
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
         let table = TableView(content: self)
         addSubview(table)
         NSLayoutConstraint.activate([
@@ -199,7 +205,7 @@ final class ConflictResolverView: CardControl {
 /// stopped firing needs to see WHICH one lost and to whom; a list that only
 /// showed the winner would be a list that answered the wrong question.
 @MainActor
-private final class ConflictCard: NSView {
+private final class ConflictCard: NSStackView {
     init(conflict: ConflictRow) {
         super.init(frame: .zero)
 
