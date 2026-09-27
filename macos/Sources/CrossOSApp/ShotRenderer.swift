@@ -142,11 +142,81 @@ enum ShotRenderer {
         context.cgContext.drawPDFPage(page)
         context.restoreGraphicsState()
 
+        // The controls that draw through a CELL, drawn last and each at the
+        // frame it actually occupies.
+        //
+        // An `NSButton`'s own `draw(_:)` returns nothing, which is why every
+        // rendered page had its labels and none of its buttons; `cell.draw` is
+        // the path the control actually takes.
+        //
+        // Each cell draws into a translated copy of the page and is then
+        // composited back at the frame the control occupies. A cell draws in
+        // the units of the frame it is handed, so handing it the page-space
+        // frame directly lands it wherever that frame is — and a control inside
+        // a scroll view's document has a page-space frame that accounts for
+        // the document's own origin, which is not where the page draws it.
+        // The translation is what reconciles the two, and the composite is
+        // `sourceOver` so a cell's own background covers only its own rect.
+        let cells = collectCells(view, root: view)
+        if !cells.isEmpty {
+            for (cell, frame) in cells {
+                guard let piece = NSBitmapImageRep(
+                    bitmapDataPlanes: nil,
+                    pixelsWide: max(1, Int(frame.width * scale)),
+                    pixelsHigh: max(1, Int(frame.height * scale)),
+                    bitsPerSample: 8, samplesPerPixel: 4,
+                    hasAlpha: true, isPlanar: false,
+                    colorSpaceName: .deviceRGB,
+                    bytesPerRow: 0, bitsPerPixel: 0
+                ), let pieceContext = NSGraphicsContext(bitmapImageRep: piece) else { continue }
+
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = pieceContext
+                cell.draw(withFrame: NSRect(origin: .zero, size: frame.size), in: view)
+                NSGraphicsContext.restoreGraphicsState()
+
+                guard let image = piece.cgImage else { continue }
+                context.saveGraphicsState()
+                context.cgContext.scaleBy(x: scale, y: scale)
+                context.cgContext.draw(
+                    image,
+                    in: CGRect(
+                        x: frame.minX,
+                        y: frame.minY,
+                        width: frame.width,
+                        height: frame.height
+                    )
+                )
+                context.restoreGraphicsState()
+            }
+        }
 
         guard let data = rep.representation(using: .png, properties: [:]) else {
             throw ShotError.noPNGData
         }
         try data.write(to: URL(fileURLWithPath: path))
+    }
+
+    /// Collect the controls that draw through a CELL, with the frame each one
+    /// occupies in the root's coordinate space.
+    ///
+    /// An `NSButton` and nothing else. `NSImageView` and `NSTableView` are
+    /// controls with cells too, and both draw the wrong thing through this
+    /// path: an image view draws a placeholder frame, a table view draws its
+    /// scroller chrome over its own rows.
+    @MainActor
+    private static func collectCells(
+        _ node: NSView,
+        root: NSView
+    ) -> [(NSCell, NSRect)] {
+        var out: [(NSCell, NSRect)] = []
+        if let button = node as? NSButton, let cell = button.cell {
+            out.append((cell, button.convert(button.bounds, to: root)))
+        }
+        for sub in node.subviews {
+            out.append(contentsOf: collectCells(sub, root: root))
+        }
+        return out
     }
 
     /// Let layout, async loads and redraws finish before anything is measured.
