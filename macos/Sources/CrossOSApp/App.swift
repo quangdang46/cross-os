@@ -172,6 +172,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // defects in this port had the same shape — a container that
             // measured zero and laid its content out below its own frame —
             // and the tree is how each was told apart from the next.
+            // Settle BEFORE anything is measured or printed. A page's
+            // controls arrive from the daemon asynchronously, so a tree read
+            // before the load lands shows every control at 0x0 — which reads
+            // as a layout bug and is not one.
+            await ShotRenderer.settle(0.9)
             if let only = explainTarget {
                 if page.id == only {
                     print("TREE \(page.id)")
@@ -179,7 +184,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 continue
             }
-            await ShotRenderer.settle(0.9)
             // The CONTENT PANE, not the window. `contentView` is the whole
             // window including the sidebar, and the sidebar has an outline
             // view at x=0..255 — so auditing the window compared every
