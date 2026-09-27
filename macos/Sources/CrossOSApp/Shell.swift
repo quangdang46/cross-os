@@ -160,16 +160,30 @@ public final class SidebarViewController: NSViewController {
         outline.delegate = self
         outline.headerView = nil
         outline.rowSizeStyle = .default
+        // `NSTableViewStyleSourceList`, and not the `.sourceList` shorthand —
+        // the shorthand has been deprecated since macOS 12 and what it selects
+        // is the OLD source list: a solid accent bar down the full height of
+        // the selected row. It is the 2010 System Preferences look, and on a
+        // modern window it reads as a highlight rather than as "you are
+        // here".
+        //
+        // What System Settings draws is a TINT behind the row plus a small
+        // accent bar, which is `.regular` with the accent brought down to a
+        // wash. `NSTableView.SelectionHighlightStyle.sourceList` is the
+        // deprecated spelling; `.regular` is the modern one and AppKit tints
+        // it with the user's accent automatically, in both appearances.
         outline.style = .sourceList
-        // A source list draws its own selection and its own focus. Both of
-        // those are the reason to use it rather than a table with a custom
-        // appearance: the focus ring and the selected-row treatment are the
-        // system's, so they are correct in every appearance and at every
-        // accessibility setting.
+        outline.selectionHighlightStyle = .regular
+        // `.regular` and not the deprecated `.sourceList` highlight: the
+        // deprecated one paints a SOLID accent bar the height of the row, which
+        // is the 2010 System Preferences look. `.regular` tints the row with
+        // the user's accent at a wash and leaves the text at full strength,
+        // which is what System Settings draws and what a 26pt sidebar row can
+        // carry without the highlight swallowing the label.
         outline.usesAlternatingRowBackgroundColors = false
         outline.floatsGroupRows = false
         outline.indentationPerLevel = 12
-        outline.rowHeight = 26
+        outline.rowHeight = 30
 
         let symbolColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("symbol"))
         symbolColumn.width = 20
