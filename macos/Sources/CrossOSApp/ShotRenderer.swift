@@ -222,16 +222,34 @@ enum ShotRenderer {
         _ node: NSView,
         root: NSView
     ) -> [(NSCell, NSRect)] {
-        // A button inside a table's row reports the ROW's frame, so drawing it
-        // from here paints a stripe where the row is rather than a checkbox
-        // where the column is. Those are AppKit's to draw, and the row's own
-        // content arrives through `dataWithPDF` — which is why the matrix's
-        // chords and actions are legible and its column of checkboxes was a
-        // column of boxes somewhere else.
-        if node is NSTableView || node is NSTableRowView || node is NSOutlineView {
-            return []
-        }
         var out: [(NSCell, NSRect)] = []
+
+        // A table's rows are NOT in `subviews` — the table hands them out one
+        // at a time, and only for rows it has built. So they are asked for by
+        // index, and the walk continues INTO each row's cell views, because a
+        // checkbox is a subview of an `NSTableCellView` and not of the row
+        // itself: measured, a row reported two `NSTextField` where the table
+        // has four columns, because the walk stopped one level short.
+        //
+        // `sizeToFit` is what makes the table build them. A window ordered
+        // front a moment ago has laid nothing out, so `rowView(atRow:)`
+        // answers nil for every row and the collection is empty on a table
+        // that visibly has eleven checkboxes in it.
+        if let table = node as? NSTableView {
+            table.sizeToFit()
+            for row in 0..<table.numberOfRows {
+                guard let rowView = table.rowView(atRow: row, makeIfNecessary: true) else { continue }
+                for cellView in rowView.subviews {
+                    out.append(contentsOf: collectCells(cellView, root: root))
+                }
+            }
+            return out
+        }
+        // An outline view draws its rows through the same mechanism, and its
+        // cells draw the disclosure triangle and the selection; its row content
+        // arrives through `dataWithPDF`.
+        if node is NSOutlineView { return [] }
+
         if let button = node as? NSButton, let cell = button.cell {
             out.append((cell, button.convert(button.bounds, to: root)))
         }

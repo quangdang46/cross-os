@@ -63,9 +63,31 @@ final class TableView: NSStackView {
         for (title, width) in content.columns {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(title))
             column.title = title
-            column.width = width
-            column.minWidth = 50
+            // A MINIMUM, and an `autoresizingMask` that lets the column
+            // shrink. `column.width = 150` is a FIXED size: AppKit honours it,
+            // the matrix's four columns come to 514pt of requested width, and
+            // the pane is 427pt — so 87pt of the table had nowhere to go and
+            // "Where" and "On" rendered past the right edge with a horizontal
+            // scroller to reach them. A settings pane with two hidden columns
+            // is a settings pane with two hidden columns.
+            column.minWidth = min(width, 60)
+            // The last column is the one that must not grow: it is a
+            // checkbox, and a checkbox in a 410pt column is a checkbox in
+            // the wrong place. The others take the slack.
+            if title == content.columns.last?.0 {
+                column.maxWidth = width
+            } else {
+                column.maxWidth = .greatestFiniteMagnitude
+            }
+            column.resizingMask = [.autoresizingMask]
             table.addTableColumn(column)
+        }
+        if CommandLine.arguments.contains("--log-cols") {
+            let d = table.tableColumns.enumerated()
+                .map { i, c in "\(c.title)@\(Int(table.rect(ofColumn: i).minX))w\(Int(c.width))" }
+                .joined(separator: " ")
+            print("cols=\(d) table=\(Int(table.bounds.width))")
+            fflush(stdout)
         }
         table.dataSource = self
         table.delegate = self
@@ -93,6 +115,19 @@ final class TableView: NSStackView {
             // this one.
             scroll.widthAnchor.constraint(equalTo: widthAnchor),
             scroll.topAnchor.constraint(equalTo: topAnchor),
+            // And the TABLE fills the scroll view, which is the whole fix for
+            // a table that renders two of its four columns.
+            //
+            // The scroll view was sized and the table inside it was not: an
+            // `NSScrollView`'s document view is NOT stretched to it, so the
+            // table kept whatever width the sum of its columns gave it and
+            // the columns past that rendered outside the visible area with a
+            // horizontal scroller to reach them. Measured, the matrix built
+            // row views holding two `NSTextField` where there are four
+            // columns — "Chord" and "Action" got cells and "Where" and "On"
+            // never did, because AppKit only asks the delegate for the row
+            // views that fit.
+            table.widthAnchor.constraint(equalTo: scroll.widthAnchor),
             // A table has no intrinsic height: its CONTENT's height is not the
             // VIEW's height, and an unconstrained scroll view collapses to
             // nothing. Stated, and capped — which is what makes a long list

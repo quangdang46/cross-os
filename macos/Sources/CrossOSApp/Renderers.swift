@@ -321,17 +321,34 @@ class Card: NSStackView {
         // down here they stretched to the card's width and the text sat at
         // the trailing edge, which is a card that fills and is unreadable.
         if let stack = view as? NSStackView {
+            // LEADING, and that is the other half of the card's own alignment:
+            // the card's is what makes the card take the height of its rows,
+            // and the child's is what puts those rows at the LEFT of a card
+            // that fills the pane. With `.width` down here they stretched to
+            // the card's width and the text sat at the trailing edge, which is
+            // a card that fills and is unreadable.
             stack.alignment = .leading
-            // And the stack STRETCHES to the card's width. A `.width`-
-            // aligned card does not resize its child — it leaves the child at
-            // the child's own width and places it on the cross axis, which is
-            // why a 301pt stack sat at x=489 in an 810pt card. A settings
-            // card fills its pane and its content starts at the left edge.
-            stack.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            stack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
         view.translatesAutoresizingMaskIntoConstraints = false
         addArrangedSubview(view)
+
+        // The content FILLS the card, and a priority is not a statement about
+        // width — it says only how hard this view resists being squeezed, and
+        // a view with no width to fill is measured at its intrinsic one no
+        // matter how willing it is.
+        //
+        // Measured, the card was 810pt and its stack 387pt: the matrix's table
+        // never saw the card's width, so the table kept the width of the
+        // columns it could fit and the two columns past that rendered outside
+        // the visible area with a horizontal scroller to reach them. A
+        // settings pane with two hidden columns is a settings pane with two
+        // hidden columns.
+        NSLayoutConstraint.activate([
+            view.widthAnchor.constraint(equalTo: widthAnchor),
+            view.leadingAnchor.constraint(equalTo: leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
+
         setHuggingPriority(.defaultLow, for: .vertical)
     }
 }

@@ -28,25 +28,46 @@ That is enough to have found, and these were all real:
 - **A row at 26pt** where System Settings uses 30, and a selected row in the
   deprecated `.sourceList` style — a solid accent bar, the 2010 look.
 
-## Controls: buttons and checkboxes yes, table cells no
+## Buttons and checkboxes draw; a table's checkboxes do not
 
-A button draws through its **cell**. `btn.draw(bounds)` produces nothing;
-`btn.cell?.draw(withFrame: btn.bounds, in: view)` produces 2041 bytes of real
-pixels where a blank frame of the same size is 903. `--shots` walks the tree
-calling the second form, drawing each cell into its own bitmap and compositing
-it back at the frame the control occupies.
+An `NSButton`'s own `draw(_:)` returns nothing — which is why every rendered
+page had its labels and none of its buttons. `cell.draw` is the path the
+control actually takes, and it produces real pixels: **2041 bytes** for one
+button against **903** for a blank frame of the same size. Buttons and the
+checkboxes outside tables render, and the Safety page's PANIC STOP, its two
+companions and the trial's own button are all in the picture.
 
-Two things that is not:
+**A checkbox inside a table's cell does not.** The collector finds the
+checkboxes — measured, eleven of them at a 44x26 frame in the right column,
+each piece a bitmap with real content — and the composite does not land them.
+Thirteen attempts at this, each ruling out one theory, and the ones that
+survived measurement are the ones worth recording:
 
-- **A cell inside a table's row is skipped.** An `NSTableRowView` reports the
-  frame of the ROW, so a checkbox in the last column drew a 700pt-wide box at
-  the row's own x — a stripe down the middle of the table, sitting exactly
-  where the scrollbar is. A table's rows come through `dataWithPDF` instead,
-  which is why the matrix's chords and actions are legible and its column of
-  checkboxes is not drawn by this file. The running app draws them; AppKit
-  does.
-- **`NSTableView` itself does not draw through this path.** Its cell draws its
-  scroller chrome over its own rows.
+| Tried | Ruled out by |
+|---|---|
+| clip the cell to its own rect | a clip on a cell's drawing clips the cell's content |
+| draw the cells before the page | a cell paints an opaque background and erases it |
+| one bitmap per cell, composited | the same bug in a longer dress |
+| `rowViews` | **not a property of `NSTableView`** — compiles, evaluates to nothing |
+| `reloadData` / `layoutSubtreeIfNeeded` / `sizeToFit` | `rowView(atRow:)` was returning the rows all along |
+| scale the dest rect | the piece is already at `scale`; scaling again drew it 2x |
+| zero the canvas origin | the origin was already the page's |
+
+The last measurement is the honest one: the same button converts to
+`(753, 444)` in the page view and `(1003, 444)` in the window — 250pt apart,
+which is the sidebar's width. The rects are right in the window and the
+canvas is drawn from the page view's own origin, and the two have not been
+reconciled. The button is in the running app, in the right column, at the
+right size; it is not in this tool's picture.
+
+## What this tool cannot see
+
+- a table cell's own control
+- the window chrome — title bar, traffic lights, split divider
+- anything that composites against the window server rather than drawing
+
+None of those are the app's problem. They are the tool's, and they are the
+reason `--shots` is a measurement instrument and not the specification.
 
 ## What the measurement tool was
 
