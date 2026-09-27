@@ -40,6 +40,7 @@ public actor SpiedCoreClient: CoreClient {
     private var fileTypesAnswer: [FileTypeRow] = []
     private var healthyAnswer = false
     private var menuAnswer: [JSONValue] = []
+    private var auditAnswer: [AuditRow] = []
     private var trialAnswer = TrialState(plugin: "", state: "none", remainingMS: 0, timeoutMS: 0)
 
     public init() {}
@@ -225,6 +226,11 @@ public actor SpiedCoreClient: CoreClient {
     public func finderMenu() async throws -> [JSONValue] {
         record("core.finderMenu")
         return menuAnswer
+    }
+
+    public func ownershipAudit() async throws -> [AuditRow] {
+        record("safety.ownershipAudit")
+        return auditAnswer
     }
 
     public func trialState() async throws -> TrialState {

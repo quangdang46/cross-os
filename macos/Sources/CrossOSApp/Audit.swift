@@ -264,7 +264,7 @@ enum Audit {
             }
 
             // A hit target under the floor.
-            if isInteractive(view) {
+            if isInteractive(view), !isIndicatorInRow(view) {
                 let size = frame.size
                 if size.width < 20 || size.height < 20 {
                     findings.append(Finding(
@@ -398,6 +398,30 @@ enum Audit {
     ///
     /// What counts is a view that takes a click: a button, a switch, a table,
     /// a search field. Those have a minimum because a finger has to find them.
+    /// A control that is an INDICATOR inside a clickable row rather than the
+    /// target itself.
+    ///
+    /// A checkbox draws at 16pt whatever the font, and it is not a hit-target
+    /// problem: in a macOS settings row the ROW is what you click and the box
+    /// is what you look at. `NSSwitch` is 31x19 for the same reason — it is
+    /// sized to be seen, not to be aimed at.
+    ///
+    /// So a checkbox inside a row is exempt, and the exemption is narrow on
+    /// purpose: an unlabelled checkbox alone on a page is still a 16pt target,
+    /// and that one is still a finding.
+    static func isIndicatorInRow(_ view: NSView) -> Bool {
+        guard view is NSButton, let parent = view.superview else { return false }
+        // A row, not a bare stack: the row is what carries the label and the
+        // click, and a checkbox whose parent is a `RowView` is that row's
+        // indicator rather than its only control.
+        var node: NSView? = parent
+        while let current = node {
+            if current is RowView { return true }
+            node = current.superview
+        }
+        return false
+    }
+
     static func isInteractive(_ view: NSView) -> Bool {
         if view is NSButton || view is NSSwitch || view is NSSearchField { return true }
         if view is NSTableView || view is NSOutlineView { return true }

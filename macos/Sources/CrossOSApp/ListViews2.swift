@@ -401,7 +401,10 @@ private final class PluginRow: NSStackView {
         distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
 
-        let toggle = NSSwitch()
+        // A checkbox, for the reason in ObserveBody: `NSSwitch` does not draw
+        // into a PDF context and a checkbox does, and a settings row with a
+        // label and a sentence wants a checkbox anyway.
+        let toggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
         toggle.state = isOn ? .on : .off
         toggle.target = PluginTarget.shared
         let proxy = PluginTarget.shared.register(toggle, id: meta.id, next: !isOn, service: service, note: note)
@@ -412,11 +415,11 @@ private final class PluginRow: NSStackView {
         title.font = Typeface.body
         title.textColor = Palette.primaryInk
 
-        let header = NSStackView(views: [title, toggle])
-        header.orientation = .horizontal
-        header.alignment = .centerY
-        header.spacing = Gap.group
-        header.setHuggingPriority(.defaultLow, for: .horizontal)
+        // A `RowView` and not a hand-built header: the title on the left with
+        // low hugging so the control wins the right edge, which is what every
+        // other row in the app does. Two ways of building one row is how the
+        // checkbox ended up outside every exemption the audit knows about.
+        let header = RowView(label: meta.name, control: toggle)
 
         let column = NSStackView(views: [header])
         column.orientation = .vertical
@@ -480,7 +483,7 @@ final class PluginTarget: NSObject {
 
     @discardableResult
     func register(
-        _ toggle: NSSwitch,
+        _ toggle: NSButton,
         id: String,
         next: Bool,
         service: any CoreClient,

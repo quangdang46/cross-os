@@ -104,6 +104,11 @@ public protocol CoreClient: Sendable {
     /// `JSONValue` exists for.
     func finderMenu() async throws -> [JSONValue]
 
+    /// What CrossOS created on this machine (`safety.ownershipAudit`) — the
+    /// Safety page's rollback list, and the input to Reset Everything's
+    /// ownership scoping.
+    func ownershipAudit() async throws -> [AuditRow]
+
     /// The trial in flight (`safety.trialState`) and its three transitions.
     func trialState() async throws -> TrialState
     func beginTrial(plugin: String) async throws -> String
@@ -606,6 +611,14 @@ public actor LiveCoreClient: CoreClient {
 
     public func finderMenu() async throws -> [JSONValue] {
         try decode([JSONValue].self, from: await call("core.finderMenu"), method: "core.finderMenu")
+    }
+
+    public func ownershipAudit() async throws -> [AuditRow] {
+        try decode(
+            [AuditRow].self,
+            from: await call("safety.ownershipAudit"),
+            method: "safety.ownershipAudit"
+        )
     }
 
     public func trialState() async throws -> TrialState {

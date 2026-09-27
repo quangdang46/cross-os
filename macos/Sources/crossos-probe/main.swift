@@ -69,6 +69,12 @@ do {
     case "readiness":
         emit(try await client.readiness())
 
+    case "audit":
+        emit(try await client.ownershipAudit())
+
+    case "trial":
+        emit(try await client.trialState())
+
     case "matrix":
         emit(try await client.matrix())
 

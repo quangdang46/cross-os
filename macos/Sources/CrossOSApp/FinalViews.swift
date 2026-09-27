@@ -57,14 +57,31 @@ final class TrialView: CardControl {
         }
 
         if state.isIdle {
-            replaceBody(with: EmptyStateView(
-                headline: "No trial in flight.",
-                detail: "A trial is a time-boxed run of one plugin. Start one to try it without a full install."
-            ))
+            // The sentence AND the button, in one column.
+            //
+            // Two `replaceBody` calls in a row — the empty state, then the
+            // button column — meant the button column was the only thing
+            // standing, and since `NSButton` does not draw into a PDF the
+            // card rendered as an empty box with a heading. On screen it was a
+            // heading with a button, which is right; in a render it was
+            // nothing, which is the whole class of bug this list keeps
+            // turning up.
             addButton("Start a trial", in: buttons) { [weak self] in
                 Task { await self?.begin(context: context) }
             }
-            replaceBody(with: boxed(buttons))
+            let column = NSStackView(views: [
+                EmptyStateView(
+                    headline: "No trial in flight.",
+                    detail: "A trial is a time-boxed run of one plugin. Start one to try it "
+                          + "without a full install."
+                ),
+                buttons,
+            ])
+            column.orientation = .vertical
+            column.alignment = .width
+            column.spacing = Gap.row
+            column.translatesAutoresizingMaskIntoConstraints = false
+            replaceBody(with: column)
             return
         }
 

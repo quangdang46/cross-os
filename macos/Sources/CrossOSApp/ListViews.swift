@@ -295,8 +295,27 @@ private final class ObserveBody: NSStackView {
         distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
 
-        let toggle = NSSwitch()
+        // A CHECKBOX and not an NSSwitch, and the reason is not that a
+        // checkbox looks better.
+        //
+        // `NSSwitch` draws through a path a PDF context cannot reach: its
+        // `cell.draw(withFrame:in:)` returns nil and the bitmap comes out
+        // empty, which is why every rendered page was missing its switches
+        // while their labels were there. `NSButton(checkboxWithTitle:)` draws
+        // through its cell and renders — measured, not argued.
+        //
+        // So this is a checkbox on two counts. It renders, and it is what a
+        // macOS settings row uses for a boolean that is not "on by default
+        // and quiet about it" — System Settings draws `NSSwitch` in the
+        // narrower panes and a checkbox where the row has a label and a
+        // sentence, which is exactly this row.
+        let toggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
         toggle.state = state.observe ? .on : .off
+        // The box is 16pt and the ROW is the target, which is how a macOS
+        // settings row works: the row is clickable and the checkbox is an
+        // indicator inside it. Without that the 16pt box IS the hit target
+        // and the audit is right to call it under 20.
+        toggle.setContentHuggingPriority(.defaultHigh, for: .horizontal)
 
         let row = RowView(
             label: "Record what CrossOS sees",
@@ -329,6 +348,13 @@ private final class ObserveBody: NSStackView {
 
 /// What CrossOS created on this machine.
 @MainActor
+/// What CrossOS created on this machine — the Safety page's rollback list.
+///
+/// This was a stub that called `core.eventLogs` and then said "nothing to
+/// roll back", with the error text naming a method it had not called. It
+/// reported honestly ("the daemon did not answer safety.ownershipAudit") and
+/// wrongly at the same time, which is the worst of both: the sentence was
+/// true and the answer was not.
 final class AuditListView: CardControl {
     override init(control: Control, context: ControlContext) {
         super.init(control: control, context: context)
@@ -336,15 +362,49 @@ final class AuditListView: CardControl {
     }
 
     private func load(context: ControlContext) async {
-        guard let rows = try? await context.service.eventLogs() else {
-            showError("Could not read the audit list.", "The daemon did not answer safety.ownershipAudit.")
-            return
+        do {
+            let rows = try await context.service.ownershipAudit()
+            guard !rows.isEmpty else {
+                replaceBody(with: EmptyStateView(
+                    headline: "Nothing to roll back.",
+                    detail: "CrossOS has created nothing on this machine. The list names the login "
+                          + "item, the extension and the config file it owns, so Reset Everything "
+                          + "can scope to them and leave the rest alone."
+                ))
+                return
+            }
+            let column = NSStackView()
+            column.orientation = .vertical
+            column.alignment = .width
+            column.spacing = Gap.tight
+            column.translatesAutoresizingMaskIntoConstraints = false
+            for row in rows {
+                let line = NSTextField(labelWithString: "\(row.resource) — \(row.id)")
+                line.font = Typeface.body
+                line.textColor = Palette.primaryInk
+                line.lineBreakMode = .byTruncatingMiddle
+                line.maximumNumberOfLines = 1
+                column.addArrangedSubview(line)
+
+                // The owner and the moment, in the second tone. "What is this
+                // and is it mine" is the question the list exists to answer,
+                // and an id alone answers half of it.
+                let detail = NSTextField(
+                    labelWithString: "\(row.owner) · \(row.createdAt)"
+                )
+                detail.font = Typeface.caption
+                detail.textColor = Palette.secondaryInk
+                detail.lineBreakMode = .byTruncatingMiddle
+                detail.maximumNumberOfLines = 1
+                column.addArrangedSubview(detail)
+            }
+            replaceBody(with: column)
+        } catch {
+            showError(
+                "Could not read the audit list.",
+                "The daemon did not answer safety.ownershipAudit: \(error)"
+            )
         }
-        _ = rows
-        replaceBody(with: EmptyStateView(
-            headline: "Nothing to roll back.",
-            detail: "CrossOS has not created anything on this machine. The list names login items, "
-                + "extensions and files it owns, so Reset Everything can scope to them."
-        ))
     }
 }
+
