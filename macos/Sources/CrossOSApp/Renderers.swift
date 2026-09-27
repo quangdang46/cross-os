@@ -80,9 +80,15 @@ struct Renderers: Sendable {
         // The three retired spellings, mapping to what replaced them.
         // `app/backend` re-points them by renaming the `kind` field; these are
         // the grace period, not a second implementation.
+        // Three retired spellings, each mapping to the renderer that replaced
+        // it. `traceList` is the one that was wrong: it pointed at `.note`, so
+        // the Activity page's timeline rendered as a sentence. The daemon
+        // still sends `traceList` (core/pkg/pluginapi/pages.go, `activityPage`)
+        // while `pipelineTrace` is what the registry knows, and the two are the
+        // same control under two names.
         alias("enableFlow", to: .wizard)
         alias("statusCard", to: .homeSummary)
-        alias("traceList", to: .note)
+        alias("traceList", to: .pipelineTrace)
     }
 
     private mutating func register(
