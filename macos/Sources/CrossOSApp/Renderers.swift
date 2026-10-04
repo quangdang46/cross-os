@@ -231,36 +231,30 @@ final class UnsupportedView: NSStackView {
 /// pretends to be see-through so that elevation reads as depth when there is
 /// no depth behind it.
 class Card: NSStackView {
+    /// The padding, as one value, because a card that is padded on four
+    /// sides by four numbers is four decisions pretending to be one.
+    ///
+    /// Horizontal padding is wider than vertical on purpose: the content is
+    /// text, and text needs air on its line but not above and below it.
+    static let inset = NSEdgeInsets(
+        top: Gap.row + Gap.close, left: Gap.group,
+        bottom: Gap.row + Gap.close, right: Gap.group
+    )
+
     init(title: String? = nil) {
         super.init(frame: .zero)
         orientation = .vertical
-        alignment = .width
-        distribution = .fill
-        translatesAutoresizingMaskIntoConstraints = false
-        translatesAutoresizingMaskIntoConstraints = false
-        orientation = .vertical
-        // `.leading`, NOT `.width`.
+        // `.leading` NOT `.width`.
         //
-        // `.width` was supposed to make the card take the height of its rows
-        // and it does — but it also leaves each child at the child's own
-        // width and places it on the cross axis, so a 301pt stack of labels
-        // sat at x=489 inside an 810pt card. Every line in every card was
-        // right-aligned in a card that fills, which is a card that is
-        // technically laid out and completely unreadable.
-        //
-        // `.leading` with a `.fill` distribution stretches the child to the
-        // card's width and keeps its rows at the left, which is what a
-        // settings card is.
+        // A `.width`-aligned stack positions each child on the cross axis by
+        // the CHILD's own width, so a short stack of labels sat at x=489
+        // inside an 810pt card and every line in it was right-aligned in a
+        // card that fills. The width is stated in `setContent` instead, which
+        // is the one place that knows the card's insets.
         alignment = .leading
         distribution = .fill
-        // The padding is ON the card rather than around it, and that is the
-        // fix as much as the padding is: an inner stack with `edgeInsets`
-        // measures its insets above its own origin, which put the content at
-        // y=-162 in a card whose frame said 0.
-        edgeInsets = NSEdgeInsets(
-            top: Gap.row, left: Gap.group,
-            bottom: Gap.row, right: Gap.group
-        )
+        translatesAutoresizingMaskIntoConstraints = false
+        edgeInsets = Card.inset
     }
 
     /// The fill and the hairline, drawn in `draw(_:)` rather than set on the
@@ -309,6 +303,11 @@ class Card: NSStackView {
     /// `Card` is a stack now, and the padding is on it rather than around it.
     /// One coordinate space, one alignment, and the height is the sum of the
     /// rows.
+    ///
+    /// **The insets are load-bearing and nothing may pin the content to the
+    /// card's own edges.** See the constraint block below: an explicit
+    /// leading/trailing pair silently overrides `edgeInsets` and puts every
+    /// line of text on the hairline.
     func setContent(_ view: NSView) {
         // `view` is already a vertical stack in most cases; adopting it means
         // the card's height IS the content's height, with no intermediate
@@ -332,24 +331,30 @@ class Card: NSStackView {
         view.translatesAutoresizingMaskIntoConstraints = false
         addArrangedSubview(view)
 
-        // The content FILLS the card, and a priority is not a statement about
-        // width — it says only how hard this view resists being squeezed, and
-        // a view with no width to fill is measured at its intrinsic one no
-        // matter how willing it is.
+        // The content fills the card's CONTENT RECT, not the card.
         //
-        // Measured, the card was 810pt and its stack 387pt: the matrix's table
-        // never saw the card's width, so the table kept the width of the
-        // columns it could fit and the two columns past that rendered outside
-        // the visible area with a horizontal scroller to reach them. A
-        // settings pane with two hidden columns is a settings pane with two
-        // hidden columns.
+        // These three constraints used to pin the content to the card's own
+        // left, right and width, which cancelled `edgeInsets` completely:
+        // an `NSStackView` applies its insets by insetting the rect its
+        // arranged subviews live in, and a subview pinned edge-to-edge to the
+        // stack ignores that rect. Measured on `core.home`, the card was
+        // 810pt and its content stack 810pt at x=0 — so `Gap.group` of
+        // horizontal padding was in the file, in the initializer, and not on
+        // the screen. Every line of text in every card touched the hairline,
+        // and a label one pixel outside its own card was clipped by it: the
+        // renders showed "ules" for "rules" and "0 of these" for "10 of
+        // these".
+        //
+        // The width is therefore the card's width LESS the two horizontal
+        // insets, and the position is not restated at all — the stack's own
+        // layout places the content inside its inset rect, so stating it here
+        // is what broke it.
         NSLayoutConstraint.activate([
-            view.widthAnchor.constraint(equalTo: widthAnchor),
-            view.leadingAnchor.constraint(equalTo: leadingAnchor),
-            view.trailingAnchor.constraint(equalTo: trailingAnchor),
+            view.widthAnchor.constraint(
+                equalTo: widthAnchor,
+                constant: -(Card.inset.left + Card.inset.right)
+            ),
         ])
-
-        setHuggingPriority(.defaultLow, for: .vertical)
     }
 }
 

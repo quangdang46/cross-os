@@ -136,8 +136,28 @@ enum ShotRenderer {
         // clip and no second rep — the page is under, the cells are on top,
         // and a cell's background is opaque only where the cell is.
         context.saveGraphicsState()
-        NSColor.white.setFill()
-        context.cgContext.fill(CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height))
+        // The colour goes on the CONTEXT BEING DRAUGHT INTO, not on
+        // `NSGraphicsContext.current`.
+        //
+        // `NSColor.setFill()` writes to whatever context is current, and this
+        // function never made `context` current — so `NSColor.white.setFill()`
+        // set white on some other context and the fill below ran with the CG
+        // default of BLACK. Every page therefore rendered with a black page
+        // behind it, and the title — `labelColor`, near-black in light mode —
+        // was black on black and invisible. Measured on `core.home`: the
+        // whole 1700x1440 bitmap was `(0,0,0,255)`.
+        context.cgContext.setFillColor(NSColor.white.cgColor)
+        // The fill covers the WHOLE bitmap in PIXELS. It was
+        // `CGRect(0, 0, bounds.width, bounds.height)` — 850x720 points —
+        // against a 1700x1440 bitmap, and the `scaleBy` that doubles it runs
+        // on the NEXT line, so the fill covered the bottom-left quarter and
+        // left the rest transparent.
+        //
+        // A page needs this at all because the page view paints no background
+        // of its own (`drawsBackground = false`), which is right for a window
+        // — the window supplies the colour — and wrong for a standalone
+        // bitmap, which has no window underneath it.
+        context.cgContext.fill(CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
         context.cgContext.scaleBy(x: scale, y: scale)
         context.cgContext.drawPDFPage(page)
         context.restoreGraphicsState()

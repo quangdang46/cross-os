@@ -533,6 +533,14 @@ final class WizardView: NSStackView {
             verdict.tag = index
             verdict.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
+            // An EMPTY text field is not a neutral placeholder: an
+            // `NSTextField` with no string still has an intrinsic width of a
+            // few points, so before the verdict lands this was a 4pt box that
+            // reserved a row's worth of height and drew nothing. Hidden from
+            // the start and revealed when there is a reason to read it, which
+            // is also what `loadVerdicts` expects to find.
+            verdict.isHidden = true
+
             let column = NSStackView(views: [header, verdict])
             column.orientation = .vertical
             column.alignment = .leading

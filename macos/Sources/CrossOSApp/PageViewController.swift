@@ -112,12 +112,32 @@ public final class PageViewController: NSViewController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.edgeInsets = NSEdgeInsets(top: Gap.plane, left: Gap.plane,
                                         bottom: Gap.plane, right: Gap.plane)
+        stack.setContentHuggingPriority(.required, for: .vertical)
+
+        // The stack HUGS its content vertically, and that is what stops the
+        // page's slack from being handed to a card.
+        //
+        // The stack is held to at least the clip view's height so a short page
+        // sits at the top, and every extra point of height goes to the one
+        // arranged subview willing to absorb it. Measured with the default
+        // priorities: the first card came out 810x400 — 400pt of white with
+        // four lines of text in it — and the title, which is at the top of the
+        // stack, was pushed off the top of the window entirely.
+        //
+        // Hugging at `.required` says "a card is as tall as what is in it", so
+        // the slack has nowhere to go and collects at the bottom of the page
+        // instead, which is where empty space belongs.
         stack.addArrangedSubview(titleField)
         stack.addArrangedSubview(descriptionField)
         stack.setCustomSpacing(Gap.plane, after: descriptionField)
 
-
-        scroll.documentView = stack
+        // The document view is `TopDownDocument`, not the stack. See
+        // `TopDownDocument` for why a non-flipped stack hangs from the bottom
+        // of the window, and why raising the stack's height instead made the
+        // first card 500pt of empty white and pushed the title off the top.
+        let document = TopDownDocument()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = document
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
@@ -129,16 +149,17 @@ public final class PageViewController: NSViewController {
             scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scroll.topAnchor.constraint(equalTo: container.topAnchor),
             scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            // A stack inside a scroll view needs a width constraint or it
-            // collapses to its intrinsic width, which is the narrowest line in
-            // it rather than the width of the pane.
+            // A document view needs a width constraint or it collapses to its
+            // content's intrinsic width, which is the narrowest line in it
+            // rather than the width of the pane.
             //
             // Activated HERE and not at the point of writing, because a
             // constraint needs a common ancestor the moment it activates and
-            // the stack does not join the view hierarchy until the line above
-            // assigns `documentView`. Setting it earlier throws.
-            stack.widthAnchor.constraint(equalTo: scroll.widthAnchor),
+            // the document does not join the view hierarchy until the line
+            // above assigns `documentView`. Setting it earlier throws.
+            document.widthAnchor.constraint(equalTo: scroll.widthAnchor),
         ])
+        document.hold(stack, width: document.widthAnchor, minimumHeight: scroll.heightAnchor)
 
         view = container
     }
@@ -200,21 +221,82 @@ public final class PageViewController: NSViewController {
                 stack.addArrangedSubview(view)
                 // Fill the pane, and hug the content vertically. Two
                 // constraints, one axis each: `.leading` alignment already
-                // keeps the row on the left and takes its height from the
-                // first child, and the height that produces is wrong for a
-                // row whose first child is another leading-aligned stack.
-                // Hugging is what corrects it, and the width is what fills.
+                // keeps the row on the left, and the width is what fills.
+                //
+                // Hugging is REQUIRED here, and not `.defaultLow`. Low was
+                // the fix for a row whose first child is another
+                // leading-aligned stack reporting the height of nothing, and
+                // it kept working long after the thing it was working around
+                // stopped being true: with the page now held to the clip
+                // view's height, a low-hugging row is the row that absorbs
+                // every extra point. Measured, the first card was 810x400 —
+                // 400pt of white around four lines of text.
                 view.translatesAutoresizingMaskIntoConstraints = false
                 view.widthAnchor.constraint(
                     equalTo: stack.widthAnchor,
                     constant: -(Gap.plane * 2)
                 ).isActive = true
-                view.setContentHuggingPriority(.defaultLow, for: .vertical)
+                view.setContentHuggingPriority(.required, for: .vertical)
             }
         }
 
         stack.addArrangedSubview(pageId)
     }
+}
+
+/// A scroll view's document view that starts at the TOP of its bounds.
+///
+/// `isFlipped` is get-only on `NSView`, so a stack cannot be told to flip, and
+/// a non-flipped `NSStackView` lays its arranged subviews out from the BOTTOM.
+/// The page therefore hung from the bottom of the window with a band of
+/// nothing above the title — measured at 278pt on `core.home`.
+///
+/// This is the smallest thing that answers it: one view, flipped, that holds
+/// the stack pinned to its top edge. The stack is unchanged and still a stack,
+/// which is what the page's width and height arithmetic already relies on.
+final class TopDownDocument: NSView {
+    override var isFlipped: Bool { true }
+
+    /// `init(frame:)` is restated rather than inherited, because marking
+    /// `init(coder:)` unavailable stops the compiler synthesising it.
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+    }
+
+    /// Hold `content` against the top edge and the full width, and be at
+    /// least as tall as the clip view.
+    ///
+    /// **This view's height is the clip view's; the content's height is its
+    /// own.** Getting that backwards is what made every page either blank or
+    /// ballooned, and both were measured:
+    ///
+    ///   - The document left unconstrained measured 850x0 while the stack
+    ///     inside it measured 442pt, and a 0-height view clips its own
+    ///     content: every render came out blank white.
+    ///   - Forcing the CONTENT to the clip view's height instead hands every
+    ///     spare point to the first row willing to grow, and the first card
+    ///     came out 810x400 — 400pt of white around four lines of text.
+    ///
+    /// So the document fills the pane (which is what puts a short page at the
+    /// top, because this view is flipped) and the content hugs itself (which
+    /// is what leaves the empty space BELOW the page instead of inside it).
+    func hold(
+        _ content: NSView,
+        width: NSLayoutDimension,
+        minimumHeight: NSLayoutDimension
+    ) {
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: topAnchor),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor),
+            content.widthAnchor.constraint(equalTo: width),
+            heightAnchor.constraint(greaterThanOrEqualTo: minimumHeight),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("TopDownDocument is created in code") }
 }
 
 // MARK: - Empty and error states
