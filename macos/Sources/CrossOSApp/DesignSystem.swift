@@ -335,6 +335,16 @@ final class SectionView: NSStackView {
         // it, and 10pt reads as belonging to the NEXT section.
         if !title.isEmpty { setCustomSpacing(Gap.close, after: cap) }
         setCustomSpacing(Gap.close, after: group)
+
+        // The group is the width of this section. STATED, not negotiated: a
+        // `.leading`-aligned stack gives each child the child's own width and
+        // low compression resistance alone does not make it take the width it
+        // is offered — measured, the two home groups came out 491pt and 341pt
+        // inside 600pt sections, so two groups on one page ended two different
+        // widths and the page read as two unrelated panels.
+        NSLayoutConstraint.activate([
+            group.widthAnchor.constraint(equalTo: widthAnchor),
+        ])
     }
 
     @available(*, unavailable)

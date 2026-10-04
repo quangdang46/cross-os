@@ -26,14 +26,6 @@ class CardControl: NSStackView {
     init(control: Control, context: ControlContext) {
         super.init(frame: .zero)
         orientation = .vertical
-        alignment = .width
-        distribution = .fill
-        translatesAutoresizingMaskIntoConstraints = false
-        orientation = .vertical
-        // `.leading` and not `.width`: a `.width`-aligned stack positions its
-        // child on the cross axis by the CHILD's own width, so a 427pt card in
-        // an 810pt control sat at x=383 — the card was the right size and on
-        // the wrong half of the page. The width is stated below instead.
         alignment = .leading
         distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
@@ -54,18 +46,35 @@ class CardControl: NSStackView {
 
         bodyStack.orientation = .vertical
         bodyStack.alignment = .leading
+        bodyStack.distribution = .fill
         bodyStack.spacing = Gap.row
         bodyStack.translatesAutoresizingMaskIntoConstraints = false
+        bodyStack.setContentHuggingPriority(.required, for: .vertical)
 
         let card = Card()
-        let column = NSStackView(views: [heading, subtitle, bodyStack])
+        // The heading and the note are ABOVE and BELOW the group, not inside
+        // it — see `SectionView`. A bold title inside a bordered box is a web
+        // card; a small cap above the box and a caption below it is a macOS
+        // section, and it is the single change that stopped every page reading
+        // as a stack of panels.
+        let column = NSStackView(views: [heading, card, subtitle])
         column.orientation = .vertical
         column.alignment = .leading
-        column.spacing = Gap.row
+        column.distribution = .fill
+        column.spacing = Gap.close
         column.translatesAutoresizingMaskIntoConstraints = false
-        card.setContent(column)
+        card.setContent(bodyStack)
         self.card = card
         self.cardColumn = column
+
+        // The cap sits closer to the group it labels than to the group above
+        // it, and the note is set apart from both — a note belongs to the group
+        // above it and to nothing else.
+        column.setCustomSpacing(Gap.close, after: heading)
+        column.setCustomSpacing(Gap.close, after: card)
+        heading.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+        card.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+        subtitle.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
 
         // ARRANGED, and that word is the whole fix.
         //
@@ -76,10 +85,9 @@ class CardControl: NSStackView {
         // outside the clip view, so the page rendered with its title, its
         // description and a hole where the control goes. The audit could not
         // see it because the card's frame was 0 and its content was below it.
-        addArrangedSubview(card)
-        // Fill the pane. The card is the content of this control, and a
-        // settings card is the width of the pane it sits in.
-        card.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
+        addArrangedSubview(column)
+        // Fill the pane. A settings card is the width of the pane it sits in.
+        column.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
     }
 
     @available(*, unavailable)

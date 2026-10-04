@@ -698,6 +698,10 @@ final class NoteView: NSStackView {
 final class ButtonRowView: NSStackView {
     init(control: Control, context: ControlContext) {
         super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .leading
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
 
         // `NSButton` with a bezel style, because a button drawn by hand is a
         // button that does not get the system focus ring, the system press
@@ -709,41 +713,91 @@ final class ButtonRowView: NSStackView {
         )
         button.bezelStyle = .rounded
         button.target = ActionTarget.shared
+        // Hug horizontally so the button is its own width rather than the
+        // row's. Measured without it: a button in a row with no note came out
+        // 520pt — the full pane — with its label centred in it, which is a
+        // banner rather than a button.
+        //
+        // Compression resistance is `.defaultLow`, NOT `.required`. A
+        // `.rounded` button resists being squeezed, and required resistance
+        // outranks the width cap below: measured, the cap was active and the
+        // button was still 339pt, having starved the sentence beside it to
+        // 245pt and clipped its second line. A button that shrinks and
+        // truncates its label is better than one that starves its own
+        // description.
+        //
+        // The height is the system's, taken rather than declared: a `.rounded`
+        // bezel on a 14pt label measures 24pt, and pinning it to a number here
+        // is a number this file has to keep correct across macOS releases.
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         ActionTarget.shared.register(button, control: control, context: context)
 
-        let column = NSStackView(views: [button])
-        column.orientation = .vertical
-        column.alignment = .leading
-        column.spacing = Gap.tight
-        column.translatesAutoresizingMaskIntoConstraints = false
+        // The row is the button and the sentence beside it, side by side, and
+        // it is CONSTRAINED rather than stacked.
+        //
+        // A horizontal `NSStackView` with a `.fill` distribution stretches its
+        // only subview to the row's width: measured, the Reset button — the
+        // one row with no note — came out 520pt, the full pane, with its
+        // label centred in it, which is a banner rather than a button. A stack
+        // also cannot say "the button is its own width and the note takes what
+        // is left of the row".
+        //
+        // So the two are pinned directly: the button at the leading edge at
+        // its own width, the note filling the rest on the button's first
+        // baseline. Three of these share one leading edge and one trailing
+        // edge, which is what makes them read as rows rather than as three
+        // loose widgets.
+        addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: leadingAnchor),
+            button.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+
+        // The button's label is `control.label`, and one of them is a sentence
+        // ("PANIC STOP — disable interception + plugin actions"). Hugged at its
+        // full width that button took 339pt of a 600pt row and left the note
+        // 245pt — enough to wrap and not enough to show the result, so the
+        // second line was clipped ("Reversible via Re-…").
+        //
+        // A button on macOS truncates; the sentence beside it does not. The cap
+        // is what makes that the outcome instead of the reverse.
+        button.widthAnchor.constraint(lessThanOrEqualToConstant: 260).isActive = true
 
         if !control.note.isEmpty {
             let note = NSTextField(labelWithString: control.note)
-            note.font = Typeface.caption
+            note.font = Typeface.body
             note.textColor = Palette.secondaryInk
+            note.alignment = .left
             note.lineBreakMode = .byWordWrapping
+            // `labelWithString:` sets `usesSingleLineMode`, and with it set a
+            // label IGNORES `byWordWrapping` and truncates at the frame's edge
+            // instead. That is why this sentence rendered as "Login item stays.
+            // Reversible via Re-…" at 245pt wide, with the rest of the second
+            // line clipped away rather than wrapped onto it.
+            note.usesSingleLineMode = false
             note.maximumNumberOfLines = 0
-            column.addArrangedSubview(note)
+            note.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(note)
+            NSLayoutConstraint.activate([
+                note.leadingAnchor.constraint(equalTo: button.trailingAnchor, constant: Gap.group),
+                note.trailingAnchor.constraint(equalTo: trailingAnchor),
+                note.firstBaselineAnchor.constraint(equalTo: button.firstBaselineAnchor),
+                note.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
+                note.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+            ])
         }
 
-        addSubview(column)
-        NSLayoutConstraint.activate([
-            column.leadingAnchor.constraint(equalTo: leadingAnchor),
-            column.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            column.topAnchor.constraint(equalTo: topAnchor),
-            // The BOTTOM pin, and its absence is why three plugin rows
-            // overlapped by 14pt each in the first audit run.
-            //
-            // A view pinned leading/trailing/top and nothing else has no
-            // height: Auto Layout is free to give it zero and let the
-            // content overflow, and the content does — the switch on row two
-            // lands on top of the switch on row one. The audit named it as
-            // "NSSwitch and NSSwitch overlap by 54x14 [window A x=306 y=-11 |
-            // window B x=306 y=-21]", and the ten points between them were
-            // the ten points each row claimed for itself and none of them
-            // gave back.
-            column.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
-        ])
+        // Hug vertically, with a floor at the standard row height so a short
+        // button is still a comfortable target.
+        //
+        // Hugging alone is not enough and the height floor is not either: the
+        // children are pinned by `centerY` and `firstBaseline`, neither of
+        // which says how tall the row is, so a two-line note measured 32pt
+        // inside a 24pt row and ran from y=-12 to y=20 — half of it ABOVE the
+        // row's own origin. The note's own top and bottom are what close that.
+        setContentHuggingPriority(.required, for: .vertical)
+        heightAnchor.constraint(greaterThanOrEqualToConstant: Measure.rowHeight).isActive = true
     }
 
     @available(*, unavailable)

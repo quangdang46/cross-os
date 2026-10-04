@@ -351,46 +351,35 @@ final class EmptyStateView: NSStackView {
     init(headline: String, detail: String) {
         super.init(frame: .zero)
         orientation = .vertical
-        alignment = .width
+        // `.leading`, NOT `.width`. A `.width`-aligned stack distributes its
+        // child on the cross axis, so an empty state came out CENTRED inside
+        // its group — measured at x=148 in a 600pt row, which reads as a
+        // deliberate centring rather than as a state that has nothing to say.
+        // An empty state in a settings group belongs at the group's leading
+        // edge, with the rest of the row empty to its right.
+        alignment = .leading
         distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
 
         let headlineField = NSTextField(labelWithString: headline)
         headlineField.font = Typeface.bodyStrong
         headlineField.textColor = Palette.primaryInk
+        headlineField.alignment = .left
         headlineField.lineBreakMode = .byWordWrapping
         headlineField.maximumNumberOfLines = 0
 
         let detailField = NSTextField(labelWithString: detail)
         detailField.font = Typeface.caption
         detailField.textColor = Palette.secondaryInk
+        detailField.alignment = .left
         detailField.lineBreakMode = .byWordWrapping
         detailField.maximumNumberOfLines = 0
+        detailField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let column = NSStackView(views: [headlineField, detailField])
-        column.orientation = .vertical
-        column.alignment = .leading
-        column.spacing = Gap.tight
-        column.translatesAutoresizingMaskIntoConstraints = false
-
-        addSubview(column)
-        NSLayoutConstraint.activate([
-            column.leadingAnchor.constraint(equalTo: leadingAnchor),
-            column.trailingAnchor.constraint(equalTo: trailingAnchor),
-            column.topAnchor.constraint(equalTo: topAnchor),
-            // The BOTTOM pin, and its absence is why three plugin rows
-            // overlapped by 14pt each in the first audit run.
-            //
-            // A view pinned leading/trailing/top and nothing else has no
-            // height: Auto Layout is free to give it zero and let the
-            // content overflow, and the content does — the switch on row two
-            // lands on top of the switch on row one. The audit named it as
-            // "NSSwitch and NSSwitch overlap by 54x14 [window A x=306 y=-11 |
-            // window B x=306 y=-21]", and the ten points between them were
-            // the ten points each row claimed for itself and none of them
-            // gave back.
-            column.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
-        ])
+        addArrangedSubview(headlineField)
+        addArrangedSubview(detailField)
+        spacing = Gap.tight
+        setContentHuggingPriority(.required, for: .vertical)
     }
 
     override var isFlipped: Bool { true }
