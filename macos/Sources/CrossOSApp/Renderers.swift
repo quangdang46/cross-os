@@ -471,9 +471,21 @@ class RowView: NSStackView {
         addArrangedSubview(texts)
         if let control {
             control.setContentHuggingPriority(.required, for: .horizontal)
+            control.setContentCompressionResistancePriority(.required, for: .horizontal)
             addArrangedSubview(control)
         }
 
+        // The row has a HEIGHT of its own, and that is the whole fix for a
+        // checkbox drawn in mid-air.
+        //
+        // A horizontal stack takes the tallest child, and `texts` — a
+        // `.leading`-aligned vertical stack — takes the height of ITS first
+        // child, which bottoms out at a label reporting the height of nothing.
+        // So the row measured 0pt, its children overflowed above it, and on
+        // `core.extensions` three plugin rows rendered a checkbox floating in
+        // mid-air with the plugin's reason underneath and no name at all.
+        heightAnchor.constraint(greaterThanOrEqualToConstant: Measure.rowHeight).isActive = true
+        setContentHuggingPriority(.required, for: .vertical)
     }
 
     @available(*, unavailable)

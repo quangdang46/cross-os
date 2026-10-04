@@ -660,34 +660,27 @@ final class NoteView: NSStackView {
         translatesAutoresizingMaskIntoConstraints = false
 
         let label = NSTextField(labelWithString: control.label)
-        label.font = Typeface.body
-        label.textColor = Palette.primaryInk
+        // Caption size in the secondary ink, not body size in primary ink.
+        //
+        // A note is prose ABOUT a page, and it was being drawn at the same
+        // size and weight as the page title and its description — so on
+        // `core.finder` the page read "Finder" / "What the Finder extension
+        // adds." / "The Finder Sync extension is what draws CrossOS's entries
+        // in Finder." as three headings of nearly equal weight, the last of
+        // them at the left margin with nothing around it.
+        //
+        // Secondary ink at caption size is what macOS uses for exactly this:
+        // text that elaborates rather than announces.
+        label.font = Typeface.caption
+        label.textColor = Palette.secondaryInk
+        label.alignment = .left
         label.lineBreakMode = .byWordWrapping
+        label.usesSingleLineMode = false
         label.maximumNumberOfLines = 0
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let column = NSStackView(views: [label])
-        column.orientation = .vertical
-        column.alignment = .leading
-        column.spacing = Gap.tight
-        column.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(column)
-        NSLayoutConstraint.activate([
-            column.leadingAnchor.constraint(equalTo: leadingAnchor),
-            column.trailingAnchor.constraint(equalTo: trailingAnchor),
-            column.topAnchor.constraint(equalTo: topAnchor),
-            // The BOTTOM pin, and its absence is why three plugin rows
-            // overlapped by 14pt each in the first audit run.
-            //
-            // A view pinned leading/trailing/top and nothing else has no
-            // height: Auto Layout is free to give it zero and let the
-            // content overflow, and the content does — the switch on row two
-            // lands on top of the switch on row one. The audit named it as
-            // "NSSwitch and NSSwitch overlap by 54x14 [window A x=306 y=-11 |
-            // window B x=306 y=-21]", and the ten points between them were
-            // the ten points each row claimed for itself and none of them
-            // gave back.
-            column.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
-        ])
+        addArrangedSubview(label)
+        setContentHuggingPriority(.required, for: .vertical)
     }
 
     @available(*, unavailable)

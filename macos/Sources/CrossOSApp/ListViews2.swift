@@ -411,15 +411,26 @@ private final class PluginRow: NSStackView {
         toggle.target = proxy
         toggle.action = #selector(PluginTarget.fire(_:))
 
-        let title = NSTextField(labelWithString: meta.name)
-        title.font = Typeface.body
-        title.textColor = Palette.primaryInk
+        // A plugin always has a NAME on this row.
+        //
+        // `core.pluginMeta` sends `"name": ""` for all three builtin plugins —
+        // they are compiled from the rule table and have no manifest to name
+        // them — so the Extensions page rendered three rows with a checkbox, a
+        // reason, and no label at all: three identical orange sentences a
+        // reader cannot tell apart and cannot act on.
+        //
+        // The id is what the daemon does have, and it is humanised rather than
+        // printed raw: "windows-keyboard" is the schema, "Windows keyboard" is
+        // the plugin.
+        let displayName = meta.name.isEmpty
+            ? Humanize.phrase(meta.id.replacingOccurrences(of: "-", with: " "))
+            : meta.name
 
         // A `RowView` and not a hand-built header: the title on the left with
         // low hugging so the control wins the right edge, which is what every
         // other row in the app does. Two ways of building one row is how the
         // checkbox ended up outside every exemption the audit knows about.
-        let header = RowView(label: meta.name, control: toggle)
+        let header = RowView(label: displayName, control: toggle)
 
         let column = NSStackView(views: [header])
         column.orientation = .vertical
