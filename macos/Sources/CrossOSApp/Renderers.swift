@@ -461,14 +461,28 @@ class RowView: NSStackView {
         // a gap between them that the row fills. That is the whole row: a
         // settings row is two texts and a control, and the two texts are a
         // column because a sentence describes the word above it.
+        // The label column is pinned to the row's LEADING edge.
+        //
+        // It was pinned by nothing: a `greaterThanOrEqualToConstant: 200` plus
+        // low hugging and no leading constraint, so Auto Layout was free to
+ // give the column every spare point and the row's `.fill` distribution
+        // placed the pair wherever the slack landed. Measured on
+        // `core.observe`, "Record what CrossOS sees" started at x=755 in a
+        // group whose leading edge is x=40 — a label floating in the middle of
+        // an empty box with its checkbox on the far edge.
         let texts = NSStackView(views: subtitle.isEmpty ? [label] : [label, detail])
         texts.orientation = .vertical
         texts.alignment = .leading
+        texts.distribution = .fill
         texts.spacing = 1
         texts.translatesAutoresizingMaskIntoConstraints = false
         texts.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        texts.widthAnchor.constraint(greaterThanOrEqualToConstant: 200).isActive = true
+        texts.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         addArrangedSubview(texts)
+        NSLayoutConstraint.activate([
+            texts.leadingAnchor.constraint(equalTo: leadingAnchor),
+            texts.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
+        ])
         if let control {
             control.setContentHuggingPriority(.required, for: .horizontal)
             control.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -486,6 +500,26 @@ class RowView: NSStackView {
         // mid-air with the plugin's reason underneath and no name at all.
         heightAnchor.constraint(greaterThanOrEqualToConstant: Measure.rowHeight).isActive = true
         setContentHuggingPriority(.required, for: .vertical)
+    }
+
+    /// Bind to the stack that holds this row, once there is one.
+    ///
+    /// A `.leading`-aligned stack PROPOSES its width and a row with an
+    /// intrinsic width keeps it, so the row sized itself to its content and
+    /// the stack put it at the trailing edge: measured on `core.observe`, a
+    /// 224pt row sat at x=336 inside a 560pt content rect — a label and a
+    /// checkbox pushed to the right of an otherwise empty group.
+    ///
+    /// `init` cannot do this: `RowView` is built and RETURNED before anything
+    /// adds it to a stack, and a constraint needs a common ancestor at the
+    /// moment it activates.
+    public override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        guard let parent = superview as? NSStackView else { return }
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalTo: parent.widthAnchor),
+        ])
     }
 
     @available(*, unavailable)

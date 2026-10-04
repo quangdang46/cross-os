@@ -41,10 +41,22 @@ class CardControl: NSStackView {
             subtitle.isHidden = true
         } else {
             subtitle.stringValue = control.note
-            subtitle.font = Typeface.body
+            // Caption size, because this text now sits BELOW the group where
+            // a footnote belongs. It was body size when it was a title INSIDE
+            // the box, which made sense there; at body size under the group it
+            // is the same size as the page's own description and the page
+            // loses its hierarchy — on `core.activity` the footnote "Newest
+            // last. Clear empties the list…" read as a second description
+            // rather than as a note on the group above it.
+            subtitle.font = Typeface.caption
             subtitle.textColor = Palette.secondaryInk
+            subtitle.alignment = .left
             subtitle.lineBreakMode = .byWordWrapping
+            // `labelWithString:` sets `usesSingleLineMode`, and with it set a
+            // label ignores `byWordWrapping` and truncates instead.
+            subtitle.usesSingleLineMode = false
             subtitle.maximumNumberOfLines = 0
+            subtitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
 
         bodyStack.orientation = .vertical
