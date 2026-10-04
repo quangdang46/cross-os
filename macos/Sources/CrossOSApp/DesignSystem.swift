@@ -286,7 +286,15 @@ final class SectionView: NSStackView {
         distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
 
-        cap.stringValue = title
+        // The cap is HUMANISED, not printed raw. The daemon sends
+        // `label: "panel"` and `label: "rules"`, and a section cap reading
+        // "panel" is a schema value leaking into the interface — System
+        // Settings' caps read "Siri & Spotlight", never "siriAndSpotlight".
+        //
+        // Uppercase is NOT the answer: macOS section caps are sentence case,
+        // and a page of them set in all-caps reads as shouting and fights the
+        // page title it sits under.
+        cap.stringValue = Humanize.phrase(title)
         cap.font = Typeface.sectionCap
         cap.textColor = Palette.secondaryInk
         cap.isHidden = title.isEmpty

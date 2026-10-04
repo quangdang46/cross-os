@@ -30,7 +30,10 @@ class CardControl: NSStackView {
         distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
 
-        heading.stringValue = control.label.isEmpty ? control.id : control.label
+        // Humanised, for the same reason a section cap is: the daemon sends
+        // `label: "matrix"` and a heading reading "matrix" is a schema value
+        // leaking into the interface.
+        heading.stringValue = Humanize.phrase(control.label.isEmpty ? control.id : control.label)
         heading.font = Typeface.cardTitle
         heading.textColor = Palette.primaryInk
 
