@@ -138,8 +138,21 @@ public final class PageViewController: NSViewController {
         let document = TopDownDocument()
         document.translatesAutoresizingMaskIntoConstraints = false
         scroll.documentView = document
+        // The scroller floats OVER the page and is absent when the page fits.
+        //
+        // `scrollerStyle` is AppKit's name for it — not `overlayScrollers`,
+        // and not `NSScroller.style`; the compiler rejects both of those on
+        // this SDK, and the header is the authority:
+        // `NSScrollView.h:72` declares `@property NSScrollerStyle
+        // scrollerStyle`.
+        //
+        // What it buys, measured before it: no 17pt gutter reserved on a page
+        // whose content fits, and no track drawn down the full height of the
+        // pane. `core.home` has 326pt of page in a 720pt window and was
+        // carrying a grey stripe the whole way down beside it.
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
         scroll.drawsBackground = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
 

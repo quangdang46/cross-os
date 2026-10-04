@@ -47,19 +47,37 @@ final class HomeSummaryView: NSStackView {
         // line, with no second source of truth to keep in step.
         setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
+        // Each row fills the card's content rect, and both halves of that are
+        // load-bearing. Measured wrong in three different directions:
+        //
+        //   `.leading` rows: every row took its own content width — 314pt for
+        //   the row whose value is "CrossOS v0.1.0", 451pt for the row whose
+        //   value is a sentence — so three locks sat at three x positions in
+        //   three rows that read as one column.
+        //   `.width` alignment with the default distribution: the rows were
+        //   CENTRED rather than stretched, measured at x=137.
+        //   `.width` with low compression resistance: still 314pt at x=456,
+        //   because a `.width`-aligned stack proposes its width and does not
+        //   enforce it.
+        //
+        // The width is therefore STATED, once, by the constraint below, and
+        // `.leading` is kept because it is what puts a stretched row at the
+        // left of the width it was given.
         rows.orientation = .vertical
         rows.alignment = .leading
+        rows.distribution = .fill
         rows.spacing = Gap.row
         rows.translatesAutoresizingMaskIntoConstraints = false
-
-        foot.font = Typeface.caption
-        foot.textColor = Palette.secondaryInk
-        foot.lineBreakMode = .byWordWrapping
-        foot.maximumNumberOfLines = 0
+        rows.setContentHuggingPriority(.required, for: .vertical)
 
         let card = Card()
         addArrangedSubview(card)
-        card.setContent(NSStackView(views: [rows, foot]))
+        let column = NSStackView(views: [rows, foot])
+        card.setContent(column)
+        column.alignment = .leading
+        column.distribution = .fill
+        // `rows` is the card's content rect, and this is what says so.
+        rows.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
         NSLayoutConstraint.activate([
             card.leadingAnchor.constraint(equalTo: leadingAnchor),
             card.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -100,6 +118,18 @@ final class HomeSummaryView: NSStackView {
         Task { await reload() }
     }
 
+    /// Put a row in the column, at the column's full width.
+    ///
+    /// The width is STATED rather than negotiated. A `.leading`-aligned stack
+    /// gives each row the row's own intrinsic width, and a `.width`-aligned
+    /// one proposes its width without enforcing it — measured, rows came out
+    /// 314pt and 451pt, centred at x=456 in a 770pt content rect, so the lock
+    /// floated mid-card instead of on the card's trailing edge.
+    private func addRow(_ row: FactRow) {
+        rows.addArrangedSubview(row)
+        row.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("HomeSummaryView is created in code") }
 
@@ -118,24 +148,25 @@ final class HomeSummaryView: NSStackView {
         let version = statusValue?.version ?? "unknown"
         let running = statusValue?.running == true
         let interception = statusValue?.interception == true
+        let profile = activeProfileName(from: pluginRows)
 
-        rows.addArrangedSubview(FactRow(
+        addRow(FactRow(
             key: "Daemon",
             badge: running ? .healthy("Running") : .unhealthy("Not running"),
             value: "CrossOS \(version)",
             monospaced: true
         ))
-        rows.addArrangedSubview(FactRow(
+        addRow(FactRow(
             key: "Keyboard",
             badge: interception ? .healthy("On") : .unhealthy("Off"),
             value: interception
                 ? "CrossOS can read the keyboard and act on it."
                 : "CrossOS cannot see the keyboard yet."
         ))
-        rows.addArrangedSubview(FactRow(
+        addRow(FactRow(
             key: "Profile",
-            badge: .neutral(activeProfileName(from: pluginRows) ?? "None"),
-            value: activeProfileName(from: pluginRows) ?? "No profile applied"
+            badge: .neutral(profile ?? "None"),
+            value: profile ?? "No profile applied"
         ))
 
         if let error = statusValue?.tapError, !error.isEmpty, !interception {
@@ -187,30 +218,49 @@ final class FactRow: NSStackView {
     init(key: String, badge: Badge, value: String, monospaced: Bool = false) {
         super.init(frame: .zero)
 
+        // The row fills whatever width it is given, and says so.
+        //
+        // A row in a `.width`-aligned stack is meant to take the stack's
+        // width, but this one kept its 314pt intrinsic width and was centred
+        // in the 770pt content rect at x=456 — so the lock floated in the
+        // middle of the card instead of on its trailing edge. Low compression
+        // resistance is what "take the width you are offered" means to Auto
+        // Layout, and the stack's alignment is what offers it.
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
         let keyField = NSTextField(labelWithString: key)
         keyField.font = Typeface.body
         keyField.textColor = Palette.secondaryInk
-        keyField.alignment = .right
-        // The right edge is shared by every row, and it is shared because the
-        // key column is the same column — not because every key is a measured
-        // number of pixels.
-        keyField.widthAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
+        // LEFT aligned, not right. The key column is a fixed width so the
+        // values line up, and right-aligning inside it pushed "Profile" to
+        // x=192 while "Daemon" sat at x=126 — three keys, three left edges,
+        // in a column whose entire purpose is one shared left edge.
+        keyField.alignment = .left
+        // A FIXED key column, not `greaterThanOrEqualToConstant`. A minimum
+        // lets each row's key claim whatever width its own badge and value
+        // need, so the values started at three different x positions across
+        // the three rows above.
+        keyField.widthAnchor.constraint(equalToConstant: 110).isActive = true
 
         let badgeField = NSTextField(labelWithString: badge.text)
         badgeField.font = Typeface.caption
         badgeField.textColor = badge.color
-        badgeField.alignment = .right
+        badgeField.alignment = .left
+        // The badge is a COLUMN too, for the same reason: "Running" beside
+        // "Off" beside "None" put the values at three more x positions.
+        badgeField.widthAnchor.constraint(equalToConstant: 70).isActive = true
 
         let valueField = NSTextField(labelWithString: value)
         valueField.font = monospaced ? Typeface.mono : Typeface.body
         valueField.textColor = Palette.primaryInk
         valueField.lineBreakMode = .byTruncatingTail
 
-        // The lock: what says "this is fixed, not editable". A glyph rather
-        // than a padlock emoji — the React shell used U+1F512 and Chromium
-        // painted it as a yellow padlock, the only saturated non-accent colour
-        // in a window of three greys and one blue. SF Symbols has a lock and
-        // it takes the text colour.
+        // The lock, at the row's trailing edge.
+        //
+        // A glyph rather than a padlock emoji — the React shell used U+1F512
+        // and Chromium painted it as a yellow padlock, the only saturated
+        // non-accent colour in a window of three greys and one blue. SF
+        // Symbols has a lock and it takes the text colour.
         let lock = NSImageView()
         if let image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "Fixed") {
             lock.image = image
@@ -218,6 +268,10 @@ final class FactRow: NSStackView {
         lock.contentTintColor = Palette.tertiaryInk
         lock.translatesAutoresizingMaskIntoConstraints = false
         lock.setContentHuggingPriority(.required, for: .horizontal)
+        // Both axes: without a height the image view asked for 0 and the row
+        // gave it 0, so nothing drew.
+        lock.setContentHuggingPriority(.required, for: .vertical)
+        lock.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         for field in [keyField, badgeField, valueField] as [NSView] {
             field.translatesAutoresizingMaskIntoConstraints = false
@@ -226,20 +280,36 @@ final class FactRow: NSStackView {
         addSubview(lock)
 
         NSLayoutConstraint.activate([
+            // The row's HEIGHT is the tallest thing in it. `centerY` on a row
+            // with no height of its own is `centerY` on nothing: the row
+            // measured 314x0, every field landed at y=-7 (half of zero,
+            // negated) and all of it fell outside the row's own frame.
+            // `greaterThanOrEqual` rather than `equalTo` so a value that wraps
+            // to two lines grows the row instead of being clipped by it.
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 18),
+
             keyField.leadingAnchor.constraint(equalTo: leadingAnchor),
-            keyField.topAnchor.constraint(equalTo: topAnchor),
-            keyField.bottomAnchor.constraint(equalTo: bottomAnchor),
+            keyField.centerYAnchor.constraint(equalTo: centerYAnchor),
+            keyField.widthAnchor.constraint(equalToConstant: 110),
 
             badgeField.leadingAnchor.constraint(equalTo: keyField.trailingAnchor, constant: Gap.close),
-            badgeField.centerYAnchor.constraint(equalTo: keyField.centerYAnchor),
+            badgeField.centerYAnchor.constraint(equalTo: centerYAnchor),
+            badgeField.widthAnchor.constraint(equalToConstant: 70),
 
+            // The value takes the rest of the row, so the lock sits at the
+            // trailing edge rather than floating wherever the value ended.
+            // Before this the value was `lessThanOrEqualTo` the lock with
+            // nothing pulling it there, so the lock drifted left into the
+            // middle of the card — measured at x=426 in a 438pt row, hanging
+            // in the whitespace between "CrossOS v0.1.0" and the card edge.
             valueField.leadingAnchor.constraint(equalTo: badgeField.trailingAnchor, constant: Gap.row),
-            valueField.centerYAnchor.constraint(equalTo: keyField.centerYAnchor),
-            valueField.trailingAnchor.constraint(lessThanOrEqualTo: lock.leadingAnchor, constant: -Gap.row),
+            valueField.centerYAnchor.constraint(equalTo: centerYAnchor),
+            valueField.trailingAnchor.constraint(equalTo: lock.leadingAnchor, constant: -Gap.row),
 
             lock.trailingAnchor.constraint(equalTo: trailingAnchor),
-            lock.centerYAnchor.constraint(equalTo: keyField.centerYAnchor),
+            lock.centerYAnchor.constraint(equalTo: centerYAnchor),
             lock.widthAnchor.constraint(equalToConstant: 12),
+            lock.heightAnchor.constraint(equalToConstant: 14),
         ])
     }
 
