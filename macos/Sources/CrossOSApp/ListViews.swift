@@ -62,7 +62,7 @@ private final class MatrixTable: NSStackView, TableContent {
         let row = entries[row]
         switch column {
         case 0: return Chord.format(row.keys)
-        case 1: return Humanize.phrase(row.action)
+        case 1: return Humanize.action(row.action)
         case 2: return row.contexts.isEmpty
             ? "Anywhere"
             : row.contexts.map(Humanize.phrase).joined(separator: ", ")

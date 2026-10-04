@@ -55,21 +55,28 @@ final class TableView: NSStackView {
     private let table = NSTableView()
     private let scroll = NSScrollView()
     private let content: TableContent
-
+    /// The columns' requested widths, in order, so the slack between them and
+    /// the table's real width can be shared out once both are known.
+    private let requestedWidths: [CGFloat]
     init(content: TableContent) {
         self.content = content
+        self.requestedWidths = content.columns.map { $0.1 }
         super.init(frame: .zero)
+
+        let requested = requestedWidths.reduce(CGFloat(0)) { $0 + $1 }
 
         for (title, width) in content.columns {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(title))
             column.title = title
-            // A MINIMUM, and an `autoresizingMask` that lets the column
-            // shrink. `column.width = 150` is a FIXED size: AppKit honours it,
-            // the matrix's four columns come to 514pt of requested width, and
-            // the pane is 427pt — so 87pt of the table had nowhere to go and
-            // "Where" and "On" rendered past the right edge with a horizontal
-            // scroller to reach them. A settings pane with two hidden columns
-            // is a settings pane with two hidden columns.
+            // `column.width` IS the size, and it was never assigned — only
+            // `minWidth` and `maxWidth` were, so AppKit fell back to its own
+            // default for every column and every one of them truncated:
+            // "Native, Com…", "Clipboard.cop…", "Terminal.open…".
+            //
+            // A MINIMUM as well, and an `autoresizingMask` that lets the column
+            // shrink. A settings pane with two hidden columns is a settings
+            // pane with two hidden columns.
+            column.width = width
             column.minWidth = min(width, 60)
             // The last column is the one that must not grow: it is a
             // checkbox, and a checkbox in a 410pt column is a checkbox in
@@ -82,6 +89,11 @@ final class TableView: NSStackView {
             column.resizingMask = [.autoresizingMask]
             table.addTableColumn(column)
         }
+
+        // The requested widths are a FLOOR each, not a total: the matrix asks
+        // for 514pt and the group's content rect is 560pt, so the extra 46pt
+        // belongs to the columns that need it rather than to the checkbox.
+        // `shareSlack(over:)` applies it once the real width is known.
         if CommandLine.arguments.contains("--log-cols") {
             let d = table.tableColumns.enumerated()
                 .map { i, c in "\(c.title)@\(Int(table.rect(ofColumn: i).minX))w\(Int(c.width))" }
@@ -94,6 +106,22 @@ final class TableView: NSStackView {
         table.usesAlternatingRowBackgroundColors = true
         table.rowHeight = 26
         table.usesAutomaticRowHeights = false
+
+        // The columns are resized to the table's width BY THE TABLE, and this
+        // is the switch that says so.
+        //
+        // `NSTableView` lays its columns out by their own widths and ignores
+        // its own frame unless `columnAutoresizingStyle` says what to do. With
+        // the default `.noColumnAutoresizing`, constraining the table's width
+        // does nothing at all: the columns asked for 514pt, the table was
+        // constrained to 560pt, and the columns still drew 597pt wide — so
+        // "Where" ran past the group's rounded edge and the checkbox column
+        // landed outside the box entirely.
+        // `.uniform` scales every column proportionally to fill the table. It
+        // is the right one here because the checkbox column carries a
+        // `maxWidth` below, so it clamps instead of disappearing.
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+
         // A header is a header. `NSTableHeaderView` draws the system's own,
         // and one drawn by hand is one that has to learn resizing and sorting
         // and does not.
@@ -102,6 +130,10 @@ final class TableView: NSStackView {
         scroll.documentView = table
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
+        // The same overlay scroller the page uses. Without it the table
+        // reserves a gutter and draws a legacy scroller box down its full
+        // height — measured as a dark stripe crossing the last column.
+        scroll.scrollerStyle = .overlay
         scroll.drawsBackground = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
@@ -144,6 +176,31 @@ final class TableView: NSStackView {
             scroll.heightAnchor.constraint(lessThanOrEqualToConstant: 320),
             scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 26),
         ])
+
+        // The columns are sized by the TABLE's own autoresizing, set above,
+        // rather than by arithmetic here — `NSTableView` ignores its own frame
+        // for column layout unless `columnAutoresizingStyle` says what to do.
+    }
+
+    /// Bind to the stack that holds this table, once there is one.
+    ///
+    /// The table's width was NEVER constrained to its parent, and that is why
+    /// the matrix overflowed its own group by 37pt: a `.width`-aligned stack
+    /// PROPOSES its width, and a row with an intrinsic width keeps it. The
+    /// columns asked for 514pt, the table measured 597pt, and it was drawn
+    /// inside a 560pt content rect — so "Where" ran past the group's rounded
+    /// edge and the checkbox column landed outside the box entirely.
+    ///
+    /// `init` cannot do this: `TableView(content:)` is built and RETURNED
+    /// before anything adds it to a stack, and a constraint needs a common
+    /// ancestor at the moment it activates.
+    public override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        guard let parent = superview as? NSStackView else { return }
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalTo: parent.widthAnchor),
+        ])
     }
 
     @available(*, unavailable)
@@ -171,6 +228,18 @@ extension TableView: NSTableViewDelegate {
             let proxy = ToggleTarget.shared.register(checkbox, onChange: toggle.onChange)
             checkbox.target = proxy
             checkbox.action = #selector(ToggleTarget.fire(_:))
+            // The checkbox is CENTRED in its row, both ways. A cell view is
+            // given the column's frame and left to place itself, and an
+            // `NSButton` aligns itself to the BOTTOM of what it is given: the
+            // matrix's eleven checkboxes alternated between two heights down
+            // the last column, which reads as a rendering fault rather than
+            // as a column of checkboxes.
+            checkbox.frame = NSRect(
+                x: 0,
+                y: ((checkbox.frame.height - tableView.rowHeight) / 2).rounded(),
+                width: checkbox.frame.width,
+                height: tableView.rowHeight
+            )
             return checkbox
         }
 

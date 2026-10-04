@@ -268,16 +268,59 @@ enum Humanize {
         "minimize": "Minimize",
         "maximize": "Zoom",
         "close": "Close the window",
+        // The daemon's own action vocabulary, verbatim — these keys are
+        // lowerCamel and were measured from `config.getMatrix`, not guessed:
+        // `app.open`, `clipboard.copyPath`, `terminal.openAt`, `window.close`.
+        // An earlier table spelled them `App.open` and matched nothing, which
+        // is why the matrix kept printing "app.open" on the one page whose job
+        // is saying what each action does.
+        //
+        // `app.open` and `terminal.openAt` are two DIFFERENT actions — one
+        // opens whatever app is in front, the other opens a terminal at the
+        // cursor — so they cannot share an entry.
+        "app.open": "Open the front app",
+        "app.close": "Close the app",
+        "app.quit": "Quit the app",
+        "app.focus": "Bring the app forward",
+        "terminal.openAt": "Open Terminal here",
+        "clipboard.copy": "Copy to clipboard",
+        "clipboard.copyPath": "Copy the path",
+        "clipboard.paste": "Paste from clipboard",
+        "window.close": "Close the window",
+        "window.minimize": "Minimize the window",
+        "window.zoom": "Zoom the window",
+        "space.switch": "Switch space",
+        "finder.reveal": "Reveal in Finder",
+        "finder.rename": "Rename in Finder",
     ]
+
+    /// Humanise a daemon action verb.
+    ///
+    /// A thin name for `phrase`, used at the call sites that are reading an
+    /// ACTION rather than a word. It says at the point of use that this string
+    /// is the daemon's vocabulary and not a UI label — the reason it exists
+    /// rather than a call to `phrase` at each site.
+    ///
+    /// Measured against `config.getMatrix`, the actions carry no argument:
+    /// `app.open`, `clipboard.copyPath`, `terminal.openAt`, `window.close`. An
+    /// earlier version of this split on a space to keep an argument it was
+    /// written for and the daemon does not send.
+    static func action(_ raw: String) -> String { phrase(raw) }
 
     static func phrase(_ word: String) -> String {
         if let known = phrases[word] { return known }
         guard !word.isEmpty else { return word }
         // camelCase to words, then capitalise the first. A word that is one
         // letter is left alone: "x" is an axis name here, not a word.
+        //
+        // The split must not ADD a space where the daemon already wrote one.
+        // The matrix sends "Left Half" and "Open Window Switcher" in that Title
+        // Case, and splitting on the capital produced "Left  half" and "Open
+        // window  switcher" — a doubled gap on every sentence with no table
+        // entry, which is most of the Action column.
         var out = ""
         for (index, character) in word.enumerated() {
-            if character.isUppercase && index > 0 { out += " " }
+            if character.isUppercase, index > 0, out.last != " " { out += " " }
             out += String(character).lowercased()
         }
         guard let first = out.first else { return out }
