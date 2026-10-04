@@ -25,7 +25,9 @@ import CrossOSCore
 final class HomeSummaryView: NSStackView {
     private let client: any CoreClient
     private let rows = NSStackView()
-    private let foot = NSTextField(labelWithString: "")
+    /// The section: cap, group, footnote. The footnote is where the daemon's
+    /// tap warning goes — below the group, not as a fourth row inside it.
+    private var section: SectionView?
 
     init(control: Control, context: ControlContext) {
         self.client = context.service
@@ -47,73 +49,47 @@ final class HomeSummaryView: NSStackView {
         // line, with no second source of truth to keep in step.
         setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        // Each row fills the card's content rect, and both halves of that are
-        // load-bearing. Measured wrong in three different directions:
-        //
-        //   `.leading` rows: every row took its own content width — 314pt for
-        //   the row whose value is "CrossOS v0.1.0", 451pt for the row whose
-        //   value is a sentence — so three locks sat at three x positions in
-        //   three rows that read as one column.
-        //   `.width` alignment with the default distribution: the rows were
-        //   CENTRED rather than stretched, measured at x=137.
-        //   `.width` with low compression resistance: still 314pt at x=456,
-        //   because a `.width`-aligned stack proposes its width and does not
-        //   enforce it.
-        //
-        // The width is therefore STATED, once, by the constraint below, and
-        // `.leading` is kept because it is what puts a stretched row at the
-        // left of the width it was given.
+        // The rows are a GROUP with a cap above it, not a titled card. See
+        // `SectionView` for why the cap is outside the box: inside, every
+        // control renders as its own titled card and the page reads as a
+        // stack of web panels rather than as one settings window.
+        // The rows stack holds the FactRows directly; the group's insets pad
+        // the group as a whole. No spacing between rows: the group draws a
+        // hairline between them, which is the macOS arrangement. A gap AND a
+        // hairline would put two separators between every pair of rows.
         rows.orientation = .vertical
         rows.alignment = .leading
         rows.distribution = .fill
-        rows.spacing = Gap.row
+        rows.spacing = 0
         rows.translatesAutoresizingMaskIntoConstraints = false
         rows.setContentHuggingPriority(.required, for: .vertical)
 
-        let card = Card()
-        addArrangedSubview(card)
-        let column = NSStackView(views: [rows, foot])
-        card.setContent(column)
+        let section = SectionView(title: "Status")
+        self.section = section
+        addArrangedSubview(section)
+        let column = NSStackView(views: [rows])
         column.alignment = .leading
         column.distribution = .fill
-        // `rows` is the card's content rect, and this is what says so.
+        section.group.setContent(column)
+        // `rows` is the group's content rect, and this is what says so. A
+        // `.leading`-aligned stack gives each row the row's own width, so
+        // without this the three locks sat at three different x positions in
+        // three rows that read as one column.
         rows.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
         NSLayoutConstraint.activate([
-            card.leadingAnchor.constraint(equalTo: leadingAnchor),
-            card.trailingAnchor.constraint(equalTo: trailingAnchor),
-            card.topAnchor.constraint(equalTo: topAnchor),
-            // The card fills THIS view, and this view is sized by the stack
-            // that holds it. The width is not restated here because restating
-            // it needs a reference that does not exist yet at init time —
-            // `superview` is nil while these constraints are activated, which
-            // is a crash rather than a layout failure.
-            //
-            // So the width comes from the parent: `PageViewController` builds
-            // its stack with `.width` alignment, and a row in a `.width`
-            // stack is the stack's width. What that does NOT do is override a
-            // row's own intrinsic width, and a card holding labels has one —
-            // hence `setContentCompressionResistancePriority(.defaultLow)`
-            // above, which is what lets the stack's proposal win.
+            section.leadingAnchor.constraint(equalTo: leadingAnchor),
+            section.trailingAnchor.constraint(equalTo: trailingAnchor),
+            section.topAnchor.constraint(equalTo: topAnchor),
         ])
 
-        // Hug the card VERTICALLY, which is the width constraint's other half
-        // and was missing.
-        //
-        // A `.leading`-aligned vertical stack gives a row the height it
-        // measured, and this view measured zero: nothing tied its height to
-        // the card it holds. The card was then laid out below its own control
-        // — outside the clip view, below the page's own origin — so it was
-        // neither on screen nor in a render of the page. Every page came out
-        // with its title, its description and a hole exactly where the cards
-        // go, and the audit could not see it because the card DOES have a
-        // height; the row it hangs in does not.
-        setContentHuggingPriority(.defaultLow, for: .vertical)
-        // At REQUIRED, so "a card is the width of its pane" beats the card's
-        // own intrinsic width. A card that is the width of its longest label is
-        // a chip with a border, and a chip with a border in a settings pane
-        // reads as a control rather than as a group of controls.
-        card.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        card.widthAnchor.constraint(greaterThanOrEqualToConstant: 320).isActive = true
+        // Hug the group VERTICALLY, which is the width constraint's other
+        // half. Without it this view measures zero, the group is laid out
+        // below its own control — outside the clip view — and the page
+        // renders with a hole where the rows go.
+        setContentHuggingPriority(.required, for: .vertical)
+        // Low compression resistance so "the group is the width of its pane"
+        // beats the group's own intrinsic width.
+        section.group.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         Task { await reload() }
     }
@@ -169,16 +145,30 @@ final class HomeSummaryView: NSStackView {
             value: profile ?? "No profile applied"
         ))
 
+        // The daemon's own words, in its own order. The React shell showed a
+        // permission error as a blank panel because there was no channel for
+        // the message; the string is the whole value of a tap that is not on.
+        //
+        // "All checks are ready" is shown ONLY when there is something to say
+        // — a green footnote under a group of three green facts is noise, and
+        // it is noise on the most-read page in the app.
+        // The daemon's own words, in its own order. The React shell showed a
+        // permission error as a blank panel because there was no channel for
+        // the message; the string is the whole value of a tap that is not on.
+        //
+        // It goes in the FOOTNOTE, below the group. As a fourth row inside the
+        // box it read as a fourth fact, which is not what it is — it explains
+        // the "Off" above it.
+        //
+        // And it is shown ONLY when there is something to say: a green
+        // "All checks are ready" under a group of three green facts is noise,
+        // on the most-read page in the app.
         if let error = statusValue?.tapError, !error.isEmpty, !interception {
-            // The daemon's own words, in its own order. The React shell showed a
-            // permission error as a blank panel because there was no channel
-            // for the message; the string is the whole value of a tap that is
-            // not on.
-            foot.stringValue = "Keyboard interception is off: \(error)"
-            foot.textColor = Palette.warn
+            section?.footnote.stringValue = "Keyboard interception is off: \(error)"
+            section?.footnote.textColor = Palette.warn
+            section?.footnote.isHidden = false
         } else {
-            foot.stringValue = "All checks are ready."
-            foot.textColor = Palette.secondaryInk
+            section?.footnote.isHidden = true
         }
     }
 
@@ -284,9 +274,13 @@ final class FactRow: NSStackView {
             // with no height of its own is `centerY` on nothing: the row
             // measured 314x0, every field landed at y=-7 (half of zero,
             // negated) and all of it fell outside the row's own frame.
-            // `greaterThanOrEqual` rather than `equalTo` so a value that wraps
-            // to two lines grows the row instead of being clipped by it.
-            heightAnchor.constraint(greaterThanOrEqualToConstant: 18),
+            //
+            // 32pt, not the 18pt this declared before. A settings row is a
+            // target, and three 18pt rows separated by hairlines read as a
+            // list of chips rather than as the contents of one group.
+            // `greaterThanOrEqual` so a value that wraps grows the row rather
+            // than being clipped by it.
+            heightAnchor.constraint(greaterThanOrEqualToConstant: Measure.rowHeight),
 
             keyField.leadingAnchor.constraint(equalTo: leadingAnchor),
             keyField.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -352,53 +346,40 @@ final class ChecklistView: NSStackView {
 
         let stack = NSStackView()
         stack.orientation = .vertical
-        // `.leading` so the rows sit at the LEFT of a card that fills 810pt.
-        // `.width` would stretch each row and distribute them, which is what
-        // put every line at the trailing edge of the card: a card that fills
-        // and is unreadable.
+        // `.leading`, so each row sits at the LEFT of a group that fills the
+        // page. `.width` would stretch each row and distribute them, which is
+        // what put every line at the trailing edge: a group that fills and is
+        // unreadable.
         stack.alignment = .leading
         stack.distribution = .fill
+        // No spacing: the group draws a hairline between its rows, which is
+        // what macOS does. A gap AND a hairline is two separators.
+        stack.spacing = 0
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let card = Card()
-        addArrangedSubview(card)
-        card.setContent(stack)
+        // A cap above the group and a footnote below it, per `SectionView`.
+        let section = SectionView(title: "Readiness", note: control.note)
+        addArrangedSubview(section)
+        let column = NSStackView(views: [stack])
+        column.alignment = .leading
+        column.distribution = .fill
+        section.group.setContent(column)
+        stack.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
         NSLayoutConstraint.activate([
-            card.leadingAnchor.constraint(equalTo: leadingAnchor),
-            card.trailingAnchor.constraint(equalTo: trailingAnchor),
-            card.topAnchor.constraint(equalTo: topAnchor),
-            // The card fills THIS view, and this view is sized by the stack
-            // that holds it. The width is not restated here because restating
-            // it needs a reference that does not exist yet at init time —
-            // `superview` is nil while these constraints are activated, which
-            // is a crash rather than a layout failure.
-            //
-            // So the width comes from the parent: `PageViewController` builds
-            // its stack with `.width` alignment, and a row in a `.width`
-            // stack is the stack's width. What that does NOT do is override a
-            // row's own intrinsic width, and a card holding labels has one —
-            // hence `setContentCompressionResistancePriority(.defaultLow)`
-            // above, which is what lets the stack's proposal win.
+            section.leadingAnchor.constraint(equalTo: leadingAnchor),
+            section.trailingAnchor.constraint(equalTo: trailingAnchor),
+            section.topAnchor.constraint(equalTo: topAnchor),
         ])
 
-        // Hug the card VERTICALLY, which is the width constraint's other half
-        // and was missing.
-        //
-        // A `.leading`-aligned vertical stack gives a row the height it
-        // measured, and this view measured zero: nothing tied its height to
-        // the card it holds. The card was then laid out below its own control
-        // — outside the clip view, below the page's own origin — so it was
-        // neither on screen nor in a render of the page. Every page came out
-        // with its title, its description and a hole exactly where the cards
-        // go, and the audit could not see it because the card DOES have a
-        // height; the row it hangs in does not.
-        setContentHuggingPriority(.defaultLow, for: .vertical)
-        // At REQUIRED, so "a card is the width of its pane" beats the card's
-        // own intrinsic width. A card that is the width of its longest label is
-        // a chip with a border, and a chip with a border in a settings pane
-        // reads as a control rather than as a group of controls.
-        card.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        card.widthAnchor.constraint(greaterThanOrEqualToConstant: 320).isActive = true
+        // Hug the group VERTICALLY. A `.leading`-aligned vertical stack gives
+        // a row the height it measured, and this view measured zero: nothing
+        // tied its height to the group it holds. The group was then laid out
+        // below its own control — outside the clip view — so the page
+        // rendered with a hole exactly where the rows go.
+        setContentHuggingPriority(.required, for: .vertical)
+        // Low compression resistance so "the group is the width of its pane"
+        // beats the group's own intrinsic width.
+        section.group.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         Task { await load(context: context, wanted: control.items, into: stack) }
     }
@@ -424,22 +405,26 @@ final class ChecklistView: NSStackView {
         for row in shown {
             let chip = NSTextField(labelWithString: row.ready ? "Ready" : "Not ready")
             chip.font = Typeface.caption
-            chip.font = Typeface.caption
             chip.textColor = row.ready ? Palette.ok : Palette.danger
 
             let label = NSTextField(labelWithString: row.label)
             label.font = Typeface.body
             label.textColor = Palette.primaryInk
 
+            // The chip is a fixed-width column so every label in the group
+            // starts at the same x. Without it "Ready" and "Not ready" put
+            // their labels at two different positions in one list.
             let header = NSStackView(views: [chip, label])
             header.orientation = .horizontal
             header.alignment = .firstBaseline
             header.spacing = Gap.row
+            chip.widthAnchor.constraint(equalToConstant: 70).isActive = true
 
             let column = NSStackView(views: [header])
             column.orientation = .vertical
             column.alignment = .leading
             column.spacing = Gap.tight
+            column.translatesAutoresizingMaskIntoConstraints = false
 
             if !row.detail.isEmpty {
                 // The reason, on its own line. "Not ready" without a reason is
@@ -452,7 +437,27 @@ final class ChecklistView: NSStackView {
                 detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
                 column.addArrangedSubview(detail)
             }
-            stack.addArrangedSubview(column)
+
+            // Rows breathe. `stack.spacing = 0` because the group draws the
+            // hairline between rows, but a row still needs its own padding or
+            // the text sits ON the separator above it.
+            //
+            // The wrapper's constraints reference `padded` itself rather than
+            // the enclosing stack: a constraint needs a common ancestor at the
+            // moment it activates, and `padded` has no superview until
+            // `addArrangedSubview` — so pinning to a stack the row is not yet
+            // in throws `NSGenericException: ... no common ancestor`.
+            let padded = NSView()
+            padded.translatesAutoresizingMaskIntoConstraints = false
+            padded.addSubview(column)
+            stack.addArrangedSubview(padded)
+            NSLayoutConstraint.activate([
+                column.topAnchor.constraint(equalTo: padded.topAnchor, constant: Gap.close),
+                column.bottomAnchor.constraint(equalTo: padded.bottomAnchor, constant: -Gap.close),
+                column.leadingAnchor.constraint(equalTo: padded.leadingAnchor),
+                column.trailingAnchor.constraint(equalTo: padded.trailingAnchor),
+                padded.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            ])
         }
     }
 }

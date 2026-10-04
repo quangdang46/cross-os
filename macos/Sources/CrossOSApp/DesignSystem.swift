@@ -151,6 +151,40 @@ public enum Gap {
     public static let plane: CGFloat = 20
 }
 
+// MARK: - Measure
+
+/// The sizes a System Settings pane is built from.
+///
+/// This exists because "looks like macOS" was not something the design could
+/// get right by accident. The three values here are the ones that separate a
+/// macOS settings pane from a web page that happens to run in a window:
+/// content does not run the full width of the window, a group is a filled
+/// rounded rectangle with a 10pt radius rather than a bordered card with an
+/// 8pt one, and the rows inside a group are separated by inset hairlines
+/// rather than by each row carrying its own border.
+public enum Measure {
+    /// The widest a page's content is allowed to be.
+    ///
+    /// System Settings does not stretch its groups to the window edge; it
+    /// holds them to a readable measure and leaves the rest of the pane empty.
+    /// Without this a row of text runs the full 810pt of the pane, which is
+    /// the single clearest tell of a web layout in a native window — the eye
+    /// has no way to find the start of the next line.
+    public static let contentMaxWidth: CGFloat = 640
+
+    /// A group's own padding, and the inset its row separators start at.
+    ///
+    /// The separator is inset to the text's left edge rather than drawn from
+    /// the group's edge, which is what makes the rows read as one list instead
+    /// of as stacked boxes.
+    public static let groupPadding: CGFloat = 14
+
+    /// The height of a row in a group. System Settings' rows are 32pt with
+    /// room for a second line; a settings pane with 18pt rows reads as a list
+    /// of chips.
+    public static let rowHeight: CGFloat = 32
+}
+
 /// A corner radius, in points.
 ///
 /// Three values, and that is the whole scale. The React shell had seven radii
@@ -160,10 +194,15 @@ public enum Gap {
 public enum Radius {
     /// A control — a field, a button. Small, because a control with a large
     /// radius reads as a chip, not as something you put a value into.
-    public static let control: CGFloat = 5
-    /// A card or a group. The one generous value, on the one shape that earns
-    /// it.
-    public static let card: CGFloat = 8
+
+    /// A group.
+    ///
+    /// **10, not 8.** System Settings' inset groups are 10pt; 8 is the web
+    /// card radius, read off a CSS `border-radius` and carried through the
+    /// port. The number is the most visible single thing that made these
+    /// panes look like a browser, because the eye reads the shape before it
+    /// reads anything on it.
+    public static let card: CGFloat = 10
     /// A switch track and a chip. Full, because a capsule is what those two
     /// are and a rounded rectangle is neither.
     public static let capsule: CGFloat = 999
@@ -205,6 +244,101 @@ public enum Typeface {
 
     /// Machine text — a version, a daemon's error string, a log line.
     public static var mono: NSFont { .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular) }
+}
+
+// MARK: - Section
+
+/// One section of a settings page: a cap, a group, and a footnote.
+///
+/// **This is the shape System Settings draws, and getting it is most of what
+/// separates a macOS pane from a web page.** The three parts are:
+///
+///   1. a CAP above the group — a small semibold label for the group, not a
+///      title inside it. A heading inside the box makes the box a card with a
+///      title, which is a web pattern; a heading above it makes it a labelled
+///      group, which is a macOS one.
+///   2. the GROUP — the filled rounded rectangle holding the rows.
+///   3. a FOOTNOTE below it, in the secondary ink at caption size, explaining
+///      the group rather than heading it.
+///
+/// Everything inside the group is a ROW, and rows are separated by hairlines
+/// rather than each carrying its own border.
+///
+/// Putting the cap and the footnote outside the group is the change that
+/// matters. Both were inside the box, so every control rendered as its own
+/// titled card, and a page of them read as a stack of web panels rather than
+/// as one settings window.
+@MainActor
+final class SectionView: NSStackView {
+    /// The cap above the group.
+    let cap = NSTextField(labelWithString: "")
+    /// The footnote under it.
+    let footnote = NSTextField(labelWithString: "")
+    /// The group itself.
+    let group = Card()
+    /// The stack inside the group, where rows go.
+    let body = NSStackView()
+
+    init(title: String, note: String = "") {
+        super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .leading
+        distribution = .fill
+        translatesAutoresizingMaskIntoConstraints = false
+
+        cap.stringValue = title
+        cap.font = Typeface.sectionCap
+        cap.textColor = Palette.secondaryInk
+        cap.isHidden = title.isEmpty
+
+        body.orientation = .vertical
+        body.alignment = .leading
+        body.distribution = .fill
+        body.spacing = 0
+        body.translatesAutoresizingMaskIntoConstraints = false
+        body.setContentHuggingPriority(.required, for: .vertical)
+
+        footnote.stringValue = note
+        footnote.font = Typeface.caption
+        footnote.textColor = Palette.secondaryInk
+        footnote.lineBreakMode = .byWordWrapping
+        footnote.maximumNumberOfLines = 0
+        footnote.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        footnote.isHidden = note.isEmpty
+
+        group.setContent(body)
+
+        // Cap, group, footnote — and the SPACING is the design. The cap sits
+        // closer to the group it labels than to the group above it, and the
+        // footnote is set apart from both, because a footnote belongs to the
+        // group above it and to nothing else.
+        spacing = Gap.close
+
+        // Arrange FIRST, space SECOND.
+        //
+        // `setCustomSpacing(_:after:)` throws
+        // `NSInternalInconsistencyException` — "View is not (and has to be) in
+        // stack view" — for a view that is not yet an arranged subview, and
+        // there is no diagnostic saying which view it meant. The calls are
+        // therefore after every `addArrangedSubview`, which is also the order
+        // that reads correctly: the arrangement establishes what exists, and
+        // the spacing says how far apart they are.
+        if !title.isEmpty { addArrangedSubview(cap) }
+        addArrangedSubview(group)
+        // The footnote is ALWAYS arranged, and hidden when empty. Arranging it
+        // only when there is text in it means a caller that fills it later —
+        // the home page's tap warning arrives after the first paint — has no
+        // view to put the text in.
+        addArrangedSubview(footnote)
+
+        // The footnote is set apart from the group: 2pt reads as attached to
+        // it, and 10pt reads as belonging to the NEXT section.
+        if !title.isEmpty { setCustomSpacing(Gap.close, after: cap) }
+        setCustomSpacing(Gap.close, after: group)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("SectionView is created in code") }
 }
 
 // MARK: - Controls

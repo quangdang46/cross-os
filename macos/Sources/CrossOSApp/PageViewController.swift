@@ -174,6 +174,31 @@ public final class PageViewController: NSViewController {
         ])
         document.hold(stack, width: document.widthAnchor, minimumHeight: scroll.heightAnchor)
 
+        // The page's content is held to a READABLE measure and centred, which
+        // is the most visible single difference between a macOS settings pane
+        // and a web page in a window.
+        //
+        // System Settings does not run its groups to the window edge. At
+        // 1100x720 with a 250pt sidebar the content pane is 850pt, and a group
+        // stretched across all of it puts 810pt of unbroken text in front of
+        // the reader: the eye locates the start of a line by its left edge,
+        // and at that width there is nothing to locate it by.
+        //
+        // `centerX` rather than `leading`, because System Settings centres the
+        // measure in the pane — which stays balanced when the sidebar is
+        // dragged, and a settings pane is exactly the window whose sidebar a
+        // person resizes.
+        //
+        // The measure is `defaultHigh` and the pane's width `required`: on a
+        // narrow pane the content must still fill it rather than overflow, and
+        // on a wide one the measure wins.
+        let measure = stack.widthAnchor.constraint(equalToConstant: Measure.contentMaxWidth)
+        measure.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            measure,
+            stack.centerXAnchor.constraint(equalTo: document.centerXAnchor),
+        ])
+
         view = container
     }
 

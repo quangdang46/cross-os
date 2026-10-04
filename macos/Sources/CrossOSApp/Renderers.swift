@@ -257,26 +257,67 @@ class Card: NSStackView {
         edgeInsets = Card.inset
     }
 
-    /// The fill and the hairline, drawn in `draw(_:)` rather than set on the
-    /// layer.
+    /// The group and the hairlines inside it, drawn in `draw(_:)` rather than
+    /// set on the layer.
     ///
     /// A layer's `backgroundColor` is a property the compositor reads, and a
     /// PDF context is not a compositor: `dataWithPDF(inside:)` asks each view
     /// to DRAW, and a view whose only fill lives on its layer has nothing to
     /// draw. Every page came out with its title, its description and two holes
-    /// exactly where the cards were, for two reasons stacked — the NSBox host
+    /// exactly where the groups were, for two reasons stacked — the NSBox host
     /// view on top, and then the layer fill underneath it.
     ///
     /// `draw(_:)` is the path a print job takes and the path a PDF takes, so
     /// this is the one that renders in both.
+    ///
+    /// **Filled, not bordered.** System Settings draws a solid rounded
+    /// rectangle in `controlBackgroundColor` with a hairline around it. A
+    /// panel that is only a border reads as a web card sitting on the page
+    /// rather than as a group sitting on the window, because on macOS the
+    /// window background is itself a surface and the group is one level above
+    /// it.
+    ///
+    /// **One hairline between rows, not a border per row.** This is the other
+    /// half of the same problem: giving every row its own box produces a
+    /// column of cards with doubled lines between them. macOS separates rows
+    /// INSIDE a group with a single hairline that starts at the text's left
+    /// edge and stops at the trailing inset.
     public override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+        let inset = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let path = NSBezierPath(roundedRect: inset,
                                 xRadius: Radius.card, yRadius: Radius.card)
         Palette.cardBackground.setFill()
         path.fill()
         Palette.hairline.setStroke()
         path.lineWidth = 1
         path.stroke()
+
+        // A hairline between consecutive ROWS, and the rows are the content
+        // column's arranged subviews rather than this group's.
+        //
+        // `setContent` puts ONE subview in the group — the column — so
+        // `arrangedSubviews` here is a single view and reading separators off
+        // it draws one line across the whole group at the column's midpoint,
+        // which is the stray rule above the first row.
+        //
+        // The rows are asked of the column, one level down, and the lines are
+        // drawn at their shared edges. Each stops short of the group's rounded
+        // corners because a separator running edge to edge cuts the group's own
+        // border.
+        let column = arrangedSubviews.first
+        let rows = (column as? NSStackView)?.arrangedSubviews.filter { !$0.isHidden } ?? []
+        guard rows.count > 1 else { return }
+        let from = inset.minX + Card.inset.left
+        let to = inset.maxX - Card.inset.right
+        let separators = NSBezierPath()
+        separators.lineWidth = 1
+        for row in rows.dropLast() {
+            let edge = row.frame.maxY.rounded() + 0.5
+            separators.move(to: NSPoint(x: from, y: edge))
+            separators.line(to: NSPoint(x: to, y: edge))
+        }
+        Palette.hairline.setStroke()
+        separators.stroke()
     }
 
     @available(*, unavailable)
