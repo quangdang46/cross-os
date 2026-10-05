@@ -118,7 +118,7 @@ private final class ProfileCard: NSStackView {
         if profile.active {
             let applied = NSTextField(labelWithString: "Active")
             applied.font = Typeface.caption
-            applied.textColor = Palette.ok
+            applied.textColor = Palette.okInk
             header.addArrangedSubview(applied)
         } else {
             // A button only where there is a button's worth of point. The
@@ -509,7 +509,7 @@ private final class PluginRow: NSStackView {
         if !meta.loaded, let reason = meta.reason, !reason.isEmpty, !reasonIsShared {
             let field = NSTextField(labelWithString: reason)
             field.font = Typeface.caption
-            field.textColor = Palette.warn
+            field.textColor = Palette.warnInk
             field.lineBreakMode = .byWordWrapping
             field.usesSingleLineMode = false
             field.maximumNumberOfLines = 0

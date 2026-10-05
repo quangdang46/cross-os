@@ -251,7 +251,7 @@ private final class ConflictCard: NSStackView {
 
         let winner = NSTextField(labelWithString: "→ \(Humanize.phrase(conflict.winner))")
         winner.font = Typeface.body
-        winner.textColor = Palette.ok
+        winner.textColor = Palette.okInk
 
         let header = NSStackView(views: [chord, winner])
         header.orientation = .horizontal

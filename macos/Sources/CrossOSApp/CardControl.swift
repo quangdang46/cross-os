@@ -225,7 +225,7 @@ final class ErrorView: NSStackView {
 
         let headlineField = NSTextField(labelWithString: headline)
         headlineField.font = Typeface.bodyStrong
-        headlineField.textColor = Palette.danger
+        headlineField.textColor = Palette.dangerInk
         headlineField.lineBreakMode = .byWordWrapping
         headlineField.maximumNumberOfLines = 0
 

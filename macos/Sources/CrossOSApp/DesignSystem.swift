@@ -124,6 +124,46 @@ public enum Palette {
     /// reason as the accent: it follows the appearance.
     public static var danger: NSColor { .systemRed }
 
+    /// A status colour meant to be READ, not to fill something.
+    ///
+    /// **The system status colours fail WCAG AA as text on a light surface.**
+    /// Measured against `controlBackgroundColor`:
+    ///
+    ///     systemGreen    2.22:1   FAIL      (AA wants 4.5:1)
+    ///     systemOrange   2.31:1   FAIL
+    ///     systemRed      3.57:1   large text only
+    ///
+    /// macOS uses those three for FILLS, icons and badges, where the rule is
+    /// non-text contrast at 3:1 and they pass it. This app used them for
+    /// CAPTION-SIZED TEXT — the "Ready" and "Not ready" chips — and 2.22:1 is a
+    /// reading nobody should have to do.
+    ///
+    /// The colour is darkened toward black in the light appearance and
+    /// lightened toward white in the dark one, so it still follows the user's
+    /// appearance instead of being another value this file owns.
+    static func readable(_ colour: NSColor) -> NSColor {
+        let dark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        return colour.usingColorSpace(.sRGB).map { rgb in
+            let mix: CGFloat = dark ? 0.30 : 0.55
+            let to: CGFloat = dark ? 1.0 : 0.0
+            return NSColor(
+                srgbRed: rgb.redComponent * (1 - mix) + to * mix,
+                green: rgb.greenComponent * (1 - mix) + to * mix,
+                blue: rgb.blueComponent * (1 - mix) + to * mix,
+                alpha: rgb.alphaComponent
+            )
+        } ?? colour
+    }
+
+    /// A destructive action's INK. Readable at caption size, unlike `danger`.
+    public static var dangerInk: NSColor { readable(.systemRed) }
+
+    /// A healthy state's INK. Readable at caption size, unlike `ok`.
+    public static var okInk: NSColor { readable(.systemGreen) }
+
+    /// A warning's INK. Readable at caption size, unlike `warn`.
+    public static var warnInk: NSColor { readable(.systemOrange) }
+
     /// A healthy state.
     public static var ok: NSColor { .systemGreen }
 

@@ -428,7 +428,7 @@ final class ChecklistView: NSStackView {
         for row in shown {
             let chip = NSTextField(labelWithString: row.ready ? "Ready" : "Not ready")
             chip.font = Typeface.caption
-            chip.textColor = row.ready ? Palette.ok : Palette.danger
+            chip.textColor = row.ready ? Palette.okInk : Palette.dangerInk
 
             let label = NSTextField(labelWithString: row.label)
             label.font = Typeface.body
