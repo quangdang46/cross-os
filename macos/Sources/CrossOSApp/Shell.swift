@@ -23,11 +23,29 @@ public final class ShellWindowController: NSWindowController {
     private let sidebar: SidebarViewController
     private var refreshTimer: Timer?
 
-    /// The app's window size. `app/main.go:85` is where the Wails window
-    /// declared 1100x720, and it is the size every screenshot in
-    /// docs/baseline/ was taken at — the port is judged against those, so the
-    /// window does not get to be a different shape than what it replaces.
+    /// The app's window size.
+    ///
+    /// **This is the window's MINIMUM, not its size.** It was a fixed size —
+    /// 1100x720 because `app/main.go:85` declared it and every screenshot in
+    /// `docs/baseline/` was taken at it — and that fixed rectangle is the
+    /// single biggest reason these panes looked wrong: content filled about a
+    /// third of it and the rest was empty pane under every page. Fifteen pages
+    /// of a few boxes each, floating in the bottom-left of a 720pt window.
+    ///
+    /// Rectangle sizes its window to its content and keeps the size per tab:
+    ///
+    ///     let fitting = vc.view.fittingSize          // SettingsWindowController.swift:145
+    ///     let target = window.frameRect(forContentRect: ...)  // :167
+    ///     window.setFrame(frame, display: true, animate: animated)
+    ///
+    /// and a macOS settings window is sized to what is in it. The titlebar
+    /// adds on top of that, which is what `frameRect(forContentRect:)` is for.
     public static let contentSize = NSSize(width: 1100, height: 720)
+
+    /// The window height floor. Below this the sidebar's fifteen rows stop
+    /// fitting and scrolling a settings window to reach its last item is a
+    /// worse answer than a little empty space.
+    public static let minimumHeight: CGFloat = 480
 
     public init(client: any CoreClient) {
         self.client = client
@@ -40,7 +58,7 @@ public final class ShellWindowController: NSWindowController {
         )
         window.title = "CrossOS"
         window.titlebarAppearsTransparent = false
-        window.minSize = NSSize(width: 880, height: 560)
+        window.minSize = NSSize(width: 880, height: ShellWindowController.minimumHeight)
         // The split view IS the content view, so the title bar sits above it
         // rather than a toolbar floating in it. `fullSizeContentView` plus a
         // hidden title is what makes a sidebar reach the top of the window the
@@ -98,6 +116,49 @@ public final class ShellWindowController: NSWindowController {
 
     public func show(_ page: Page) {
         (split.splitViewItems.last?.viewController as? PageViewController)?.show(page)
+        window?.title = page.title
+        fitWindowToContent()
+    }
+
+    /// Size the window to the page's content, within a floor and a ceiling.
+    ///
+    /// This is the change that stops every page from being a few boxes in the
+    /// bottom-left of a 720pt window. A macOS settings window is sized to what
+    /// is in it — Rectangle does exactly this and keeps a saved size per tab
+    /// (`SettingsWindowController.swift:141-171`):
+    ///
+    ///     let fitting = vc.view.fittingSize
+    ///     let target = window.frameRect(forContentRect: NSRect(origin: .zero, size: contentSize))
+    ///     window.setFrame(frame, display: true, animate: animated)
+    ///
+    /// **The floor is the point.** A page can legitimately be short — `core.about`
+    /// is a licence and a version — and a window shrunk to a licence is a
+    /// window the reader cannot see the rest of the app in. So the window
+    /// shrinks to the content down to `minimumHeight` and no further, which
+    /// means a short page has a little empty space BELOW it and a tall page
+    /// has none at all. The empty space is at the bottom, where the eye does
+    /// not read for content, instead of on three sides of a small island.
+    ///
+    /// Not animated: the window resizes on every nav click and an animation
+    /// there makes the whole frame move under the pointer.
+    private func fitWindowToContent() {
+        guard let window, let page = pageController?.view else { return }
+        // The page's fitting size is asked AFTER layout, or it is the previous
+        // page's number: this runs on a nav click, and the new page's controls
+        // have not loaded yet.
+        let fitting = page.fittingSize
+        guard fitting.width > 0, fitting.height > 0 else { return }
+        let content = NSSize(
+            width: ShellWindowController.contentSize.width,
+            height: max(ShellWindowController.minimumHeight, fitting.height + Gap.plane)
+        )
+        let target = window.frameRect(forContentRect: NSRect(origin: .zero, size: content))
+        var frame = window.frame
+        // Keep the window's own position and only change its size — a settings
+        // window that jumps up and down the screen as the reader navigates is
+        // worse than the void it was fixing.
+        frame.size = target.size
+        window.setFrame(frame, display: true)
     }
 
     /// The 5s refresh, inherited from the React shell rather than invented.
