@@ -919,6 +919,30 @@ final class ActionTarget: NSObject {
             return
         }
 
+        // A destructive control asks FIRST.
+        //
+        // `core.safety`'s Reset Everything sends
+        // `confirm: "Remove login item, disable extension, clean CrossOS-owned
+        // state, verify no process remains?"` and the shell never read it — so
+        // the button that removes the login item, disables the extension and
+        // deletes CrossOS's own state was ONE CLICK, in an app whose first
+        // page is a Safety page. That is the one defect in this whole history
+        // that can cost somebody their setup.
+        //
+        // The question is the DAEMON's sentence, not one written here: the
+        // daemon knows what the step removes, and a paraphrase is one more
+        // place for the two to disagree about it.
+        if let confirm = binding.control.confirm, !confirm.isEmpty {
+            askThenRun(confirm, capability: capability, binding: binding)
+            return
+        }
+
+        dispatch(capability, binding)
+    }
+
+    /// Run a capability. Split out of `fire(_:)` so the confirmation path and
+    /// the direct path cannot drift into being two dispatch tables.
+    private func dispatch(_ capability: String, _ binding: Binding) {
         switch capability {
         case "safety.panicStop":
             run(binding, failure: "Panic stop failed.") {
@@ -946,6 +970,32 @@ final class ActionTarget: NSObject {
             // `actions.ts:402-409` specifies.
             binding.context.note("“\(capability)” is not wired yet in the AppKit shell.")
         }
+    }
+
+    /// Put the question in front of the person, and run the capability on yes.
+    ///
+    /// An `NSAlert` with the daemon's own wording, a Cancel that is the
+    /// default, and the destructive action named plainly rather than as
+    /// "OK". A sheet would suit a document better than a settings window, so
+    /// the alert is used rather than a bespoke overlay drawn from scratch.
+    private func askThenRun(
+        _ confirm: String,
+        capability: String,
+        binding: Binding
+    ) {
+        let alert = NSAlert()
+        alert.messageText = Humanize.phrase(capability)
+        alert.informativeText = confirm
+        alert.addButton(withTitle: capability == "safety.reset" ? "Reset Everything" : "Run")
+        alert.addButton(withTitle: "Cancel")
+        // Cancel is the default: a destructive action must be pressed twice on
+        // purpose, never taken by a stray Return.
+        alert.buttons.last?.keyEquivalent = "\u{1b}"
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            binding.context.note("\(Humanize.phrase(capability)) was not run.")
+            return
+        }
+        dispatch(capability, binding)
     }
 
     /// Run a capability and say plainly what happened.

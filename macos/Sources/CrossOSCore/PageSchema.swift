@@ -117,6 +117,20 @@ public struct Control: Sendable, Hashable {
         (payload["steps"]?.arrayValue ?? []).compactMap(\.stringValue)
     }
 
+    /// What to ask before running a destructive control.
+    ///
+    /// The daemon sends this on `core.safety`'s reset button — "Remove login
+    /// item, disable extension, clean CrossOS-owned state, verify no process
+    /// remains?" — and the shell has never read it, so Reset Everything has
+    /// been one click deep into the most destructive thing the app can do.
+    ///
+    /// It is the daemon's own sentence on purpose: the person who wrote the
+    /// step knows what it removes, and a shell that paraphrased it would be
+    /// one more place for the two to disagree.
+    public var confirm: String? {
+        payload["confirm"]?.stringValue
+    }
+
     /// Other pages this one links to, by page id — `aboutLink`, `trialLink`
     /// on the wizard (app/backend/onboarding.go:29).
     public func link(_ key: String) -> String? {

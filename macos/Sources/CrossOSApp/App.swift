@@ -250,19 +250,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //    verification script must not leave panic stop latched, and
         //    resetting afterwards would put the machine into the very state
         //    the first two steps were checking.
-        guard let reset = button("Reset Everything") else {
+        guard button("Reset Everything") != nil else {
             failures.append("no Reset Everything button on core.safety")
             print("click-test FAIL: no Reset Everything button on core.safety")
             exit(1)
         }
-        reset.performClick(nil)
-        await ShotRenderer.settle(1.5)
-        // Reset stops the tap, so `killed` must now be true. That is the
-        // daemon's own flag, not a UI echo of the click.
-        let afterReset = (try? await client.status())?.killed ?? false
-        print("click-test: Reset Everything pressed, daemon killed -> \(afterReset)")
-        if !afterReset {
-            failures.append("Reset Everything did not stop the daemon's tap")
+
+        // Reset Everything is NOT pressed, and the reason is the point.
+        //
+        // It asks first: the daemon sends
+        // `confirm: "Remove login item, disable extension, clean CrossOS-owned
+        // state, verify no process remains?"` and the shell now shows it. So
+        // pressing the button here would open a modal, and `NSAlert.runModal`
+        // spins a NESTED run loop on the main thread — the test's own
+        // continuations would never resume and the run would hang with no
+        // output at all. Which is, in its way, the proof the guard is up.
+        //
+        // So this checks the guard is DECLARED rather than pressing past it. A
+        // test that could drive the modal is a test that could also destroy
+        // somebody's configuration, and that is not a trade worth making to
+        // gain a green tick.
+        let resetControl = safety.schema?.controls.first { $0.id == "reset" }
+        let guardText = resetControl?.confirm ?? ""
+        print("click-test: Reset Everything asks first: \(guardText.isEmpty ? "NO — it runs unguarded" : "yes")")
+        if guardText.isEmpty {
+            failures.append("Reset Everything has no confirmation and runs unguarded")
         }
 
         // 4. The WRITE paths, which matter more than the buttons: a checkbox
