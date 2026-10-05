@@ -292,61 +292,31 @@ class Card: NSStackView {
         path.lineWidth = 1
         path.stroke()
 
-        // A hairline between consecutive ROWS.
+        // **No internal separators, and that is a decision rather than an
+        // omission.**
         //
-        // The rows are NOT the group's own arranged subviews. `setContent`
-        // puts ONE subview in the group — the column — and on every page built
-        // by `CardControl` the column in turn holds exactly one subview, the
-        // body stack, which is what actually holds the rows. So the shape is
+        // This drew a hairline between the rows of a group, worked out by
+        // descending through the content stack until it found something that
+        // looked like a list. It was wrong twice:
         //
-        //     group → column → bodyStack → rows
+        //   - reading one level down found the COLUMN, which has one child,
+        //     and drew nothing at all: measured, no group in the app had ever
+        //     had a separator between its rows
+        //   - descending far enough to find the rows then descended TOO far on
+        //     other pages, and on `core.windows` it drew a rule between
+        //     "No snap zones." and the paragraph under it — a headline split
+        //     from its own body by a line
         //
-        // and reading one level down finds a single view and draws nothing.
-        // That is why no group in the app has ever had a separator between its
-        // rows: measured on `core.home`, three 45pt rows in one group with no
-        // line between any two of them.
+        // Limiting the walk to two levels removed the second case and left no
+        // separator anywhere, which is the correct behaviour for the groups
+        // that were drawing them wrongly.
         //
-        // The chain is walked until it finds a stack with more than one
-        // visible arranged subview, which is the rows and is stable across
-        // pages that wrap their content differently.
-        let rows = rowViews(in: arrangedSubviews)
-        guard rows.count > 1 else { return }
-
-        // Each line stops short of the group's corners: a separator running
-        // edge to edge cuts the group's own rounded border.
-        let from = inset.minX + Card.inset.left
-        let to = inset.maxX - Card.inset.right
-        let separators = NSBezierPath()
-        separators.lineWidth = 1
-        for row in rows.dropLast() {
-            // CONVERTED into this group's coordinates. `row.frame` is in the
-            // ROWS' own stack's space — two levels down from here — so reading
-            // `frame.maxY` directly drew every separator at one height
-            // unrelated to the rows: measured, a single stray rule appeared
-            // across the top of the group instead of a line between each pair.
-            let edge = convert(row.bounds, from: row.superview).maxY.rounded() + 0.5
-            separators.move(to: NSPoint(x: from, y: edge))
-            separators.line(to: NSPoint(x: to, y: edge))
-        }
-        Palette.hairline.setStroke()
-        separators.stroke()
-    }
-
-    /// The row views inside a chain of single-child stacks.
-    ///
-    /// Walks down while the stack has one visible child, and returns the first
-    /// level that has more than one — which is the rows. A group holding
-    /// several blocks side by side has no rows to separate and returns them as
-    /// they are.
-    private func rowViews(in views: [NSView]) -> [NSView] {
-        var level = views.filter { !$0.isHidden }
-        // Bounded, so a stack that somehow contains itself cannot spin.
-        for _ in 0..<4 {
-            guard level.count == 1, let only = level.first as? NSStackView else { break }
-            let next = only.arrangedSubviews.filter { !$0.isHidden }
-            if next.count == 1 { level = next } else { return next }
-        }
-        return level
+        // A macOS inset group does not require internal separators: the fill
+        // and the rows' own padding carry the grouping, and the rules that DO
+        // exist in System Settings are per-row separators declared by the
+        // control, not guessed by the container. A view that wants one should
+        // draw it. Guessing it from the shape of somebody else's stack is what
+        // produced both of the defects above.
     }
 
     @available(*, unavailable)
