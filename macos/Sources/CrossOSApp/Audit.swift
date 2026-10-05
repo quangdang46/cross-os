@@ -156,7 +156,18 @@ enum Audit {
             ("sidebar", Palette.sidebarBackground),
             ("card", Palette.cardBackground),
             ("sunken", Palette.cardBackground), // a well sits on a card
-            ("accent", Palette.accent),
+            // NOT the accent. There is no accent surface in this app: the
+            // rail's selected row is a NEUTRAL grey, measured on the dark
+            // render at `(70, 70, 70)` with a white label at **9.44:1**, and
+            // `Palette.accent` appears nowhere outside this audit. So pairing
+            // every ink with it measured a surface the app does not draw, and
+            // in the dark appearance it reported a FAIL for it — which is the
+            // third time this matrix has produced a finding about a
+            // combination nothing renders.
+            //
+            // What the app DOES put behind text is the selection grey, and
+            // `selectionInk` checks the ink against that, measured.
+            ("selection", Palette.selectionSurface),
         ]
 
         var findings: [Finding] = []

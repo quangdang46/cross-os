@@ -57,6 +57,22 @@ public enum Palette {
     /// directions for free.
     public static var sidebarBackground: NSColor { .windowBackgroundColor }
 
+    /// The rail's selected row, as the system actually draws it.
+    ///
+    /// **Not the accent.** AppKit's `.regular` selection highlight tints the
+    /// row with the user's accent at a wash, which on this host resolves to a
+    /// neutral grey — measured on the dark render as `(70, 70, 70)` with a
+    /// white label, 9.44:1.
+    ///
+    /// It is a token because the audit needs the surface the app really puts
+    /// behind text, and using `controlAccentColor` for that measured a surface
+    /// nothing draws: `Palette.accent` appeared nowhere in the app outside the
+    /// audit's own list.
+    public static var selectionSurface: NSColor {
+        NSColor.selectedContentBackgroundColor.blended(withFraction: 0.65,
+                                                       of: .windowBackgroundColor) ?? .windowBackgroundColor
+    }
+
     /// A row at rest, before hover. The hover colour is `alternatingContentBackgroundColors`
     ///'s neighbour, not a hand-mixed translucent black: the system knows what
     /// a hover looks like in both appearances and in every accent.
@@ -142,7 +158,20 @@ public enum Palette {
     /// lightened toward white in the dark one, so it still follows the user's
     /// appearance instead of being another value this file owns.
     static func readable(_ colour: NSColor) -> NSColor {
-        let dark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        // `NSAppearance.currentDrawing()`, NOT `NSApp.effectiveAppearance`.
+        //
+        // The audit measures the same palette in both appearances by wrapping
+        // each pass in `performAsCurrentDrawingAppearance`, and that changes
+        // what is DRAWING — not what the app is configured as. Reading
+        // `NSApp.effectiveAppearance` here produced a dark-appropriated ink
+        // that was then measured against a light surface, and the audit
+        // reported `okInk on card is 2.12:1` for a colour that measures 8.35:1
+        // in the appearance it was built for.
+        //
+        // Caught by the audit, which is the first time here that a check written
+        // to catch a defect caught one in the thing that fixed a defect.
+        let drawing = NSAppearance.currentDrawing() ?? NSApp.effectiveAppearance
+        let dark = drawing.bestMatch(from: [NSAppearance.Name.aqua, .darkAqua]) == .darkAqua
         return colour.usingColorSpace(.sRGB).map { rgb in
             let mix: CGFloat = dark ? 0.30 : 0.55
             let to: CGFloat = dark ? 1.0 : 0.0
