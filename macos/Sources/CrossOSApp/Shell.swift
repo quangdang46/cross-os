@@ -193,6 +193,15 @@ public final class ShellWindowController: NSWindowController, NSToolbarDelegate 
     public func show(_ page: Page) {
         (split.splitViewItems.last?.viewController as? PageViewController)?.show(page)
         window?.title = page.title
+        // The rail follows the page.
+        //
+        // It does not when the page is shown directly rather than clicked, and
+        // that made every screenshot in `docs/screenshots/` show "Welcome"
+        // selected while a different page was displayed — a picture of a state
+        // the app is never actually in, which is worse than no picture. It is
+        // also what a deep link should do: arriving at a page should put the
+        // rail on it.
+        sidebar.select(page)
         fitWindowToContent()
     }
 
@@ -622,6 +631,25 @@ public final class SidebarViewController: NSViewController {
     private enum Row {
         case group(name: String)
         case page(Page)
+    }
+
+    /// Move the rail's selection onto a page, without telling the window.
+    ///
+    /// `selectRow(for:)` is the other half of a click: it selects AND fires
+    /// `onSelect`, which is what makes the window show the page. Calling that
+    /// from `show(_:)` would be a loop — the window shows a page, the page asks
+    /// the rail to select, the rail asks the window to show the page.
+    ///
+    /// This selects without firing, which is what "the rail follows the page"
+    /// means and nothing more.
+    func select(_ page: Page) {
+        let rows = flatRows
+        guard let index = rows.firstIndex(where: { row in
+            if case .page(let candidate) = row { return candidate.id == page.id }
+            return false
+        }) else { return }
+        outline.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+        outline.scrollRowToVisible(index)
     }
 
     private func selectRow(for page: Page) {
