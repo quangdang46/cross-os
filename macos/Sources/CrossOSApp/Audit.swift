@@ -390,6 +390,105 @@ enum Audit {
         )]
     }
 
+    /// Does the failure copy say what to DO?
+    ///
+    /// The seventh check, and the only one that reads strings instead of
+    /// frames. `ErrorView` states the rule in its own documentation — "a
+    /// person reading it should learn the cause and the one action that
+    /// changes it" — so this measures whether the copy obeys the contract
+    /// `ErrorView` already claims to hold.
+    ///
+    /// It reads the source rather than the rendered tree because these
+    /// messages only appear when the daemon is NOT answering, which is
+    /// exactly when the audit cannot run: a failure surface that is only
+    /// checked on a healthy daemon is never checked.
+    static func errorCopyAudit() -> [Finding] {
+        let root = URL(fileURLWithPath: sourceDirectory())
+        guard (try? root.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return [] }
+        var findings: [Finding] = []
+
+        // "The daemon did not answer X." names a CAUSE and stops. Every one of
+        // these is the same situation — the socket, or the daemon's build —
+        // and the app already knows what the reader should do about it,
+        // because exactly one of them says so.
+        guard let dirs = try? FileManager.default.contentsOfDirectory(atPath: root.path) else { return [] }
+        let cause = "The daemon did not answer"
+        /// The one message that names a next step is the rule, not a
+        /// violation of it.
+        let hint = "Is it running?"
+        var offenders: [String] = []
+
+        for dir in dirs {
+            let dirURL = root.appendingPathComponent(dir)
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: dirURL.path, isDirectory: &isDir), isDir.boolValue else { continue }
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: dirURL.path) else { continue }
+            // **Not this file.** The check's own copy contains the phrase it
+            // looks for, so without this it reported 17 offenders when the
+            // app has 15 — it was grading its own source text.
+            for name in names where name.hasSuffix(".swift") && name != "Audit.swift" {
+                guard let text = try? String(contentsOf: dirURL.appendingPathComponent(name), encoding: .utf8) else { continue }
+
+                // Scanned as a STRING, not line by line.
+                //
+                // A Swift string literal can be split across lines, and one of
+                // these is: `showError("The daemon did not answer.",` with the
+                // rest on the line below. A line-based check cannot see that
+                // the sentence is finished two lines later, so it reported the
+                // one message in the app that DOES say what to do as the one
+                // that does not — with a line number that was nine out.
+                //
+                // So each occurrence is checked against the next 160
+                // characters of the file, which covers a wrapped literal and
+                // does not reach the next message.
+                var index = text.startIndex
+                while let found = text.range(of: cause, range: index..<text.endIndex) {
+                    let after = text[found.upperBound...].prefix(160)
+                    let lineStart = text[..<found.lowerBound].lastIndex(of: "\n").map { text.index(after: $0) } ?? text.startIndex
+                    let head = String(text[lineStart..<found.lowerBound]).trimmingCharacters(in: .whitespaces)
+                    // A comment is not something a person reads.
+                    if !head.hasPrefix("//") && !after.contains(hint) {
+                        let shown = head.count > 80 ? String(head.prefix(80)) + "…" : head
+                        offenders.append("\(dir)/\(name): \(shown)")
+                    }
+                    index = found.upperBound
+                }
+            }
+        }
+
+        if offenders.count > 0 {
+            findings.append(Finding(
+                severity: .note, page: "errors",
+                what: "\(offenders.count) failure messages name a cause but no next step",
+                detail: "\(offenders.prefix(6).joined(separator: " | "))\(offenders.count > 6 ? " and \(offenders.count - 6) more" : "") "
+                      + "name what the daemon did not answer and stop there. `ErrorView`'s contract is "
+                      + "\"what failed and what to do about it\" — the second half is the half that helps, and "
+                      + "the situation is the same in every one of these."
+            ))
+        }
+        return findings
+    }
+
+    /// Where this app's sources are, found from the running binary.
+    ///
+    /// Walked up from the executable until a directory named `Sources` turns
+    /// up, rather than counting levels. The executable is at
+    /// `.build/<triple>/<config>/CrossOS`, so two levels up is
+    /// `.build/<triple>` and there is nothing there — the first version of
+    /// this returned a path that does not exist and silently found no
+    /// violations, which is the worst possible failure for a check like this:
+    /// it reported a clean app by looking at nothing.
+    static func sourceDirectory() -> String {
+        var dir = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+            .deletingLastPathComponent()
+        for _ in 0..<8 {
+            let candidate = dir.appendingPathComponent("Sources")
+            if FileManager.default.fileExists(atPath: candidate.path) { return candidate.path }
+            dir = dir.deletingLastPathComponent()
+        }
+        return ""
+    }
+
     static func fitAudit(root: NSView, page: String) -> [Finding] {
         var findings: [Finding] = []
         let leaves = collect(root)

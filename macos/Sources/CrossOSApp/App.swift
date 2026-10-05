@@ -51,6 +51,13 @@ struct CrossOSApp {
             NSApp.appearance = NSAppearance(named: .darkAqua)
         }
 
+        // Set before the audit runs, so every finding's `detail` is printed.
+        // Without it the audit explains its own rules to a file descriptor
+        // nobody has open.
+        if CommandLine.arguments.contains("--verbose") {
+            AuditPrinter.verbose = true
+        }
+
         if CommandLine.arguments.contains("--audit") {
             // Top-level, NOT inside a Task. Swift's top-level `await` runs
             // the main actor with an implicit run loop, and that is the thing
@@ -641,6 +648,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let systemFindings = Audit.contrastMatrix()
             + Audit.contrastMatrix(inAppearance: .darkAqua)
             + Audit.rhythmAudit()
+            + Audit.errorCopyAudit()
         var findings = systemFindings
         print("design system")
         AuditPrinter.emitPage("design system", findings: systemFindings)

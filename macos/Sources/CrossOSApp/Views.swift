@@ -430,7 +430,7 @@ final class ChecklistView: NSStackView {
         guard let rows = try? await context.service.readiness() else {
             stack.addArrangedSubview(EmptyStateView(
                 headline: "Could not read the readiness list.",
-                detail: "The daemon did not answer core.readiness. Is it running? (./scripts/run.sh)"
+                detail: didNotAnswer("core.readiness")
             ))
             return
         }

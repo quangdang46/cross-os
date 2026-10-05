@@ -229,6 +229,23 @@ class CardControl: NSStackView {
     }
 }
 
+/// The one sentence every unreadable-page failure says.
+///
+/// `ErrorView`'s contract is "what failed and what to do about it", and the
+/// audit measured fifteen messages that gave the first half and stopped.
+/// Every one of them is the same situation — the socket, or the daemon's
+/// build — and the app already knew what the reader should do about it,
+/// because exactly one message said so:
+///
+///     The daemon did not answer core.readiness.
+///     **Is it running? (./scripts/run.sh)**
+///
+/// Fifteen separate strings are fifteen chances to leave the second line
+/// out, and fifteen were left out. So there is one string now.
+func didNotAnswer(_ method: String) -> String {
+    "The daemon did not answer \(method). Is it running? (./scripts/run.sh)"
+}
+
 /// A failure that says what failed and what to do about it.
 ///
 /// The rule is that "No data" is a failure of the state and not a description

@@ -238,7 +238,7 @@ final class PluginDetailView: CardControl {
 
     private func load(control: Control, context: ControlContext) async {
         guard let all = try? await context.service.pluginMeta() else {
-            showError("Could not read the plugin.", "The daemon did not answer core.pluginMeta.")
+            showError("Could not read the plugin.", didNotAnswer("core.pluginMeta"))
             return
         }
         // The page names the plugin by capability id, and the id is the
@@ -278,7 +278,7 @@ final class KeymapEditorView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let rows = try? await context.service.matrix() else {
-            showError("Could not read the keymap.", "The daemon did not answer config.getMatrix.")
+            showError("Could not read the keymap.", didNotAnswer("config.getMatrix"))
             return
         }
         let column = NSStackView()
@@ -401,7 +401,7 @@ final class SchemaFormView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let schemas = try? await context.service.pluginSchemas() else {
-            showError("Could not read the plugin schemas.", "The daemon did not answer core.pluginSchemas.")
+            showError("Could not read the plugin schemas.", didNotAnswer("core.pluginSchemas"))
             return
         }
         guard let schema = schemas.first else {

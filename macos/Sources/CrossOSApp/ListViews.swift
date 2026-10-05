@@ -23,7 +23,7 @@ final class MatrixView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let loaded = try? await context.service.matrix() else {
-            showError("Could not read the behaviour matrix.", "The daemon did not answer config.getMatrix.")
+            showError("Could not read the behaviour matrix.", didNotAnswer("config.getMatrix"))
             return
         }
         replaceBody(with: MatrixTable(rows: loaded, service: context.service, note: context.note))
@@ -143,7 +143,7 @@ final class OverridesView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let loaded = try? await context.service.overrides() else {
-            showError("Could not read the overrides.", "The daemon did not answer config.getOverrides.")
+            showError("Could not read the overrides.", didNotAnswer("config.getOverrides"))
             return
         }
         guard !loaded.isEmpty else {
@@ -214,7 +214,7 @@ final class ConflictResolverView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let loaded = try? await context.service.conflicts() else {
-            showError("Could not read the conflicts.", "The daemon did not answer core.conflicts.")
+            showError("Could not read the conflicts.", didNotAnswer("core.conflicts"))
             return
         }
         guard !loaded.isEmpty else {
@@ -307,7 +307,7 @@ final class ObserveToggleView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let state = try? await context.service.observeState() else {
-            showError("Could not read the recorder.", "The daemon did not answer core.observeState.")
+            showError("Could not read the recorder.", didNotAnswer("core.observeState"))
             return
         }
         replaceBody(with: ObserveBody(state: state))
@@ -438,7 +438,7 @@ final class AuditListView: CardControl {
         } catch {
             showError(
                 "Could not read the audit list.",
-                "The daemon did not answer safety.ownershipAudit: \(error)"
+                "The daemon did not answer safety.ownershipAudit. Is it running? (./scripts/run.sh) \(error)"
             )
         }
     }

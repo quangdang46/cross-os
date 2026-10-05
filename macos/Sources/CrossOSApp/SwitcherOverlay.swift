@@ -117,7 +117,8 @@ public final class SwitcherOverlayController: NSObject, NSWindowDelegate {
                 } catch {
                     let stillLive = await self.currentGeneration
                     guard mine == stillLive else { return }
-                    self.grid.showError("The daemon did not answer.", "\(error)")
+                    self.grid.showError("The daemon did not answer.",
+                                   "Is it running? (./scripts/run.sh) \(error)")
                     return
                 }
             }

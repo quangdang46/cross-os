@@ -22,7 +22,7 @@ final class ProfileListView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let profiles = try? await context.service.profiles() else {
-            showError("Could not read the profiles.", "The daemon did not answer core.profiles.")
+            showError("Could not read the profiles.", didNotAnswer("core.profiles"))
             return
         }
         guard !profiles.isEmpty else {
@@ -205,7 +205,7 @@ final class FileTypeListView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let rows = try? await context.service.fileTypes() else {
-            showError("Could not read the file types.", "The daemon did not answer core.fileTypes.")
+            showError("Could not read the file types.", didNotAnswer("core.fileTypes"))
             return
         }
         replaceBody(with: FileTypeTable(rows: rows, service: context.service, note: context.note))
@@ -320,7 +320,7 @@ final class PipelineTraceView: CardControl {
             }
             replaceBody(with: TraceTable(rows: rows, service: context.service, note: context.note))
         } catch {
-            showError("Could not read the timeline.", "The daemon did not answer core.traces.")
+            showError("Could not read the timeline.", didNotAnswer("core.traces"))
         }
     }
 }
