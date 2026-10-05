@@ -499,6 +499,13 @@ public final class SidebarViewController: NSViewController {
         // deprecated spelling; `.regular` is the modern one and AppKit tints
         // it with the user's accent automatically, in both appearances.
         outline.style = .sourceList
+        // `.regular`, which is what System Settings uses.
+        //
+        // `.sourceList` is the deprecated spelling and it draws a SOLID accent
+        // bar the height of the row, which is the 2010 System Preferences
+        // look. `.regular` tints the row with the user's accent at a wash and
+        // leaves the label at full strength, which is the modern one and the
+        // one that reads as "you are here" rather than as a highlight.
         outline.selectionHighlightStyle = .regular
         // `.regular` and not the deprecated `.sourceList` highlight: the
         // deprecated one paints a SOLID accent bar the height of the row, which
