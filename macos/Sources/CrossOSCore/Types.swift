@@ -224,3 +224,43 @@ public struct AuditRow: Codable, Sendable, Equatable {
         self.createdAt = createdAt
     }
 }
+
+/// What `safety.reset` actually did, step by step.
+///
+/// The shape matters more than the convenience: a destructive control that
+/// returns a Bool has told the person who pressed it nothing. This returns
+/// the daemon's own report so the UI can show which steps ran, which were
+/// skipped because the resource was not there, and which failed.
+///
+/// `complete` is the daemon's verdict and is expected to be `false` on a
+/// successful reset — the last step, "verify no CrossOS process remains",
+/// cannot be checked from inside the process being checked.
+public struct ResetReport: Sendable, Equatable {
+    public struct Step: Sendable, Equatable {
+        /// What the step was, in the daemon's words.
+        public let name: String
+        /// Whether it ran successfully.
+        public let done: Bool
+        /// What happened — a path, an error, or "not present".
+        public let detail: String
+
+        public init(name: String, done: Bool, detail: String) {
+            self.name = name
+            self.done = done
+            self.detail = detail
+        }
+    }
+
+    public let steps: [Step]
+    public let complete: Bool
+
+    public init(steps: [Step], complete: Bool) {
+        self.steps = steps
+        self.complete = complete
+    }
+
+    /// One line per step, for the note the person pressed the button sees.
+    public var summary: String {
+        steps.map { "\($0.name): \($0.detail)" }.joined(separator: " · ")
+    }
+}

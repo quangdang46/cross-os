@@ -119,6 +119,14 @@ public protocol CoreClient: Sendable {
     func panicStop() async throws -> JSONValue
     func resume() async throws -> JSONValue
 
+    /// Reset Everything (`safety.reset`): what it did, step by step.
+    ///
+    /// Returns the daemon's own report rather than a Bool, because a safety
+    /// control that says "done" without saying what it did is the failure mode
+    /// this whole method exists to avoid. The last step is always reported
+    /// incomplete — a process cannot verify its own absence.
+    func reset() async throws -> ResetReport
+
     /// The behaviour matrix (`config.getMatrix`).
     func matrix() async throws -> [MatrixRow]
 
@@ -651,6 +659,28 @@ public actor LiveCoreClient: CoreClient {
 
     public func resume() async throws -> JSONValue {
         try await call("safety.resume", .object([:]))
+    }
+
+    public func reset() async throws -> ResetReport {
+        let raw = try await call("safety.reset", .object([:]))
+        guard case .object(let fields) = raw,
+              case .array(let steps)? = fields["steps"] else {
+            throw CoreError.decode(
+                method: "safety.reset",
+                underlying: DecodeShapeError.expectedObject
+            )
+        }
+        let parsed = steps.compactMap { step -> ResetReport.Step? in
+            guard case .object(let f) = step,
+                  case .string(let name)? = f["step"],
+                  case .bool(let done)? = f["done"] else { return nil }
+            return ResetReport.Step(
+                name: name,
+                done: done,
+                detail: f["detail"]?.stringValue ?? ""
+            )
+        }
+        return ResetReport(steps: parsed, complete: fields["complete"]?.boolValue ?? false)
     }
 
     public func setRuleEnabled(ruleID: String, enabled: Bool) async throws -> Bool {

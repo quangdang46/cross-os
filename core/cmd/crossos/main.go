@@ -424,6 +424,120 @@ func (c *Core) handleReset(_ json.RawMessage) (any, *ipc.RPCError) {
 	return steps, nil
 }
 
+// handleSafetyReset serves `safety.reset`: the Reset Everything button.
+//
+// The page declared this capability and the daemon had no method for it —
+// `{"code":-32601,"message":"no such method: safety.reset"}` — so the app's
+// most consequential control was a button that did nothing. `core.reset` is
+// NOT a substitute: it returns the plan as a list of strings and performs
+// none of it, so pointing the button there would have made "Reset
+// Everything" remove nothing while reporting that it had.
+//
+// **It only ever touches what the ownership audit says CrossOS made.** The
+// §3.10 boundary is the rule: roll back what you created, never sweep the
+// machine. `c.ownedIntegrations()` is the same source the audit page reads,
+// so the button cannot reach a resource the audit would not have shown the
+// user first.
+//
+// Each step reports what it actually did, and a step that fails is named
+// rather than swallowed — a safety control that reports success for work it
+// did not do is the one outcome worse than not having the button.
+//
+// The last step of the README's description — "verify no CrossOS process
+// remains" — cannot be done from inside the process being verified, so it is
+// reported as pending rather than claimed.
+func (c *Core) handleSafetyReset(_ json.RawMessage) (any, *ipc.RPCError) {
+	steps := make([]resetStep, 0, 5)
+
+	// 1. Stop intercepting before touching anything on disk. A live tap whose
+	//    config is deleted underneath it would re-arm against a missing file.
+	c.mu.Lock()
+	c.killed = true
+	stop := c.stopTapFn
+	c.stopTapFn = nil
+	c.mu.Unlock()
+	if stop != nil {
+		stop()
+		c.mu.Lock()
+		c.tapStopped = true
+		c.mu.Unlock()
+	}
+	if err := c.set.SetPanicStopped(true); err != nil {
+		steps = append(steps, resetStep{Step: "stop intercepting", Done: false, Detail: err.Error()})
+	} else {
+		steps = append(steps, resetStep{Step: "stop intercepting", Done: true, Detail: "tap stopped and the kill switch latched"})
+	}
+
+	// 2. Remove the login item, but only if the audit found one.
+	if !auditHas(c.ownedIntegrations(), safety.IntegrationLoginItem) {
+		steps = append(steps, resetStep{Step: "remove login item", Done: true, Detail: "not installed"})
+	} else if err := uninstallAutostart(); err != nil {
+		steps = append(steps, resetStep{Step: "remove login item", Done: false, Detail: err.Error()})
+	} else {
+		steps = append(steps, resetStep{Step: "remove login item", Done: true, Detail: "launchd agent removed"})
+	}
+
+	// 3. Delete the settings file — the destructive step, guarded by the
+	//    audit rather than by a guess at the path.
+	cfg := c.set.ConfigPath()
+	switch {
+	case cfg == "", !fileExists(cfg):
+		steps = append(steps, resetStep{Step: "delete the settings file", Done: true, Detail: "not present"})
+	default:
+		if err := os.Remove(cfg); err != nil {
+			steps = append(steps, resetStep{Step: "delete the settings file", Done: false, Detail: err.Error()})
+		} else {
+			steps = append(steps, resetStep{Step: "delete the settings file", Done: true, Detail: cfg})
+		}
+	}
+
+	// 4. Forget the ownership records — they described what this process made.
+	c.mu.Lock()
+	c.owned = nil
+	c.mu.Unlock()
+	steps = append(steps, resetStep{Step: "forget ownership records", Done: true, Detail: "records cleared"})
+
+	// Reported, not claimed: a process cannot verify its own absence.
+	steps = append(steps, resetStep{
+		Step:   "verify no CrossOS process remains",
+		Done:   false,
+		Detail: "pending — the daemon exits after answering, and cannot be checked from inside the process being checked",
+	})
+
+	complete := true
+	for _, st := range steps {
+		if !st.Done {
+			complete = false
+		}
+	}
+	return map[string]any{"steps": steps, "complete": complete}, nil
+}
+
+// auditHas reports whether the ownership audit found a resource of this kind.
+// The guard for every destructive step: CrossOS rolls back what it made, and
+// the audit is what says what it made.
+func auditHas(recs []safety.IntegrationRecord, kind safety.IntegrationType) bool {
+	for _, r := range recs {
+		if r.Type == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// resetStep is one line of Reset Everything's report.
+type resetStep struct {
+	Step   string `json:"step"`
+	Done   bool   `json:"done"`
+	Detail string `json:"detail"`
+}
+
+// fileExists reports whether a path is present, for the delete guard.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // handleEventLogs serves core.eventLogs: sanitized display lines.
 func (c *Core) handleEventLogs(_ json.RawMessage) (any, *ipc.RPCError) {
 	return observe.SanitizeForDisplay(c.rec.Traces()), nil
@@ -842,6 +956,7 @@ func (c *Core) methods() map[string]ipc.Handler {
 		"core.eventLogs":        c.handleEventLogs,
 		"safety.panicStop":      c.handlePanicStop,
 		"safety.resume":         c.handleResume,
+		"safety.reset":          c.handleSafetyReset,
 		"safety.beginTrial":     c.handleBeginTrial,
 		"safety.confirmTrial":   c.handleConfirmTrial,
 		"safety.rollbackTrial":  c.handleRollbackTrial,

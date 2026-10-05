@@ -828,12 +828,11 @@ final class ActionTarget: NSObject {
     ///     safety.panicStop → {"buffersFlushed":true,"interceptionDisabled":true,…}
     ///     safety.resume   → {"interception":false,"resumed":true}
     ///
-    /// **`safety.reset` is NOT here because it does not exist.** The page
-    /// declares a Reset Everything button with `"action": "safety.reset"` and
-    /// the daemon answers `no such method: safety.reset`. Wiring it to
-    /// something else would make a safety control do a different thing than
-    /// its label says, which is worse than saying it cannot run. It fails
-    /// closed, naming the capability, until the daemon has the method.
+    /// **`safety.reset` was absent for a long time and is now real.** The page
+    /// declared a Reset Everything button with `"action": "safety.reset"` and
+    /// the daemon answered `no such method: safety.reset` — the app's most
+    /// consequential control was a button that did nothing. The daemon now
+    /// implements it, and it reports each step rather than a bare success.
     @objc func fire(_ sender: NSButton) {
         guard let binding = bindings[ObjectIdentifier(sender)] else { return }
         let capability = binding.control.action
@@ -850,6 +849,19 @@ final class ActionTarget: NSObject {
         case "safety.resume":
             run(binding, failure: "Could not re-enable interception.") {
                 try await binding.context.service.resume()
+            }
+        case "safety.reset":
+            // Reset Everything reports rather than announces: the note is the
+            // daemon's own step list, because a destructive control that says
+            // "done" without saying what it did is the failure this whole
+            // button exists to prevent.
+            Task { @MainActor in
+                do {
+                    let report = try await binding.context.service.reset()
+                    binding.context.note(report.summary)
+                } catch {
+                    binding.context.note("Reset Everything failed: \(error)")
+                }
             }
         default:
             // Failing closed, naming the capability — the behaviour

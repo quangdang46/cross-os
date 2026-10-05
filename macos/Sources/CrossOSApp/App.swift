@@ -223,19 +223,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             failures.append("Re-enable did not clear the daemon's kill flag")
         }
 
-        // 3. The Reset Everything button has no daemon method behind it, so it
-        //    must SAY SO rather than appear to work. Its action id is
-        //    `safety.reset` and the daemon answers "no such method".
-        if let reset = button("Reset Everything") {
-            reset.performClick(nil)
-            await ShotRenderer.settle(0.8)
-            print("click-test: Reset Everything pressed — it is expected to fail closed")
-        } else {
+        // 3. Reset Everything is the destructive one, so it runs LAST — after
+        //    the round trip that leaves the machine as it was found.
+        //
+        //    It is not skipped for being destructive; it is last because a
+        //    verification script must not leave panic stop latched, and
+        //    resetting afterwards would put the machine into the very state
+        //    the first two steps were checking.
+        guard let reset = button("Reset Everything") else {
             failures.append("no Reset Everything button on core.safety")
+            print("click-test FAIL: no Reset Everything button on core.safety")
+            exit(1)
+        }
+        reset.performClick(nil)
+        await ShotRenderer.settle(1.5)
+        // Reset stops the tap, so `killed` must now be true. That is the
+        // daemon's own flag, not a UI echo of the click.
+        let afterReset = (try? await client.status())?.killed ?? false
+        print("click-test: Reset Everything pressed, daemon killed -> \(afterReset)")
+        if !afterReset {
+            failures.append("Reset Everything did not stop the daemon's tap")
         }
 
         if failures.isEmpty {
-            print("CLICK TEST PASS — 2 of 3 buttons reach the daemon, the third fails closed by design")
+            print("CLICK TEST PASS — all 3 buttons reach the daemon")
             exit(0)
         }
         for f in failures { print("click-test FAIL: \(f)") }

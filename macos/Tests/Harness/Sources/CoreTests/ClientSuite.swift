@@ -267,6 +267,19 @@ public actor SpiedCoreClient: CoreClient {
         record("safety.resume")
         return .object(["resumed": .bool(true)])
     }
+
+    public func reset() async throws -> ResetReport {
+        record("safety.reset")
+        return ResetReport(
+            steps: [
+                .init(name: "stop intercepting", done: true, detail: "tap stopped"),
+                .init(name: "remove login item", done: true, detail: "not installed"),
+                .init(name: "delete the settings file", done: true, detail: "not present"),
+                .init(name: "verify no CrossOS process remains", done: false, detail: "pending"),
+            ],
+            complete: false
+        )
+    }
 }
 
 // The two footguns, in the order the Go client demonstrates them.
