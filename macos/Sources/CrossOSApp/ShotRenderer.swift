@@ -91,12 +91,6 @@ enum ShotRenderer {
         let bounds = view.bounds
         guard bounds.width > 0, bounds.height > 0 else { throw ShotError.noContentView }
 
-        // `performAsCurrent` around the draw, not just `view.appearance`.
-        //
-        // A dynamic `NSColor` resolves against `NSAppearance.current`, which
-        // is a THREAD-level thing set by the enclosing `performAsCurrent` —
-        // setting `view.appearance` sets it for the view's own subviews in a
-        // window and does nothing at all for a view drawn outside one.
         let pdf = view.dataWithPDF(inside: bounds)
         // A temporary file, because CGPDFDocument takes a URL and the PDF is
         // in memory. The alternative — CFDataProvider over the Data — does not
