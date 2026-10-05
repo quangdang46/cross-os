@@ -566,9 +566,24 @@ public actor LiveCoreClient: CoreClient {
     }
 
     public func setShortcuts(_ rows: [JSONValue]) async throws -> Int {
-        let params = JSONValue.array(rows)
+        // WRAPPED, not a bare array. The daemon answers
+        // `need {shortcuts:[{action,modifiers,key}]}` for the array form, so
+        // every write to the shortcut list failed on its shape and the row the
+        // person had just edited reverted on the next read.
+        let params = JSONValue.object(["shortcuts": .array(rows)])
         let raw = try await call("config.setShortcuts", params)
-        return raw.intValue ?? 0
+        // The count comes back under `shortcuts` here and under `count` for
+        // `config.setZones` — two handlers, two spellings. Measured:
+        // `config.setShortcuts` answers `{"shortcuts":1}` and
+        // `config.setZones` answers `{"count":1}`. Reading `count` from both
+        // made a successful shortcut write throw as if it had failed.
+        guard let count = count(from: raw, keys: ["shortcuts", "count"]) else {
+            throw CoreError.decode(
+                method: "config.setShortcuts",
+                underlying: DecodeShapeError.expectedObject
+            )
+        }
+        return count
     }
 
     public func zones() async throws -> [ZoneRow] {
@@ -578,8 +593,33 @@ public actor LiveCoreClient: CoreClient {
     public func setZones(_ zones: [ZoneRow]) async throws -> Int {
         let data = try JSONEncoder().encode(zones)
         let rows = try JSONDecoder().decode([JSONValue].self, from: data)
-        let raw = try await call("config.setZones", .array(rows))
-        return raw.intValue ?? 0
+        // WRAPPED, for the same reason as `setShortcuts` above: the daemon
+        // answers `need {zones:[{id,name,x,y,w,h}]}` for a bare array, so
+        // drawing a window zone and saving it wrote nothing.
+        let raw = try await call("config.setZones", .object(["zones": .array(rows)]))
+        guard let count = count(from: raw, keys: ["count", "zones"]) else {
+            throw CoreError.decode(
+                method: "config.setZones",
+                underlying: DecodeShapeError.expectedObject
+            )
+        }
+        return count
+    }
+
+
+    /// Read a count out of a daemon answer, trying each key it might be under.
+    ///
+    /// Two handlers in the daemon spell the same answer differently — one
+    /// returns `{"shortcuts": n}` and the other `{"count": n}` — so a client
+    /// that reads one key throws on a write that succeeded. Trying both is the
+    /// honest response to a protocol that has not settled on a name, and it is
+    /// what keeps a green write from being reported as a failure.
+    private func count(from raw: JSONValue, keys: [String]) -> Int? {
+        guard let object = raw.objectValue else { return nil }
+        for key in keys {
+            if let value = object[key]?.intValue { return value }
+        }
+        return nil
     }
 
     public func userRules() async throws -> [UserRuleRow] {
