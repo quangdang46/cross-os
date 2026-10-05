@@ -46,7 +46,7 @@ func TestRealDispatchCommitsAndDoesNotBlock(t *testing.T) {
 		Decide:   c.decideLocked,
 		Dispatch: c.dispatch,
 		Context:  focus.get,
-		Log:      daemonTapLog{},
+		Log:      tapLog,
 	}
 	adapter.BindDecideForTest(d)
 	defer adapter.BindDecideForTest(nil)
@@ -102,7 +102,7 @@ func TestMacKeycodesDriveRules(t *testing.T) {
 		Decide:   c.decideLocked,
 		Dispatch: func(intent.Request) error { return nil },
 		Context:  focus.get,
-		Log:      daemonTapLog{},
+		Log:      tapLog,
 	}
 	adapter.BindDecideForTest(d)
 	defer adapter.BindDecideForTest(nil)

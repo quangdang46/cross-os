@@ -135,7 +135,7 @@ func NewCoreWithSettings(rules []event.CompiledRule, grants map[string][]intent.
 	}
 	c := &Core{
 		daemon:    d,
-		switcher:  newSwitcherService(adapter.NewWindowLister(&adapter.Driver{Log: daemonTapLog{}})),
+		switcher:  newSwitcherService(adapter.NewWindowLister(&adapter.Driver{Log: tapLog})),
 		router:    event.Compile(rules, reg, grants, nil),
 		rec:       record.NewRecorder(),
 		set:       set,
@@ -1110,7 +1110,7 @@ func (c *Core) startTap() func() {
 		Decide:   c.decideLocked,
 		Dispatch: c.dispatch,
 		Context:  cache.get,
-		Log:      daemonTapLog{},
+		Log:      tapLog,
 	}
 	// A persisted PANIC STOP outranks everything: do not touch the keyboard.
 	if c.set.PanicStopped() {
@@ -1170,10 +1170,57 @@ func (c *Core) startTap() func() {
 
 // daemonTapLog forwards adapter stage logs to the daemon's stdout so a
 // tap failure is visible without the UI.
-type daemonTapLog struct{}
+//
+// **A message is printed when it changes, not once per occurrence.** The
+// adapter's query path runs on a poll — `Focused()` on every tick — and
+// when the permission is missing every one of those calls fails the same
+// way, so an unconditional write turned one missing permission into
+// thousands of identical lines: measured at 340KB of `adapter: ax focused
+// failed (AXError -25204)` and nothing else in the file.
+//
+// That is not only noise. A log that repeats itself buries the one line
+// that mattered, and it fills a disk — which is this repo's own standing
+// warning, having been bitten by a full volume once already.
+//
+// So: the first message for a stage is printed, a DIFFERENT message for
+// that stage is printed along with how many copies of the previous one
+// were dropped, and a repeat of what is already showing is dropped.
+// Recovery stays visible — granting the permission changes the message and
+// it gets through — which a plain "log once, ever" would have swallowed.
+type daemonTapLog struct {
+	mu      sync.Mutex
+	stage   string
+	message string
+	dropped int
+}
 
-func (daemonTapLog) Log(stage, msg string) {
+// tapLog is the daemon's one log sink.
+var tapLog = &daemonTapLog{}
+
+func (d *daemonTapLog) Log(stage, msg string) {
+	d.mu.Lock()
+	changed := !d.dropped0(stage, msg)
+	suppressed := d.dropped
+	if changed {
+		d.stage, d.message, d.dropped = stage, msg, 0
+	} else {
+		d.dropped++
+	}
+	d.mu.Unlock()
+
+	if !changed {
+		return
+	}
 	fmt.Fprintf(os.Stderr, "crossos: [%s] %s\n", stage, msg)
+	if suppressed > 0 {
+		fmt.Fprintf(os.Stderr, "crossos: [%s] (previous message repeated %d times)\n", stage, suppressed)
+	}
+}
+
+// dropped0 reports whether this is a message the sink has not already shown.
+// Callers hold the lock.
+func (d *daemonTapLog) dropped0(stage, msg string) bool {
+	return d.stage != stage || d.message != msg
 }
 
 // dispatch executes an authorized capability through the adapter seam
@@ -1228,7 +1275,7 @@ func (c *Core) windowDispatch(req intent.Request, cache *appCache) error {
 	if !ok {
 		return fmt.Errorf("core: no focused window known yet (accessibility consent missing, or the watcher has not primed)")
 	}
-	wq := adapter.NewWindowQuery(&adapter.Driver{Log: daemonTapLog{}})
+	wq := adapter.NewWindowQuery(&adapter.Driver{Log: tapLog})
 	visible := winlayout.Rect{X: fw.X, Y: fw.Y, W: fw.W, H: fw.H}
 	m := adapter.MoveResize{ID: fw.ID}
 	switch req.Capability.ID {
@@ -1576,7 +1623,7 @@ func (a *appCache) window() (adapter.FocusedWindow, bool) {
 // tidier, but the poll is off the callback path, costs one AX call per
 // interval, and keeps the tap free of notification handling.
 func (c *Core) watchFocusedApp(stop <-chan struct{}, cache *appCache) {
-	wq := adapter.NewWindowQuery(&adapter.Driver{Log: daemonTapLog{}})
+	wq := adapter.NewWindowQuery(&adapter.Driver{Log: tapLog})
 	tick := time.NewTicker(500 * time.Millisecond)
 	defer tick.Stop()
 	// The AX focused-window call is a synchronous IPC to the frontmost app

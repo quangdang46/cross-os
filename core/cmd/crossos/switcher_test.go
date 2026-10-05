@@ -476,7 +476,7 @@ func TestSwitcherMethodsAreRegistered(t *testing.T) {
 // consent, because that is a permission state and not a defect to assert
 // around.
 func TestLiveListenerAgainstTheMachineWindows(t *testing.T) {
-	lister := adapter.NewWindowLister(&adapter.Driver{Log: daemonTapLog{}})
+	lister := adapter.NewWindowLister(&adapter.Driver{Log: tapLog})
 	snapshot, err := lister.ListWindows()
 	if err != nil {
 		t.Skipf("the window server is not answering on this machine: %v", err)
