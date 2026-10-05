@@ -460,11 +460,11 @@ enum Audit {
             // A hit target under the floor.
             if isInteractive(view), !isIndicatorInRow(view) {
                 let size = frame.size
-                if size.width < 20 || size.height < 20 {
+                if size.width < Self.minimumHitTarget || size.height < Self.minimumHitTarget {
                     findings.append(Finding(
                         severity: .fail, page: page,
-                        what: "\(type(of: view)) is \(Int(size.width))x\(Int(size.height)) — under 20pt",
-                        detail: "a control smaller than 20pt in either axis is hard to hit and harder "
+                        what: "\(type(of: view)) is \(Int(size.width))x\(Int(size.height)) — under 24pt",
+                        detail: "a control smaller than 24pt in either axis is hard to hit and harder "
                               + "to see the focus ring on. The macOS minimum is not a suggestion here: "
                               + "this is a window people click in a hurry."
                     ))
@@ -610,11 +610,31 @@ enum Audit {
         // indicator rather than its only control.
         var node: NSView? = parent
         while let current = node {
-            if current is RowView { return true }
+            if current is RowView {
+                // **Only if the row is actually a hit target.**
+                //
+                // The exemption exists because a checkbox inside a clickable
+                // row is not a 16pt target — it is a 32pt one, because the row
+                // is what takes the click. Measured on `core.extensions`, every
+                // 16x16 button sits in a `RowView 32` tall.
+                //
+                // Without this condition the exemption is a blanket pass: a
+                // checkbox in a 16pt row is a genuinely 16pt target, and the
+                // check that exists to catch exactly that would wave it
+                // through because it found the word `RowView` somewhere above
+                // it in the tree. An exemption that does not check what it
+                // exempts is a hole, not a rule.
+                return current.frame.height >= Self.minimumHitTarget
+            }
             node = current.superview
         }
         return false
     }
+
+    /// 24pt, in either axis — Apple's minimum and WCAG 2.5.8's.
+    ///
+    /// The floor the hit-target rule reports against.
+    static let minimumHitTarget: CGFloat = 24
 
     static func isInteractive(_ view: NSView) -> Bool {
         if view is NSButton || view is NSSwitch || view is NSSearchField { return true }
