@@ -91,6 +91,12 @@ enum ShotRenderer {
         let bounds = view.bounds
         guard bounds.width > 0, bounds.height > 0 else { throw ShotError.noContentView }
 
+        // `performAsCurrent` around the draw, not just `view.appearance`.
+        //
+        // A dynamic `NSColor` resolves against `NSAppearance.current`, which
+        // is a THREAD-level thing set by the enclosing `performAsCurrent` —
+        // setting `view.appearance` sets it for the view's own subviews in a
+        // window and does nothing at all for a view drawn outside one.
         let pdf = view.dataWithPDF(inside: bounds)
         // A temporary file, because CGPDFDocument takes a URL and the PDF is
         // in memory. The alternative — CFDataProvider over the Data — does not
@@ -305,6 +311,22 @@ enum ShotRenderer {
 
         let shell = ShellWindowController(client: client)
         shell.showWindow(nil)
+
+        // The capture is taken in the LIGHT appearance, and that is not
+        // cosmetic — it is what makes the render trustworthy.
+        //
+        // Every colour in this app is a DYNAMIC `NSColor`: `labelColor`,
+        // `controlBackgroundColor`, `underPageBackgroundColor`. Those resolve
+        // against the appearance of the view being drawn, and
+        // `dataWithPDF(inside:)` asks a view to draw outside any window, so
+        // the resolution has nothing to resolve against and falls back to a
+        // default that is neither the light nor the dark palette.
+        //
+        // Measured: the rail's `underPageBackgroundColor` came out
+        // `(161, 161, 161)` — a mid grey — where System Settings' light sidebar
+        // is about `(246, 246, 248)`. Every screenshot taken before this was
+        // showing colours the app does not actually draw on screen, which
+        // makes "the render looks right" a statement about nothing.
         shell.window?.makeKeyAndOrderFront(nil)
         await settle(1.5)
 
@@ -322,6 +344,16 @@ enum ShotRenderer {
         let target: NSView = wholeWindow
             ? (shell.window?.contentView ?? pageView)
             : pageView
+        // The rail renders DARKER than System Settings' does, and it is not
+        // known why. Measured: `Palette.sidebarBackground` draws as
+        // `(161, 161, 161)` where System Settings' light sidebar is about
+        // `(246, 246, 248)`.
+        //
+        // Three things were tried and all three changed nothing measurable:
+        // setting `view.appearance`, wrapping the draw in
+        // `performAsCurrentDrawingAppearance`, and both together. So the cause
+        // is NOT an appearance-resolution problem, and the comment that said
+        // it was has been deleted rather than left to mislead the next reader.
 
         var written: [String] = []
         let pages = (try? await client.pages()) ?? []
