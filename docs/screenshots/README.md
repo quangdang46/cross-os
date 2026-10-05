@@ -21,6 +21,26 @@ layout defect in this repo was measured on half the app.
 git add docs/screenshots && git commit
 ```
 
+## The app itself has been run
+
+Every check in this repo until now ran the shell **in-process** — `--shots`,
+`--audit` and `--click-test` all build the window inside the same binary that
+draws the pictures. That is not the same as the app running.
+
+It has now been run as a released, double-clicked app:
+
+```sh
+swift build --package-path macos -c release
+open macos/.build/release/CrossOS
+```
+
+Measured: the process is named `CrossOS`, it stays up, and the daemon stays up
+beside it for as long as it is left. It was alive after two minutes, and it quit
+cleanly on request.
+
+What that does NOT prove is anything about the picture — a window existing is
+not evidence of how it looks, which is the reason these PNGs exist at all.
+
 ## What is NOT in these pictures
 
 **The title bar and the toolbar are missing**, so the search field is not in
