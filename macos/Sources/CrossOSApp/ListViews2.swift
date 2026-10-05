@@ -75,12 +75,26 @@ private final class ProfileCard: NSStackView {
         // things and of those one is already on is a different promise from
         // "applies 3 changes", and a card that says only the second is a card
         // that over-promises.
-        var summary = ""
-        for capability in profile.capabilities ?? [] {
-            if summary.isEmpty { summary = "\(capability.label): " }
-            else { summary += " · " }
-            summary += "\(capability.willEnable) on, \(capability.alreadyOn) already"
+        //
+        // EVERY capability is named, and one that changes nothing is left out.
+        //
+        // It labelled only the first: measured on `core.profiles`, a profile
+        // with four capabilities rendered as
+        //
+        //     Windows Keyboard Shortcuts: 0 on, 0 already · 0 on, 0 already
+        //     · 0 on, 0 already · 0 on, 0 already
+        //
+        // — one name and three unlabelled counts, so a reader cannot tell
+        // which is which and the line reads as the same thing repeated four
+        // times. And a capability that will enable nothing and already has
+        // nothing on is not a fact about this profile; it is noise between the
+        // ones that are.
+        let relevant = (profile.capabilities ?? []).filter {
+            $0.willEnable > 0 || $0.alreadyOn > 0
         }
+        let summary = relevant
+            .map { "\($0.label): \($0.willEnable) on, \($0.alreadyOn) already" }
+            .joined(separator: " · ")
 
         let body = NSStackView(views: [detail])
         body.orientation = .vertical

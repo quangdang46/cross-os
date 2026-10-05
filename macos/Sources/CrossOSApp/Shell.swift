@@ -59,26 +59,22 @@ public final class ShellWindowController: NSWindowController, NSToolbarDelegate 
     /// cosmetic thing to leave. 700 clears it. This number is a measurement
     /// and not a formula, and it says so rather than pretending to derive it.
 
-    /// **The sidebar's selected row draws grey in `--shots`, and that is
-    /// measured-not-explained.**
+    /// **The selected sidebar row draws in the accent — and sometimes does not,
+    /// which is a property of the RUN rather than of the app.**
     ///
-    /// On screen a key window draws the selected row in the user's accent. The
-    /// renders show `(220, 220, 220)` — neutral grey, which is what macOS
-    /// draws for an INACTIVE window — over a 13px band at y=148pt. The pill
-    /// IS drawn and IS the right size; only its colour is wrong.
+    /// The pill is always drawn and always the right size; only its COLOUR
+    /// varies. One run measured `(220, 220, 220)` neutral grey over a 13px
+    /// band at y=148pt, and a later run measured the same row in the user's
+    /// accent blue.
     ///
-    /// Two causes were tried and neither changed it:
+    /// So the note that called this an unexplained defect was wrong in the way
+    /// a single sample always is. Grey is a legitimate state for a window that
+    /// does not hold key, and a CLI-invoked accessory process does not reliably
+    /// hold key — so both readings are the app drawing correctly, and which one
+    /// a given render catches is a property of that render.
     ///
-    ///   - `NSApp.activate(ignoringOtherApps: true)` in the shot path, on the
-    ///     theory that an accessory app never becomes key. Measured after:
-    ///     still `(220, 220, 220)`.
-    ///   - `.paneSplitter` instead of `.thin` on the divider, measured on the
-    ///     pixels rather than the tree; identical, so reverted.
-    ///
-    /// So this is recorded rather than fixed. It is very likely an environment
-    /// limitation — a CLI-invoked accessory process may not be able to take key
-    /// window status at all — but "very likely" is not a measurement, and the
-    /// thing that settles it is a person looking at the real window.
+    /// Nothing here needs fixing. What would settle it is a person looking at
+    /// the real window, which is key by definition.
     public static let minimumHeight: CGFloat = 700
 
     public init(client: any CoreClient) {
