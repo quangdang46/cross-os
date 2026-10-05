@@ -489,6 +489,41 @@ enum Audit {
         return ""
     }
 
+    /// Does a rendered failure carry a signal other than its colour?
+    ///
+    /// The eighth check, and the only one that renders something itself
+    /// instead of inspecting the app: it builds an `ErrorView`, lays it out,
+    /// and asks what a reader who cannot separate `dangerInk` from
+    /// `secondaryInk` would have left.
+    ///
+    /// Building it is the point. Every other error check reads source text,
+    /// because the real failures only appear when the daemon is down and the
+    /// audit cannot run. This one does not need a daemon, and measuring the
+    /// live view rather than the string catches the case the string cannot:
+    /// a message that reads correctly and still has nothing but colour on it.
+    static func errorSignalAudit() -> [Finding] {
+        let view = ErrorView(headline: "Could not read the profiles.",
+                             detail: didNotAnswer("core.profiles"))
+        view.frame = NSRect(x: 0, y: 0, width: 600, height: 120)
+        view.layoutSubtreeIfNeeded()
+
+        var findings: [Finding] = []
+        let symbols = collect(view).filter {
+            String(describing: type(of: $0)).contains("ImageView")
+        }
+        if symbols.isEmpty {
+            findings.append(Finding(
+                severity: .fail, page: "errors",
+                what: "a failure is signalled by colour alone",
+                detail: "the rendered ErrorView carries no image and no non-colour marker, so the whole "
+                      + "meaning of \"this went wrong\" is `dangerInk` versus `secondaryInk`. That is WCAG "
+                      + "1.4.1 — colour must not be the only thing carrying the meaning — and a reader who "
+                      + "cannot separate red from grey reads a failure as a caption."
+            ))
+        }
+        return findings
+    }
+
     static func fitAudit(root: NSView, page: String) -> [Finding] {
         var findings: [Finding] = []
         let leaves = collect(root)

@@ -262,6 +262,30 @@ final class ErrorView: NSStackView {
         let headlineField = NSTextField(labelWithString: headline)
         headlineField.font = Typeface.bodyStrong
         headlineField.textColor = Palette.dangerInk
+
+        // A SYMBOL, not just the red.
+        //
+        // `ErrorView` signalled failure with colour alone: a headline in
+        // `dangerInk` and a detail in `secondaryInk`, with nothing else
+        // distinguishing it from an ordinary card. That is WCAG 1.4.1 —
+        // colour must not be the only thing carrying the meaning — and it is
+        // also just how a Mac says it: the system puts
+        // `exclamationmark.triangle.fill` beside a message that went wrong.
+        //
+        // Measured contrast was never the problem here: `dangerInk` clears
+        // 4.5:1 on the card in BOTH appearances, and `--audit --appearance=dark`
+        // confirms it. The problem is that a reader who cannot separate red
+        // from grey reads the failure as a caption.
+        let mark = NSImageView()
+        mark.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill",
+                             accessibilityDescription: "Error")
+        mark.contentTintColor = Palette.dangerInk
+        mark.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: NSFont.systemFontSize + 1,
+                                                              weight: .semibold)
+        mark.translatesAutoresizingMaskIntoConstraints = false
+        mark.setContentHuggingPriority(.required, for: .horizontal)
+        mark.widthAnchor.constraint(equalToConstant: 18).isActive = true
+        mark.heightAnchor.constraint(equalToConstant: 18).isActive = true
         headlineField.lineBreakMode = .byWordWrapping
         headlineField.maximumNumberOfLines = 0
 
@@ -271,7 +295,17 @@ final class ErrorView: NSStackView {
         detailField.lineBreakMode = .byWordWrapping
         detailField.maximumNumberOfLines = 0
 
-        let column = NSStackView(views: [headlineField, detailField])
+        // The symbol sits beside the HEADLINE only. Putting it beside the
+        // whole card would put an icon next to a caption that is not the
+        // failure, which is worse than no icon — the sign has to point at the
+        // thing that failed.
+        let titleRow = NSStackView(views: [mark, headlineField])
+        titleRow.orientation = .horizontal
+        titleRow.alignment = .firstBaseline
+        titleRow.spacing = Gap.tight
+        titleRow.translatesAutoresizingMaskIntoConstraints = false
+
+        let column = NSStackView(views: [titleRow, detailField])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = Gap.tight

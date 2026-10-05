@@ -649,6 +649,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             + Audit.contrastMatrix(inAppearance: .darkAqua)
             + Audit.rhythmAudit()
             + Audit.errorCopyAudit()
+            + Audit.errorSignalAudit()
         var findings = systemFindings
         print("design system")
         AuditPrinter.emitPage("design system", findings: systemFindings)
