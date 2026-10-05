@@ -367,6 +367,7 @@ public final class PageViewController: NSViewController {
                     card.dropCap()
                 }
             }
+
         }
 
         stack.addArrangedSubview(pageId)
@@ -467,10 +468,28 @@ final class EmptyStateView: NSStackView {
         detailField.maximumNumberOfLines = 0
         detailField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        addArrangedSubview(headlineField)
-        addArrangedSubview(detailField)
-        spacing = Gap.tight
-        setContentHuggingPriority(.required, for: .vertical)
+        // **`.gravityAreas`, `.center`**, which is AppKit's own way to say
+        // "put this in the middle of whatever height I get".
+        //
+        // At the fitting height the area is the whole stack and nothing moves,
+        // so a state sitting under a card title still sits directly under it.
+        // Given extra height the text lands in the middle, which is where
+        // macOS puts an empty state that has the space to itself — an empty
+        // Mail list, an empty folder, an empty search.
+        //
+        // Doing it here rather than at each call site matters because empty
+        // states are built three different ways — `replaceBody`, a bare
+        // `addArrangedSubview`, and a column literal — and the two that do not
+        // go through `replaceBody` were the two that stayed at the top.
+        //
+        // **Two things that look like they should work and do not**, both
+        // measured rather than assumed: low-hugging spacer views do nothing,
+        // because a plain `NSView` has no intrinsic content size for a
+        // hugging priority to resist — both spacers stayed at 0pt inside a
+        // 132pt state and the text stayed at its top edge.
+        distribution = .gravityAreas
+        addView(headlineField, in: .center)
+        addView(detailField, in: .center)
     }
 
     override var isFlipped: Bool { true }

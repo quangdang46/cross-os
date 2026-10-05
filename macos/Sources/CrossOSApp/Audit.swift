@@ -280,6 +280,67 @@ enum Audit {
     /// What the real view tree says about fit: overflow, overlap, truncation.
     ///
     /// Measured after a layout pass, so the frames are the ones that ship.
+    /// How much of the pane the page's CONTENT reaches down into.
+    ///
+    /// The other four checks ask whether what is drawn is correct. This asks
+    /// whether there is enough of it, which is the failure a settings pane
+    /// has that a form does not: a pane is a fixed-height window and the
+    /// content in it is a list, so the list can be eleven rows or one — and
+    /// one row at the top of a 648pt pane reads as a broken app rather than
+    /// as a short page.
+    ///
+    /// It is a note and not a failure because the right answer is genuinely
+    /// page-specific: a page with one setting SHOULD be short, and a page
+    /// with an empty state should show the empty state in the space rather
+    /// than stretch something into it. What is worth saying out loud is the
+    /// number, because the number is what the empty state has to fill.
+    static func fillAudit(root: NSView, page: String) -> [Finding] {
+        let size = root.bounds.size
+        guard size.height > 80 else { return [] }
+
+        // The LOWEST point the page's own CONTENT reaches.
+        //
+        // Measured off the stack's arranged subviews rather than off the whole
+        // tree. The document view is padded out to the pane's height on
+        // purpose — `contentFittingHeight` exists so the window can shrink —
+        // and it has a background, so measuring the tree says every page
+        // fills 100% whether it holds a matrix or one line of text. That is
+        // what the first version of this check did, and it reported 100% for
+        // all fifteen pages including the empty ones.
+        //
+        // So: the tallest arranged subview that actually has content in it,
+        // skipping the trailing padding the stack added to fill the pane.
+        var bottom: CGFloat = 0
+        if let stack = collect(root).compactMap({ $0 as? NSStackView }).first(where: { stack in
+            stack.arrangedSubviews.contains { hasVisibleContent($0) }
+        }) {
+            for row in stack.arrangedSubviews where hasVisibleContent(row) {
+                bottom = max(bottom, row.frame.maxY)
+            }
+        } else {
+            for view in collect(root) where !isAppKitInternal(view) {
+                if view is NSScrollView || view is NSClipView { continue }
+                guard hasVisibleContent(view) else { continue }
+                bottom = max(bottom, view.frame.maxY)
+            }
+        }
+
+        let fraction = Double(bottom / size.height)
+        // 40%. Below that the majority of a 700pt pane is window background,
+        // and the page is either empty or nearly so. A settings page with one
+        // card is short and that is honest — but at 31% the reader is looking
+        // at more window than settings, which reads as a load failure.
+        guard fraction < 0.40 else { return [] }
+        return [Finding(
+            severity: .note, page: "fill",
+            what: String(format: "%@ fills %.0f%% of a %dpt pane", page, fraction * 100, Int(size.height)),
+            detail: "content stops \(Int(bottom))pt down a \(Int(size.height))pt pane, so the bottom "
+                  + "\(Int(size.height - bottom))pt is window background. If this page has an empty state, "
+                  + "the state belongs in that space rather than at the top; if it has one setting, one "
+                  + "setting in a 648pt window is short and that is honest."
+        )]
+    }
+
     static func fitAudit(root: NSView, page: String) -> [Finding] {
         var findings: [Finding] = []
         let leaves = collect(root)

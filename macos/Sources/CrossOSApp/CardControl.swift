@@ -168,6 +168,25 @@ class CardControl: NSStackView {
         }
         view.translatesAutoresizingMaskIntoConstraints = false
         bodyStack.addArrangedSubview(view)
+        // An empty state is the WHOLE body, so it gets the whole body.
+        //
+        // Every card on `core.activity`, `core.profiles`, `core.observe`,
+        // `core.extensions` and `core.schemaForm` is a heading and a card
+        // whose body is one sentence saying there is nothing. Measured, those
+        // cards filled 31% to 35% of a 700pt pane: the sentence sat directly
+        // under the card's title with four hundred points of empty window
+        // underneath it, which reads as a window that failed to load rather
+        // than as a page with nothing in it.
+        //
+        // macOS centres an empty state that has the space to itself — an empty
+        // Mail list, an empty folder, an empty search — and the space here is
+        // the card. So the state is given a floor and centred inside it, and
+        // the floor is a floor rather than a fixed height, so a card that
+        // later grows content stops centring.
+        if view is EmptyStateView {
+            view.setContentHuggingPriority(.defaultLow, for: .vertical)
+            view.heightAnchor.constraint(greaterThanOrEqualToConstant: 132).isActive = true
+        }
         // Now they share an ancestor, and the constraint holds the body to
         // the card's width — which is what makes a card fill its pane rather
         // than size itself to its longest label.
