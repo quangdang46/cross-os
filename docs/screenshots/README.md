@@ -58,13 +58,38 @@ window's top. Add the 52 and they line up.
 
 ## What the pictures are still not for
 
-**Colour.** This host resolves `windowBackgroundColor` and
-`controlBackgroundColor` to the same value — `(255, 255, 255)` — so every
-page renders 97% pure white and the surface hierarchy that gives a macOS app
-its depth is absent from the picture. The cause is the machine, not the app,
-and `ShotRenderer.swift` records that three separate attempts to force an
-appearance changed nothing measurable. **No conclusion about this app's
-colours can be drawn from these images.**
+**Nothing, colour-wise, since this was fixed — but read how.**
+
+This file used to say the host resolved `windowBackgroundColor` and
+`controlBackgroundColor` to the same `(255, 255, 255)`, so every page came out
+97% white and no conclusion about colour could be drawn. Half of that was
+right and the conclusion was backwards. Measured, directly:
+
+```
+                      aqua              darkAqua
+windowBackgroundColor  (255, 255, 255)   (30, 30, 30)
+controlBackgroundColor (255, 255, 255)   (30, 30, 30)
+```
+
+The two are equal **on this macOS, in both directions**, and forcing each
+appearance changes nothing — the effective appearance is already `Aqua`. That
+is not a headless host failing to resolve one. The rail painted
+`windowBackgroundColor` and the content plane painted `windowBackgroundColor`,
+so the window had **one** surface in it and nothing sat behind anything.
+
+`Audit.surfaceAudit` now enforces a 3–12 point lightness step between the two,
+and the rail derives its own step from the window background instead of asking
+for a named colour and hoping the system separates them. Measured in the
+rendered pixels:
+
+```
+light  rail (245,245,245)   pane (255,255,255)   step 3.9
+dark   rail  (55, 55, 55)   pane  (30, 30, 30)   step 9.8
+```
+
+**Dark was never rendered until this round.** The flag is `--dark`, not
+`--appearance=dark`, and nothing said so — so the "dark" runs in this repo's
+history were light runs. `screenshots.sh` now renders and measures both.
 
 **Anything a person has to like.** These are for shape, rhythm and content:
 line lengths, whether a group reads as a group, whether a page says the wrong

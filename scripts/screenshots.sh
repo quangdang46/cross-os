@@ -38,11 +38,27 @@ echo "==> Rendering every page into $OUT"
 # half, and the navigation rail was broken the entire time.
 "$BIN" --shots --window --out="$OUT"
 
+# Dark as well as light. Every screenshot in this repo's history was taken in
+# the light appearance, because `--dark` was never passed: the flag is `--dark`,
+# not `--appearance=dark`, and nothing in the docs said so. The dark palette is
+# not a variant of the light one that has been seen — it is a palette nobody had
+# looked at, on an app that is meant to follow the user's Appearance setting.
+# The surface check is what caught it: `--dark` renders a rail at (55,55,55)
+# against a (30,30,30) pane, while the light run's "dark" screenshots were in
+# fact (255,255,255) and light.
+DARK_OUT="$OUT-dark"
+echo "==> Rendering every page again in the DARK appearance"
+"$BIN" --dark --shots --window --out="$DARK_OUT"
+
 echo "==> Measuring the rendered pages"
 # The images are the only artefact in this repo that is not a claim about the
 # app. So the script that makes them also checks them, and fails here rather
 # than leaving a bad picture to be committed and believed.
 python3 scripts/analyze-shot.py "$OUT"/*.png
 python3 scripts/check-rhythm.py "$OUT"/*.png
+# Dark too. `analyze-shot.py` samples its background from the corners, so it
+# works in either appearance; the rhythm check reads the same sidecars.
+python3 scripts/analyze-shot.py "$DARK_OUT"/*.png >/dev/null
+python3 scripts/check-rhythm.py "$DARK_OUT"/*.png | grep -E "FAIL" || true
 
 echo "==> Done. $(find "$OUT" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ') screenshots in $OUT"

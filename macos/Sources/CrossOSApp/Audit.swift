@@ -56,6 +56,71 @@ enum Audit {
         }
     }
 
+    // MARK: - 0. Surfaces
+
+    /// Perceptual lightness of a resolved colour, 0–100.
+    private static func lightness(_ color: NSColor) -> Double? {
+        guard let rgb = color.usingColorSpace(.sRGB) else { return nil }
+        return 100 * (0.2126 * rgb.redComponent
+                     + 0.7152 * rgb.greenComponent
+                     + 0.0722 * rgb.blueComponent)
+    }
+
+    /// The window must have more than ONE surface.
+    ///
+    /// This check exists because of a measurement that changed the answer.
+    /// `windowBackgroundColor` and `controlBackgroundColor` are BOTH
+    /// `(255, 255, 255)` in aqua and BOTH `(30, 30, 30)` in darkAqua —
+    /// verified directly, and forcing each appearance changes nothing. The
+    /// rail painted `windowBackgroundColor` and the content pane painted
+    /// `windowBackgroundColor`, so the two were the same colour and the whole
+    /// window was a single flat plane with a divider down it.
+    ///
+    /// The failure is not a missing border. It is that there is no depth
+    /// stack at all: nothing in the window sits behind anything else, so the
+    /// eye has no cue for "this is behind that" and the app reads as a form.
+    ///
+    /// Two-sided on purpose. Below `minStep` the rail has vanished into the
+    /// page; above `maxStep` it is the 40%-grey slab `underPageBackgroundColor`
+    /// was rejected for being, where the rail stops being behind the content
+    /// and becomes a second panel arguing with it.
+    static func surfaceAudit() -> [Finding] {
+        let minStep = 3.0, maxStep = 12.0
+        var findings: [Finding] = []
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            NSAppearance(named: appearance)?.performAsCurrentDrawingAppearance {
+                guard let rail = lightness(Palette.sidebarBackground),
+                      let page = lightness(Palette.windowBackground) else {
+                    findings.append(Finding(
+                        severity: .fail, page: "surfaces",
+                        what: "\(name): a surface did not resolve to a colour",
+                        detail: "rail or content plane is not an sRGB colour, so "
+                              + "nothing can be said about how far apart they are"))
+                    return
+                }
+                let step = abs(rail - page)
+                if step < minStep {
+                    findings.append(Finding(
+                        severity: .fail, page: "surfaces",
+                        what: "\(name): the rail and the content plane are the same surface "
+                            + "(\(Int(rail))% and \(Int(page))% lightness — \(String(format: "%.1f", step)) points apart)",
+                        detail: "the window has one plane in it. The rail is painted "
+                              + "`Palette.sidebarBackground` and the content plane `Palette.windowBackground`, "
+                              + "and they resolve to the same colour, so nothing sits behind anything. "
+                              + "Needs at least \(Int(minStep)) points of lightness between them."))
+                } else if step > maxStep {
+                    findings.append(Finding(
+                        severity: .fail, page: "surfaces",
+                        what: "\(name): the rail is a slab, \(String(format: "%.1f", step)) points "
+                            + "from the content plane",
+                        detail: "past this the rail stops reading as behind the content and becomes "
+                              + "a second panel. Keep the step under \(Int(maxStep)) points."))
+                }
+            }
+        }
+        return findings
+    }
+
     // MARK: - 1. Contrast
 
     /// The WCAG relative-luminance contrast between two resolved colours.

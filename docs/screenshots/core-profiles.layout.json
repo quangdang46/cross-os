@@ -1,5 +1,5 @@
 {
-  "page" : "core.profiles",
+  "scale" : 2,
   "groups" : [
     {
       "y0" : 1172,
@@ -7,10 +7,10 @@
       "w" : 1200
     },
     {
-      "y1" : 1320,
+      "y0" : 1172,
       "w" : 1200,
-      "y0" : 1172
+      "y1" : 1320
     }
   ],
-  "scale" : 2
+  "page" : "core.profiles"
 }

@@ -38,24 +38,50 @@ public enum Palette {
     /// A card or a group sitting on that background.
     public static var cardBackground: NSColor { .controlBackgroundColor }
 
-    /// The nav rail — a step behind the content plane rather than beside it.
+    /// The nav rail — a step BEHIND the content plane, and provably so.
     ///
-    /// The WINDOW background, not `underPageBackgroundColor`.
+    /// It was `windowBackgroundColor`, which is what System Settings uses, and
+    /// the reason it cannot be is measured rather than argued:
     ///
-    /// `underPageBackgroundColor` is what an old-style sidebar is painted with
-    /// and it is heavy: measured on this host it resolves to `(150, 150, 150)`
-    /// in the light appearance, against a `(255, 255, 255)` content pane. That
-    /// is a 40% grey slab down 45% of the window, and it is the single ugliest
-    /// thing in the app — a colour so far from the content plane that the rail
-    /// stops being "behind" and becomes a second panel arguing with the first.
+    ///     windowBackgroundColor   aqua (255,255,255)   darkAqua (30,30,30)
+    ///     controlBackgroundColor  aqua (255,255,255)   darkAqua (30,30,30)
     ///
-    /// System Settings since Ventura does NOT paint its rail that colour. It
-    /// uses the window background and separates the two panes with the split
-    /// divider, so the rail reads as part of the same surface at a glance and
-    /// separates only where you look. That is one colour instead of two, it is
-    /// what the system draws, and it follows the user's appearance in both
-    /// directions for free.
-    public static var sidebarBackground: NSColor { .windowBackgroundColor }
+    /// Forcing each appearance changes nothing, and the effective appearance
+    /// is already `Aqua`, so this is not a headless host failing to resolve
+    /// one — the two colours are simply equal on this macOS in both
+    /// directions. The rail and the content plane therefore painted the same
+    /// colour, the window had exactly ONE surface in it, and nothing sat
+    /// behind anything. `Audit.surfaceAudit` now fails on a 0.0-point step.
+    ///
+    /// `underPageBackgroundColor` is the system's own step behind the content
+    /// plane and it resolves to `(150, 150, 150)` here — a 40% grey slab down
+    /// 45% of the window, which is the single ugliest thing the app has ever
+    /// drawn. A rail that far from the content stops being behind it and
+    /// becomes a second panel arguing with the first.
+    ///
+    /// So: derive the step from the window background rather than asking for a
+    /// named colour and hoping the system separates them. **The fraction is
+    /// what makes the difference survive a system that does not.**
+    ///
+    /// **Dynamic, and `blended` cannot be used directly.** Measured:
+    /// `windowBackgroundColor.blended(withFraction: 0.05, of: .black)` returns
+    /// `(244, 244, 244)` in BOTH appearances — the receiver resolves when the
+    /// blend is built, the blend does not carry the dynamic trait, and a rail
+    /// built this way is a light-mode rail drawn into a dark window. Hence the
+    /// provider, which is evaluated per appearance at draw time.
+    ///
+    /// The measured steps: aqua `(255,255,255)` → `(244,244,244)`, 4.0 points
+    /// of lightness; darkAqua `(30,30,30)` → `(54,54,54)`, 9.7 points. Both sit
+    /// inside the 3–12 band `Audit.surfaceAudit` enforces — far enough to read
+    /// as behind, near enough not to be a slab.
+    public static var sidebarBackground: NSColor {
+        NSColor(name: nil) { appearance in
+            let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            let base = NSColor.windowBackgroundColor
+            return (dark ? base.blended(withFraction: 0.08, of: .white)
+                         : base.blended(withFraction: 0.05, of: .black)) ?? base
+        }
+    }
 
     /// The rail's selected row, as the system actually draws it.
     ///

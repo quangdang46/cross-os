@@ -667,7 +667,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // The contrast half runs in BOTH appearances; the rhythm half is
         // about numbers and does not change.
-        let systemFindings = Audit.contrastMatrix()
+        let systemFindings = Audit.surfaceAudit()
+            + Audit.contrastMatrix()
             + Audit.contrastMatrix(inAppearance: .darkAqua)
             + Audit.rhythmAudit()
             + Audit.errorCopyAudit()
