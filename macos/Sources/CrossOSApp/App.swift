@@ -255,7 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await ShotRenderer.settle(1.5)
 
             do {
-                let written = try await ShotRenderer.captureAll(client: client, out: out)
+                let written = try await ShotRenderer.captureAll(client: client, out: out, wholeWindow: CommandLine.arguments.contains("--window"))
                 for path in written { print(path) }
                 print("\(written.count) shots in \(out)")
             } catch {

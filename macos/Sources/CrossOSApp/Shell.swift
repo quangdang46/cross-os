@@ -215,9 +215,38 @@ public final class SidebarViewController: NSViewController {
 
     public override func loadView() {
         let container = NSView()
-        container.wantsLayer = true
+        // The rail PAINTS ITS BACKGROUND.
+        //
+        // `wantsLayer = true` on its own makes the view layer-backed and gives
+        // it a transparent one — and a comment in `ShellWindowController`
+        // claimed "the rail's colour is on the sidebar's own view", which was
+        // never true: nothing ever set it. The rail rendered as clear glass
+        // over the window's own background, so it was the same colour as the
+        // content pane beside it and the two read as one pane with a list in
+        // it.
+        //
+        // `Palette.sidebarBackground` is `underPageBackgroundColor`, which is
+        // the system's own step behind the content plane and follows the
+        // user's appearance — so this is a macOS rail in light and dark
+        // without a colour in this file.
+        //
+        // It is DRAWN rather than set on the layer, for the reason `Card` draws
+        // its own fill: `dataWithPDF(inside:)` asks a view to draw, and a view
+        // whose only fill lives on its layer has nothing to draw — which is
+        // why the rail was transparent in every render as well as on screen.
+        container.wantsLayer = false
 
+        let backdrop = FilledView(color: Palette.sidebarBackground)
+        backdrop.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(backdrop, positioned: .below, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            backdrop.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            backdrop.topAnchor.constraint(equalTo: container.topAnchor),
+            backdrop.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
         outline.dataSource = self
+
         outline.delegate = self
         outline.headerView = nil
         outline.rowSizeStyle = .default
@@ -294,6 +323,23 @@ public final class SidebarViewController: NSViewController {
                 groups.append(page.group)
             }
             outline.reloadData()
+            // Every group is EXPANDED, because a settings window's rail is a
+            // list of pages and a collapsed group is a heading over nothing.
+            //
+            // `isItemExpandable` returning true is what makes a group ELIGIBLE
+            // to expand; it does not expand it. A freshly reloaded outline
+            // collapses every group, which is why the rail still showed four
+            // headers and no pages after the datasource was fixed — and why
+            // the first selection landed on whatever row the collapsed tree
+            // happened to number that way.
+            // Iterated by GROUP, not by row index. Expanding a group ADDS
+            // rows, so a loop over `numberOfRows` captured before the loop
+            // misses every group after the first: measured, the rail showed
+            // "HOME" with its three pages and then three empty headings —
+            // SHORTCUTS, ACTIVITY and ADVANCED with nothing under them.
+            for group in groups {
+                outline.expandItem(group, expandChildren: true)
+            }
             if outline.selectedRow < 0, !served.isEmpty {
                 // A fresh profile lands on the page that declares firstRun —
                 // the wizard — and the daemon decides which, not the id
@@ -332,17 +378,45 @@ public final class SidebarViewController: NSViewController {
 }
 
 extension SidebarViewController: NSOutlineViewDataSource {
+    /// A group has the pages in it; a page has nothing under it.
+    ///
+    /// Both halves were wrong, and together they meant **the sidebar rendered
+    /// four group headers and no page rows at all** — the nav rail had nothing
+    /// to click, so the app could not be navigated. Measured on the live tree:
+    /// `NSOutlineView 260x670` holding four `NSTableRowView`, every one of them
+    /// a `NSTextField` reading "HOME" / "SHORTCUTS" / "ACTIVITY" / "ADVANCED",
+    /// and the selection parked on the ADVANCED header because
+    /// `NSTableRowSidebarSelectionView` was on a group.
+    ///
+    ///   - `numberOfChildrenOfItem` returned 0 for anything that was not the
+    ///     root, so a group claimed to have no children.
+    ///   - `isItemExpandable` returned `false` unconditionally, so the outline
+    ///     never asked for them even when they existed.
+    ///
+    /// Every layout defect fixed before this was measured on the content pane
+    /// alone — the shot harness rendered `pageController.view` and nothing
+    /// else, so the half of the app that frames every page was never rendered
+    /// until `--shots --window`.
     public func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
-        guard item == nil else { return 0 }
+        if let group = item as? String {
+            return pages.filter { $0.group == group }.count
+        }
         return groups.count
     }
 
     public func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
-        groups[index]
+        // The children of a group are that group's PAGES, in the daemon's order
+        // — the same order `flatRows` walks, which is what makes the row index
+        // `selectRow(for:)` computes land on the page rather than beside it.
+        if let group = item as? String {
+            return pages.filter { $0.group == group }[index]
+        }
+        return groups[index]
     }
 
+    /// A group expands; a page is a leaf.
     public func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-        false
+        item is String
     }
 }
 
@@ -416,4 +490,31 @@ final class SidebarRowView: NSTableCellView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("SidebarRowView is created in code") }
+}
+
+
+/// A view that paints one colour over its own bounds.
+///
+/// `NSView` has no `drawsBackground`, and `draw` is a method rather than a
+/// settable closure — so a plain view cannot be given a fill without either a
+/// layer or a subclass. The layer route is the one that made the rail
+/// invisible: `dataWithPDF(inside:)` asks a view to DRAW, and a view whose
+/// only fill lives on its layer has nothing to draw.
+final class FilledView: NSView {
+    private let color: NSColor
+
+    init(color: NSColor) {
+        self.color = color
+        super.init(frame: .zero)
+    }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        color.setFill()
+        dirtyRect.fill()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("FilledView is created in code") }
 }

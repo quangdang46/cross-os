@@ -293,8 +293,14 @@ enum ShotRenderer {
     }
 
     /// Capture every page the daemon serves.
+    ///
+    /// `--shots --window` captures the WHOLE window — sidebar included — which
+    /// is what a person actually looks at, and for eight commits nobody did.
+    /// Every defect that was found and fixed was measured on the content pane
+    /// alone, so the half of the app that frames every page was never rendered
+    /// once.
     @MainActor
-    static func captureAll(client: any CoreClient, out: String) async throws -> [String] {
+    static func captureAll(client: any CoreClient, out: String, wholeWindow: Bool = false) async throws -> [String] {
         try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
 
         let shell = ShellWindowController(client: client)
@@ -302,14 +308,20 @@ enum ShotRenderer {
         shell.window?.makeKeyAndOrderFront(nil)
         await settle(1.5)
 
-        // The PAGE VIEW, not the window's content view: the content view is
-        // the whole window including the sidebar, and a page is what this is a
-        // picture of. The audit runs on the same view for the same reason —
-        // measuring the window compared every page's switch against the nav
-        // rail's own outline view, which cannot happen to a person.
+        // The PAGE VIEW by default, because a page is what the audit is about
+        // and because measuring the window compared every page's switch
+        // against the nav rail's own outline view.
+        //
+        // The WHOLE WINDOW on `--shots --window`, which is what a person looks
+        // at. Eight commits of layout fixes were all measured on the content
+        // pane alone, so the sidebar — the half of the app that frames every
+        // page — was never rendered once.
         guard let pageView = shell.pageController?.view else {
             throw ShotError.noContentView
         }
+        let target: NSView = wholeWindow
+            ? (shell.window?.contentView ?? pageView)
+            : pageView
 
         var written: [String] = []
         let pages = (try? await client.pages()) ?? []
@@ -318,7 +330,7 @@ enum ShotRenderer {
             await settle(0.9)
             let name = page.id.replacingOccurrences(of: ".", with: "-")
             let path = "\(out)/\(name).png"
-            try capture(pageView, to: path)
+            try capture(target, to: path)
             written.append(path)
         }
         return written
