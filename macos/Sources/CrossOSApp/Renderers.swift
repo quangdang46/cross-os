@@ -567,14 +567,27 @@ final class MenuListView: NSStackView, TableContent {
         alignment = .width
         distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
-
         let card = Card()
         let column = NSStackView()
         column.orientation = .vertical
         column.alignment = .leading
+        column.distribution = .fill
         column.spacing = Gap.row
         column.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(column)
+        card.setContent(column)
+
+        // ARRANGED, and hugging.
+        //
+        // The card was created and given content but never added — a plain
+        // column was added to the view with no constraint to its own edges, so
+        // `MenuListView` measured **600x0** and the finder-menu table inside it
+        // measured `0x192`. The audit names it as "core.commands —
+        // NSTableView is 0x192, under 20pt", which reads like a control that
+        // is too small rather than a container that was never asked to hold
+        // it.
+        addArrangedSubview(card)
+        card.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
+        setContentHuggingPriority(.required, for: .vertical)
 
         // Filled by the load below; the card is added either way so a failure
         // reads as a sentence in a card rather than as a page that lost its

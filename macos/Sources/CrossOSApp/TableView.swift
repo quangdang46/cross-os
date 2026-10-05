@@ -129,6 +129,8 @@ final class TableView: NSStackView {
 
         // Installed here rather than in `viewDidMoveToSuperview` so the table
         // is observed from the moment it exists.
+        table.translatesAutoresizingMaskIntoConstraints = false
+        observeClipWidth()
         scroll.documentView = table
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -171,6 +173,19 @@ final class TableView: NSStackView {
             // seam drawn past the group's rounded corner — and the width
             // constraint alone did not win.
             table.widthAnchor.constraint(equalTo: scroll.widthAnchor),
+
+            // **And the table is FORCED to that width**, because a
+            // document view larger than its clip view keeps its own size —
+            // that is what scrolling IS. Measured on `core.commands`: the
+            // clip view was 560pt and the table 597pt inside it, so the
+            // columns' stripes and a vertical seam ran past the group's
+            // rounded corner.
+            //
+            // A constraint alone does not do it: `NSTableView` sizes itself to
+            // its header and columns, and the clip view honours that. The
+            // table's frame is set on the CLIP's resize instead — see
+            // `clipResized()`, which observes the scroll view because the
+            // table's own bounds are exactly what is not being clamped.
             // A table has no intrinsic height: its CONTENT's height is not the
             // VIEW's height, and an unconstrained scroll view collapses to
             // nothing. Stated, and capped — which is what makes a long list
@@ -260,6 +275,58 @@ final class TableView: NSStackView {
     /// This is written down so the next person to see a table overrunning its
     /// group does not re-run them. It is a visual defect, not a functional
     /// one: every column is present, legible and hit-testable.
+
+    /// Keep the table exactly as wide as the clip view, and share or take
+    /// back the difference between the columns.
+    ///
+    /// **Observed on the SCROLL view, not the table.** The table's own bounds
+    /// are the thing being clamped: it measures 597pt inside a 560pt clip
+    /// view, and a notification about IT fires carrying the value that is
+    /// already wrong. The scroll view's bounds are the correct width.
+    private func observeClipWidth() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(clipResized),
+            name: NSView.boundsDidChangeNotification,
+            object: scroll
+        )
+    }
+
+    @objc private func clipResized() {
+        let width = scroll.contentSize.width
+        guard width > 0 else { return }
+        table.setFrameSize(NSSize(width: width, height: table.frame.height))
+        fitColumns(to: width)
+    }
+
+    /// Make the columns fill `width` exactly.
+    ///
+    /// Spare width is shared equally across every column but the last, which
+    /// is the checkbox — a checkbox in a wide column is a checkbox in the
+    /// wrong place. Missing width is taken back in proportion to what each
+    /// column asked for, so "Where" and "Menu title" shrink together instead
+    /// of one of them disappearing.
+    private func fitColumns(to width: CGFloat) {
+        let columns = table.tableColumns
+        let wanted = content.columns.map { $0.1 }
+        guard columns.count == wanted.count, columns.count > 1 else { return }
+        let total = wanted.reduce(CGFloat(0)) { $0 + $1 }
+        let last = columns.count - 1
+
+        if total <= width {
+            let share = (width - total) / CGFloat(last)
+            for index in 0..<last { columns[index].width = wanted[index] + share }
+            columns[last].width = wanted[last]
+        } else {
+            let flexibleTotal = wanted.prefix(last).reduce(CGFloat(0)) { $0 + $1 }
+            let fixed = min(wanted[last], width)
+            let flexibleWidth = max(0, width - fixed)
+            guard flexibleTotal > 0 else { return }
+            let scale = flexibleWidth / flexibleTotal
+            for index in 0..<last { columns[index].width = wanted[index] * scale }
+            columns[last].width = fixed
+        }
+    }
 
     required init?(coder: NSCoder) { fatalError("TableView is created in code") }
 }
