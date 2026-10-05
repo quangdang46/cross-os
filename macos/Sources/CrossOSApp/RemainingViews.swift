@@ -288,7 +288,10 @@ final class KeymapEditorView: CardControl {
 
         for row in rows {
             let chord = NSTextField(labelWithString: Chord.format(row.keys))
-            chord.font = Typeface.mono
+            // The SYSTEM face: `Chord.format` returns ⌃⌥⇧ and ← — Apple's
+            // key symbols, drawn for the system face and falling back to
+            // something that reads as typing in a monospace one.
+            chord.font = Typeface.body
             chord.textColor = row.enabled ? Palette.primaryInk : Palette.tertiaryInk
             let action = NSTextField(labelWithString: Humanize.phrase(row.action))
             action.font = Typeface.body
@@ -342,7 +345,10 @@ final class RuleBuilderView: CardControl {
         )
         for rule in userRules {
             let chord = NSTextField(labelWithString: Chord.format(rule.chord))
-            chord.font = Typeface.mono
+            // The SYSTEM face: `Chord.format` returns ⌃⌥⇧ and ← — Apple's
+            // key symbols, drawn for the system face and falling back to
+            // something that reads as typing in a monospace one.
+            chord.font = Typeface.body
             // The chord is a COLUMN, so every action starts at the same x.
             //
             // It took its own width, and the chords are not the same width:

@@ -413,7 +413,13 @@ final class ShortcutListView: CardControl {
             // edge. `.left` inside the field as well, because a label aligns
             // naturally by default and centres a short chord back in the column.
             let chord = NSTextField(labelWithString: Chord.format(row.keys))
-            chord.font = Typeface.mono
+            // The SYSTEM face, not monospace, and this matters more than it
+            // looks: `Chord.format` returns ⌃⌥⇧ and ← — Apple's key symbols,
+            // not characters. The system face is the face those symbols are
+            // drawn for; in a monospace face they fall back to something that
+            // reads as typing, which is what the shortcut column looked like —
+            // the one column in the app where the text was least like itself.
+            chord.font = Typeface.body
             chord.alignment = .left
             chord.widthAnchor.constraint(equalToConstant: 190).isActive = true
             chord.setContentHuggingPriority(.required, for: .horizontal)
