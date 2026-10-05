@@ -84,7 +84,43 @@ enum Audit {
     /// Not a sample: the whole matrix. A palette is a set of pairs, and a
     /// failure in one pair is a failure in the palette whether or not anybody
     /// scrolls to it.
+    /// Contrast, measured in BOTH appearances.
+    ///
+    /// Only the light appearance used to be measured, and that is not a
+    /// neutral default — every colour in this app is a DYNAMIC `NSColor`, so
+    /// the dark palette is not a variant of one that has been seen. It is a
+    /// palette nobody looked at, on an app whose entire reason for using
+    /// system colours is to follow the user's Appearance setting.
+    ///
+    /// It is worth doing, because the two appearances do not agree. Measured
+    /// here, in both:
+    ///
+    ///     light: primary/secondary/tertiary on accent   5.23:1  pass
+    ///     dark:  primary/secondary/tertiary on accent   4.02:1  FAIL (AA wants 4.5:1)
+    ///
+    /// The sidebar's selected row is drawn by AppKit over the accent fill with
+    /// the label left at full strength, so that label is the text this is
+    /// about, and in dark appearance it is below AA on the control a person
+    /// uses most.
     static func contrastMatrix() -> [Finding] {
+        contrastMatrix(inAppearance: nil)
+    }
+
+    /// Contrast measured inside a specific appearance.
+    ///
+    /// The appearance is applied around the measurement rather than to the
+    /// whole audit, so the per-page geometry that follows is still taken in
+    /// whatever appearance the app is actually running in.
+    static func contrastMatrix(inAppearance appearance: NSAppearance.Name?) -> [Finding] {
+        guard let appearance else { return contrastInCurrentAppearance() }
+        var findings: [Finding] = []
+        NSAppearance(named: appearance)?.performAsCurrentDrawingAppearance {
+            findings = contrastInCurrentAppearance()
+        }
+        return findings
+    }
+
+    private static func contrastInCurrentAppearance() -> [Finding] {
         // Ink, and the SURFACES IT ACTUALLY SITS ON.
         //
         // The greys go everywhere. The status inks go on the card and the
@@ -127,6 +163,11 @@ enum Audit {
         // A status ink is skipped on a surface it never sits on, rather than
         // reported: see the comment where they are declared.
         func paints(_ inkName: String, on surfaceName: String) -> Bool {
+            // `onAccent` is the ink of text ON the accent and nowhere else, so
+            // pairing it with the card or the window asks what colour the sky
+            // is over green. In the dark appearance it reported four failures
+            // at 1.26:1 for combinations the app never draws.
+            if inkName == "onAccent" { return surfaceName == "accent" }
             let isStatus = inkName.hasSuffix("Ink")
             guard isStatus else { return true }
             return surfaceName == "card" || surfaceName == "window"

@@ -152,7 +152,19 @@ enum ShotRenderer {
         // behind it, and the title — `labelColor`, near-black in light mode —
         // was black on black and invisible. Measured on `core.home`: the
         // whole 1700x1440 bitmap was `(0,0,0,255)`.
-        context.cgContext.setFillColor(NSColor.white.cgColor)
+        // The WINDOW's background, not white.
+        //
+        // Hard-coding white made every dark render wrong: the rail and the
+        // groups came out dark while the page around them stayed white, and
+        // the page title — `labelColor`, near-white in the dark appearance —
+        // was white on white and simply disappeared. Measured on
+        // `--shots --dark core.home`: the whole content pane white, the title
+        // and description invisible.
+        //
+        // `windowBackgroundColor` is the dynamic colour, so this follows the
+        // appearance the render is actually taken in, which is the whole point
+        // of using it everywhere else in the app.
+        context.cgContext.setFillColor(Palette.windowBackground.cgColor)
         // The fill covers the WHOLE bitmap in PIXELS. It was
         // `CGRect(0, 0, bounds.width, bounds.height)` — 850x720 points —
         // against a 1700x1440 bitmap, and the `scaleBy` that doubles it runs

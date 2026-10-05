@@ -38,6 +38,19 @@ struct CrossOSApp {
             return
         }
 
+        // `--dark` renders the audit and the shots in the DARK appearance.
+        //
+        // Every screenshot and every measurement in this repo's history has
+        // been taken in the light appearance, because the machine is in it.
+        // Every colour in this app is a DYNAMIC `NSColor`, so the dark palette
+        // is not a variant of the light one that has been seen — it is a
+        // palette nobody has ever looked at, on an app that is supposed to
+        // follow the user's Appearance setting.
+        let darkRun = CommandLine.arguments.contains("--dark")
+        if darkRun {
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+        }
+
         if CommandLine.arguments.contains("--audit") {
             // Top-level, NOT inside a Task. Swift's top-level `await` runs
             // the main actor with an implicit run loop, and that is the thing
@@ -523,7 +536,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return String(flag.dropFirst("--explain=".count))
         }()
 
-        let systemFindings = Audit.contrastMatrix() + Audit.rhythmAudit()
+        // The contrast half runs in BOTH appearances; the rhythm half is
+        // about numbers and does not change.
+        let systemFindings = Audit.contrastMatrix()
+            + Audit.contrastMatrix(inAppearance: .darkAqua)
+            + Audit.rhythmAudit()
         var findings = systemFindings
         print("design system")
         AuditPrinter.emitPage("design system", findings: systemFindings)
