@@ -85,12 +85,36 @@ enum Audit {
     /// failure in one pair is a failure in the palette whether or not anybody
     /// scrolls to it.
     static func contrastMatrix() -> [Finding] {
-        let inks: [(String, NSColor)] = [
+        // Ink, and the SURFACES IT ACTUALLY SITS ON.
+        //
+        // The greys go everywhere. The status inks go on the card and the
+        // window and nowhere else, and saying so matters: the full cross
+        // product reported `okInk on accent is 2.08:1`, which is true and is
+        // a pair the app never draws. An audit that reports twenty
+        // combinations of which three exist is noise, and noise is how people
+        // learn to skip the line that matters.
+        let everywhere: [(String, NSColor)] = [
             ("primary", Palette.primaryInk),
             ("secondary", Palette.secondaryInk),
             ("tertiary", Palette.tertiaryInk),
             ("onAccent", Palette.onAccent),
         ]
+        let statusOnly: [(String, NSColor)] = [
+            // **The status inks, which is what this list was missing.**
+            //
+            // It checked four inks and none was a colour the app paints TEXT
+            // in. `danger`, `ok` and `warn` are what the "Ready" and "Not
+            // ready" chips use, and measured against the card they were
+            // 2.22:1, 2.31:1 and 3.57:1 — the first two failing WCAG AA.
+            //
+            // A contrast audit that only covers the greys cannot find the
+            // colours that are actually unreadable, because unreadable
+            // colour is almost never grey.
+            ("okInk", Palette.okInk),
+            ("warnInk", Palette.warnInk),
+            ("dangerInk", Palette.dangerInk),
+        ]
+        let inks = everywhere + statusOnly
         let surfaces: [(String, NSColor)] = [
             ("window", Palette.windowBackground),
             ("sidebar", Palette.sidebarBackground),
@@ -100,8 +124,16 @@ enum Audit {
         ]
 
         var findings: [Finding] = []
+        // A status ink is skipped on a surface it never sits on, rather than
+        // reported: see the comment where they are declared.
+        func paints(_ inkName: String, on surfaceName: String) -> Bool {
+            let isStatus = inkName.hasSuffix("Ink")
+            guard isStatus else { return true }
+            return surfaceName == "card" || surfaceName == "window"
+        }
+
         for (inkName, ink) in inks {
-            for (surfaceName, surface) in surfaces {
+            for (surfaceName, surface) in surfaces where paints(inkName, on: surfaceName) {
                 guard let ratio = contrast(ink, surface) else {
                     findings.append(Finding(
                         severity: .blind, page: "contrast",
