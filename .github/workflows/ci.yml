@@ -114,6 +114,19 @@ jobs:
             [ -S "$HOME/Library/Application Support/CrossOS/crossos.sock" ] && break
             sleep 0.5
           done
+      # AGAINST A COLD DAEMON. The step above starts a fresh one, and that is
+      # load-bearing rather than incidental: two views on `core.home` measure
+      # from rows the daemon has not sent yet, so they measured 0pt tall and
+      # the audit reported
+      #
+      #     [FAIL] core.home — NSStackView (wrapping NSStackView) is 0.0pt tall
+      #
+      # **only on a cold daemon.** Every green audit in this repo's history was
+      # measured against a daemon that had been up for hours and already had
+      # rows, so the defect never showed locally and CI's red read as flaky.
+      #
+      # If this step is ever pointed at an already-running daemon, it stops
+      # being the check it is named as being.
       - name: Design audit
         run: ./.build/release/CrossOS --audit
 
