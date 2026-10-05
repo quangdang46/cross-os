@@ -526,11 +526,15 @@ public actor LiveCoreClient: CoreClient {
     }
 
     public func applyProfile(id: String) async throws -> JSONValue {
-        try await call("core.profileApply", .object(["id": .string(id)]))
+        // `profile`, not `id`. The daemon answers `need {"profile":"<profile id>"}`
+        // for the short spelling, so applying a profile failed on the one
+        // control that applies them.
+        try await call("core.profileApply", .object(["profile": .string(id)]))
     }
 
     public func deactivateProfile(id: String) async throws -> JSONValue {
-        try await call("core.profileDeactivate", .object(["id": .string(id)]))
+        // `profile`, for the same reason as `core.profileApply` above.
+        try await call("core.profileDeactivate", .object(["profile": .string(id)]))
     }
 
     public func setPluginEnabled(id: String, enabled: Bool) async throws {
@@ -634,13 +638,15 @@ public actor LiveCoreClient: CoreClient {
     }
 
     public func beginTrial(plugin: String) async throws -> String {
-        let raw = try await call("safety.beginTrial", .object(["plugin": .string(plugin)]))
+        // `pluginId`, not `plugin`: the daemon answers `need {pluginId}` for the
+        // short spelling, so starting a trial failed before it began.
+        let raw = try await call("safety.beginTrial", .object(["pluginId": .string(plugin)]))
         return raw.stringValue ?? ""
     }
 
     public func confirmTrial(plugin: String, healthy: Bool) async throws -> String {
         let params = JSONValue.object([
-            "plugin": .string(plugin),
+            "pluginId": .string(plugin),
             "confirmed": .bool(true),
             "healthy": .bool(healthy),
         ])
@@ -649,7 +655,8 @@ public actor LiveCoreClient: CoreClient {
     }
 
     public func rollbackTrial(plugin: String) async throws -> String {
-        let raw = try await call("safety.rollbackTrial", .object(["plugin": .string(plugin)]))
+        // `pluginId`, for the same reason as `safety.beginTrial` above.
+        let raw = try await call("safety.rollbackTrial", .object(["pluginId": .string(plugin)]))
         return raw.stringValue ?? ""
     }
 
