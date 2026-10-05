@@ -63,11 +63,46 @@ private final class MatrixTable: NSStackView, TableContent {
         switch column {
         case 0: return Chord.format(row.keys)
         case 1: return Humanize.action(row.action)
-        case 2: return row.contexts.isEmpty
-            ? "Anywhere"
-            : row.contexts.map(Humanize.phrase).joined(separator: ", ")
+        case 2: return describeContexts(row.contexts)
         default: return ""
         }
+    }
+
+    /// What a rule applies to, in a form a reader can finish.
+    ///
+    /// The full list is a wall of bundle ids: measured on `core.matrix`,
+    /// "Native, Com.microsoft.vscode, Com.todesktop.230313mzl4w4u" — and the
+    /// column truncated it at its edge, mid-word, to "Native, Com.micros…".
+    /// A cut-off identifier is worse than a count: the reader cannot tell
+    /// what was dropped or whether their app is in it.
+    ///
+    /// So the first two are named and the rest are counted. "Native +2 more"
+    /// is a complete statement; "Native, Com.micros…" is not.
+    private func describeContexts(_ contexts: [String]?) -> String {
+        guard let contexts, !contexts.isEmpty else { return "Anywhere" }
+        if contexts.count == 1 { return Humanize.phrase(contexts[0]) }
+        // A bundle id is not a name. `Com.microsoft.vscode` is the OTHER side's
+        // vocabulary, and printing it in a column 140pt wide truncates at the
+        // column edge mid-word — measured: "Native, Com.micros…", which tells
+        // the reader nothing about whether their app is in the list.
+        //
+        // So a list is a COUNT, and the count is the statement. One context is
+        // named because "Anywhere +1" is a worse answer than the name itself.
+        let named = contexts.map(Humanize.phrase)
+        let first = shortIdentifier(named[0])
+        return "\(first) +\(contexts.count - 1) more"
+    }
+
+    /// The last meaningful segment of a reverse-DNS identifier.
+    ///
+    /// `Com.microsoft.vscode` -> `vscode`, which is short enough to read and
+    /// specific enough to recognise. Dropping the prefix loses no information
+    /// a reader can act on: nobody reads `com.todesktop.230313mzl4w4u` to learn
+    /// which app it is.
+    private func shortIdentifier(_ value: String) -> String {
+        guard value.contains(".") else { return value }
+        let tail = value.split(separator: ".").last.map(String.init) ?? value
+        return tail.count > 18 ? String(tail.prefix(17)) + "…" : tail
     }
 
     func toggle(row: Int, column: Int) -> (isOn: Bool, onChange: @MainActor (Bool) -> Void)? {
