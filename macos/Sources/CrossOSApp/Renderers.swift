@@ -551,7 +551,19 @@ extension NSView {
 /// hole: "finder — unsupported control: menuList". Naming the gap is right;
 /// leaving it there once the daemon serves the data is not.
 final class MenuListView: NSStackView, TableContent {
-    let columns: [(String, CGFloat)] = [("Item", 260), ("Source", 180)]
+    /// `Source` is DROPPED when nothing fills it.
+    ///
+    /// A column with a header and an empty cell under it is worse than no
+    /// column: the reader looks for what belongs in it and finds seven blanks.
+    /// Measured on `core.finder`, every row said nothing under "Source" — the
+    /// daemon does not set the field on any of them.
+    var columns: [(String, CGFloat)] {
+        let hasSource = entries.contains { entry in
+            let item = entry.objectValue ?? [:]
+            return !(item["source"]?.stringValue ?? "").isEmpty
+        }
+        return hasSource ? [("Item", 260), ("Source", 180)] : [("Item", 420)]
+    }
     /// Filled by the async load below, so it cannot be a `let`: a control
     /// whose data arrives from the daemon has to be able to change once, and
     /// this is the one place it does.

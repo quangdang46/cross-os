@@ -221,9 +221,19 @@ func finderPage() UIContribution {
 		Type:        "page",
 		Description: "What the Finder extension adds.",
 		Controls: []map[string]any{
+			// The LIST, not just a paragraph about a list.
+			//
+			// The page is titled "Finder", describes itself as "What the
+			// Finder extension adds" — and then adds nothing. It rendered a
+			// title, a description and one sentence: a page that promises a
+			// list and shows a promise. `core.finderMenu` serves those items the
+			// whole time, so this was never a data problem.
+			control("menuList", "finderMenu", map[string]any{
+				"source": "core:finderMenu",
+			}),
 			control("note", "finderNote", map[string]any{
-				"label": "The Finder Sync extension is what draws CrossOS's entries in Finder.",
-				"note":  "If nothing appears in a Finder menu, this is the first thing to check.",
+				"label": "The Finder Sync extension is what draws these entries in Finder.",
+				"note":  "If nothing appears in a Finder menu, the extension is the first thing to check.",
 			}),
 		},
 	}), nil, "true")
