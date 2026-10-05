@@ -292,32 +292,61 @@ class Card: NSStackView {
         path.lineWidth = 1
         path.stroke()
 
-        // A hairline between consecutive ROWS, and the rows are the content
-        // column's arranged subviews rather than this group's.
+        // A hairline between consecutive ROWS.
         //
-        // `setContent` puts ONE subview in the group — the column — so
-        // `arrangedSubviews` here is a single view and reading separators off
-        // it draws one line across the whole group at the column's midpoint,
-        // which is the stray rule above the first row.
+        // The rows are NOT the group's own arranged subviews. `setContent`
+        // puts ONE subview in the group — the column — and on every page built
+        // by `CardControl` the column in turn holds exactly one subview, the
+        // body stack, which is what actually holds the rows. So the shape is
         //
-        // The rows are asked of the column, one level down, and the lines are
-        // drawn at their shared edges. Each stops short of the group's rounded
-        // corners because a separator running edge to edge cuts the group's own
-        // border.
-        let column = arrangedSubviews.first
-        let rows = (column as? NSStackView)?.arrangedSubviews.filter { !$0.isHidden } ?? []
+        //     group → column → bodyStack → rows
+        //
+        // and reading one level down finds a single view and draws nothing.
+        // That is why no group in the app has ever had a separator between its
+        // rows: measured on `core.home`, three 45pt rows in one group with no
+        // line between any two of them.
+        //
+        // The chain is walked until it finds a stack with more than one
+        // visible arranged subview, which is the rows and is stable across
+        // pages that wrap their content differently.
+        let rows = rowViews(in: arrangedSubviews)
         guard rows.count > 1 else { return }
+
+        // Each line stops short of the group's corners: a separator running
+        // edge to edge cuts the group's own rounded border.
         let from = inset.minX + Card.inset.left
         let to = inset.maxX - Card.inset.right
         let separators = NSBezierPath()
         separators.lineWidth = 1
         for row in rows.dropLast() {
-            let edge = row.frame.maxY.rounded() + 0.5
+            // CONVERTED into this group's coordinates. `row.frame` is in the
+            // ROWS' own stack's space — two levels down from here — so reading
+            // `frame.maxY` directly drew every separator at one height
+            // unrelated to the rows: measured, a single stray rule appeared
+            // across the top of the group instead of a line between each pair.
+            let edge = convert(row.bounds, from: row.superview).maxY.rounded() + 0.5
             separators.move(to: NSPoint(x: from, y: edge))
             separators.line(to: NSPoint(x: to, y: edge))
         }
         Palette.hairline.setStroke()
         separators.stroke()
+    }
+
+    /// The row views inside a chain of single-child stacks.
+    ///
+    /// Walks down while the stack has one visible child, and returns the first
+    /// level that has more than one — which is the rows. A group holding
+    /// several blocks side by side has no rows to separate and returns them as
+    /// they are.
+    private func rowViews(in views: [NSView]) -> [NSView] {
+        var level = views.filter { !$0.isHidden }
+        // Bounded, so a stack that somehow contains itself cannot spin.
+        for _ in 0..<4 {
+            guard level.count == 1, let only = level.first as? NSStackView else { break }
+            let next = only.arrangedSubviews.filter { !$0.isHidden }
+            if next.count == 1 { level = next } else { return next }
+        }
+        return level
     }
 
     @available(*, unavailable)
