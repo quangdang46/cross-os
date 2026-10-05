@@ -24,6 +24,25 @@ import AppKit
 /// to a person looking at the screen.
 
 enum ViewTree {
+    /// How many lines the field's text is actually laid out on.
+    ///
+    /// Measured from the drawn height rather than from `maximumNumberOfLines`
+    /// or from a layout manager: `NSTextField` exposes neither `textContainer`
+    /// nor `layoutManager` in Swift, and the height IS the thing being asked
+    /// about. An `NSTextField` is exactly as tall as the lines in it, so a
+    /// field that wraps to three lines is three line-heights.
+    ///
+    /// `maximumNumberOfLines` reports neither of those. It is a CAP, not a
+    /// count, and it is 0 for "no cap" — which the tree printout was
+    /// normalising to 1, so a four-line description was being reported as
+    /// `lines=1`. That is how a truncated-looking label survived being read.
+    static func wrappedLines(_ field: NSTextField) -> Int {
+        guard let font = field.font, field.stringValue.isEmpty == false else { return field.stringValue.isEmpty ? 0 : 1 }
+        let lineHeight = (font.ascender - font.descender + font.leading)
+        guard lineHeight > 1 else { return 1 }
+        return max(1, Int((field.frame.height / lineHeight).rounded()))
+    }
+
     static func describe(_ view: NSView, indent: Int) {
         let pad = String(repeating: "  ", count: indent)
         let frame = view.frame
@@ -34,9 +53,19 @@ enum ViewTree {
         // and a frame alone does not say whether the text is there.
         if let field = view as? NSTextField {
             let text = field.stringValue
+            // The line count the text ACTUALLY occupies, from the layout
+            // manager, not from `maximumNumberOfLines`.
+            //
+            // Those are not the same number and reporting the second one as
+            // though it were the first is how a label that wraps to four lines
+            // gets reported as `lines=1`. The readable-measure question — how
+            // long is a line, really — is a question about the laid-out text,
+            // and this is where it gets asked.
+            let wrapped = Self.wrappedLines(field)
             let lines = max(1, field.maximumNumberOfLines == 0 ? 1 : field.maximumNumberOfLines)
             let shown = text.isEmpty ? "(empty)" : "\"\(text.prefix(60))\""
-            print("\(pad)\(type(of: view)) \(size) \(position) \(shown) lines=\(lines)")
+            let tail = wrapped > 1 ? " wrapped=\(wrapped)" : ""
+            print("\(pad)\(type(of: view)) \(size) \(position) \(shown) lines=\(lines)\(tail)")
         } else {
             print("\(pad)\(type(of: view)) \(size) \(position)")
         }
