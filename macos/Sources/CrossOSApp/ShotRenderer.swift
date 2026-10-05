@@ -239,6 +239,32 @@ enum ShotRenderer {
     /// the matrix's chords and actions are legible and its column of
     /// checkboxes is a column of boxes somewhere else.
     ///
+    /// **Which is where the matrix's checkboxes are drawn from, and why four
+    /// attempts to move them did nothing.** The cell path above is never
+    /// reached for a row's button, so changing how that path sizes a piece
+    /// cannot move these. Measured on `core.matrix`: the row stripes run
+    /// y=712–763 (a 26pt row at 2x) and each checkbox glyph sits at y=770–790,
+    /// which is about 10pt BELOW the row it belongs to — while `--describe`
+    /// puts the button itself at `(537, 0)` in a `560x26` row, level with the
+    /// row's text.
+    ///
+    /// So the layout is right and the PDF draws the cell view's checkbox
+    /// against the bottom of the 26pt frame the table gave it. Four fixes were
+    /// tried against that:
+    ///
+    ///   - a computed centring offset into `checkbox.frame`, taken from a frame
+    ///     the table had not applied yet — measured, the boxes WALKED DOWN the
+    ///     page, each lower than the last
+    ///   - `checkbox.frame.size.height = rowHeight`, leaving the box where it
+    ///     was — still at the bottom
+    ///   - a centred holder around the box: identical output
+    ///   - drawing the cell at its natural height and compositing it centred:
+    ///     identical output, because that code path is not reached
+    ///
+    /// All four are reverted. The cause is understood and the fix is not; it
+    /// needs somebody to look at the real window, because the tree says the
+    /// layout is already correct.
+    ///
     /// So this collects the buttons that are not inside a table, which is
     /// every button on a settings page and none of a table cell — and the
     /// table's checkboxes render from their row, at the row's position, by
