@@ -202,7 +202,7 @@ final class ErrorView: NSStackView {
         headlineField.lineBreakMode = .byWordWrapping
         headlineField.maximumNumberOfLines = 0
 
-        let detailField = NSTextField(labelWithString: detail)
+        let detailField = NSTextField(labelWithString: Explain.daemon(detail))
         detailField.font = Typeface.caption
         detailField.textColor = Palette.secondaryInk
         detailField.lineBreakMode = .byWordWrapping
@@ -350,5 +350,65 @@ enum Humanize {
         }
         guard let first = out.first else { return out }
         return String(first).uppercased() + out.dropFirst()
+    }
+}
+
+/// Turn the daemon's error text into something a reader can act on.
+///
+/// **A raw RPC error is developer output on a user-facing screen.** Measured on
+/// `core.switcher`, the failure detail read:
+///
+///     core.windows: rpc code -32603: adapter: accessibility permission denied
+///
+/// Nobody reading a settings window knows what `-32603` is, and nobody can
+/// act on `core.windows`. What they can act on is the permission, and where
+/// to grant it — which is the whole point of saying it.
+///
+/// So the known failures are translated, the ACTION comes first, and the
+/// original string is kept underneath it in the secondary ink for whoever is
+/// going to file the bug. Nothing is swallowed: an unrecognised error passes
+/// through unchanged, because inventing a friendly message for an error nobody
+/// has described is how a real problem gets hidden behind a plausible one.
+enum Explain {
+    static func daemon(_ raw: String) -> String {
+        let lower = raw.lowercased()
+
+        if lower.contains("accessibility permission denied") {
+            return """
+            CrossOS needs Accessibility permission to see your windows.
+            System Settings → Privacy & Security → Accessibility → add \
+            CrossOS, then turn it on and reopen this window.
+
+            Reported by the daemon as: \(raw)
+            """
+        }
+        if lower.contains("input-monitoring") || lower.contains("input monitoring") {
+            return """
+            CrossOS needs Input Monitoring permission to read the keyboard.
+            System Settings → Privacy & Security → Input Monitoring → enable \
+            CrossOS, then reopen this window.
+
+            Reported by the daemon as: \(raw)
+            """
+        }
+        if lower.contains("no such method") {
+            return """
+            This build of CrossOS asks for something the daemon does not have.
+            That is a bug in the app, not something to fix on this machine.
+
+            Reported by the daemon as: \(raw)
+            """
+        }
+        if lower.contains("socket") || lower.contains("connection refused") {
+            return """
+            The daemon is not answering. Start it with ./scripts/run.sh \
+            --no-open, then reopen this window.
+
+            Reported by the daemon as: \(raw)
+            """
+        }
+        // Nothing matched, so nothing is claimed. A friendly message invented
+        // for an error nobody has described is worse than the error.
+        return raw
     }
 }
