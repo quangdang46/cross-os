@@ -673,6 +673,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let pageView = shell.pageController?.view else { continue }
             let found = Audit.fitAudit(root: pageView, page: page.id)
                 + Audit.fillAudit(root: pageView, page: page.id)
+                + Audit.weightAudit(root: pageView, page: page.id)
                 + Audit.duplicationAudit(root: pageView)
             findings += found
             // Per page, immediately. A hang on page fifteen must not cost

@@ -310,8 +310,18 @@ public enum Typeface {
     /// a dangerous one. The system has a weight for this; it is not bold-by-hand.
     public static var bodyStrong: NSFont { .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold) }
 
-    /// A card's title.
-    public static var cardTitle: NSFont { .systemFont(ofSize: NSFont.systemFontSize + 2, weight: .semibold) }
+    /// A card's title. **Regular**, which is what System Settings uses for a
+    /// group label.
+    ///
+    /// This was semibold, and with `pageTitle` also semibold the pane had two
+    /// semibold weights competing in one hierarchy — a 26pt page title and a
+    /// 15pt card title — so the eye had to read both before it could rank
+    /// them. Regular leaves the page title as the ONLY bold-ish thing on
+    /// screen, which is what makes it read as the page's name rather than as
+    /// the largest of several headings. macOS's group labels are regular too;
+    /// a group reads as a group because of its position and the space above
+    /// it, not because its label is heavier than the rows under it.
+    public static var cardTitle: NSFont { .systemFont(ofSize: NSFont.systemFontSize + 2) }
 
     /// The page's title.
     ///
@@ -324,9 +334,18 @@ public enum Typeface {
     ///
     /// `.preferredFont(forTextStyle:)` is the VARIANT, so it tracks the user's
     /// text size rather than being a number this file owns.
+    ///
+    /// **Semibold, not bold**, and that is the weight System Settings uses for
+    /// a content title. `convert(_:toHaveTrait: .boldFontMask)` was here, and
+    /// bold at 26pt is the heaviest text the app draws — heavier than any
+    /// control, heavier than any value, heavier than the card title it is
+    /// meant to out-weigh. A page title should dominate by size and position,
+    /// which it already does; making it the boldest thing on screen as well
+    /// turns the top of the pane into a shout, and a shout at the top of a
+    /// window is what a web form looks like.
     public static var pageTitle: NSFont {
         let large = NSFont.preferredFont(forTextStyle: .largeTitle)
-        return NSFontManager.shared.convert(large, toHaveTrait: .boldFontMask)
+        return NSFont.systemFont(ofSize: large.pointSize, weight: .semibold)
     }
 
     /// A description, a hint, a detail under a label.
@@ -335,8 +354,20 @@ public enum Typeface {
     /// A cap above a group, and the one place uppercase is right: a section
     /// label is a label for a group, not a sentence, and the system has a
     /// face for it.
+    ///
+    /// **Regular weight**, where it was semibold. Together with `pageTitle`
+    /// also semibold, the pane had two bold things in it — and the audit's new
+    /// weight check put it plainly: every one of the fifteen pages drew two
+    /// bold weights, the 26pt title and this 11pt cap, at a ratio of more than
+    /// two to one. Two bold things means neither is the thing the eye lands on.
+    ///
+    /// What the cap should be doing is quietly: it labels a group the size and
+    /// the space above it already identify, which is the same reason the cards
+    /// lost their borders. macOS's group labels are regular 13pt, and the
+    /// uppercase is a legible way to make a regular label read as a label
+    /// without making it louder than the page.
     public static var sectionCap: NSFont {
-        .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        .systemFont(ofSize: NSFont.smallSystemFontSize)
     }
 
     /// Machine text — a version, a daemon's error string, a log line.

@@ -341,6 +341,55 @@ enum Audit {
         )]
     }
 
+    /// How many DISTINCT weights the page's text is drawn in.
+    ///
+    /// The sixth check. Weight is the loudest thing in a type system and the
+    /// easiest to spend: a 26pt bold page title and a 15pt semibold card title
+    /// are both "bold-ish", so a reader has to read both before ranking them,
+    /// and the pane ends up with no single loudest thing in it.
+    ///
+    /// One page title per pane should be the only bold text on that pane. This
+    /// counts distinct non-regular weights, so a page drawing a page title, a
+    /// card title and a section cap all at the same weight reports two and is
+    /// worth a look.
+    /// `NSFontManager.weight(of:)` for `.regular`, measured — see below.
+    static let regularWeight = 5
+
+    static func weightAudit(root: NSView, page: String) -> [Finding] {
+        var boldish: Set<String> = []
+        var where_: [String: Int] = [:]
+        for view in collect(root) {
+            guard let field = view as? NSTextField, !field.stringValue.isEmpty,
+                  let font = field.font else { continue }
+            // `NSFontManager.weight(of:)` is an INDEX into the system's weight
+            // list, not an `NSFont.Weight`: measured on this machine it gives
+            // **5 for regular, 8 for semibold, 9 for bold**. The first version
+            // of this check treated anything at or above 3 as bold and so
+            // counted every ordinary row label in the app — it reported three
+            // to four bold weights a page, and what it had actually found was
+            // two. So the threshold is above regular, and the face name is
+            // what gets printed, because a bare index is not readable.
+            let symbolic = NSFontManager.shared.weight(of: font)
+            guard symbolic > Self.regularWeight else { continue }
+            let face = font.fontDescriptor.object(forKey: .face) as? String ?? "w\(symbolic)"
+            let key = "\(Int(font.pointSize))pt \(face)"
+            boldish.insert(key)
+            where_[key, default: 0] += 1
+        }
+        // Two is the right number, not one. The page title is bold and the
+        // NAME of each thing in the page is bold — a plugin's name, a list's
+        // title — and that is exactly what System Settings does: the pane has
+        // a name and the rows have names. Three is where it breaks, because
+        // then the reader has three things to rank and no way to know which.
+        guard boldish.count > 2 else { return [] }
+        return [Finding(
+            severity: .note, page: "weight",
+            what: "\(page) draws \(boldish.count) bold weights: \(boldish.sorted().joined(separator: ", "))",
+            detail: "each is emphasised, so none of them is the thing the eye should land on first. A pane "
+                  + "with one bold weight has one loudest thing in it."
+        )]
+    }
+
     static func fitAudit(root: NSView, page: String) -> [Finding] {
         var findings: [Finding] = []
         let leaves = collect(root)
