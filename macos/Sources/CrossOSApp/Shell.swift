@@ -471,7 +471,20 @@ public final class SidebarViewController: NSViewController {
     /// nowhere, and it is cleared rather than left pointing at a row that is
     /// not there.
     func filter(to visible: [Page]) {
-        guard pages != visible else { return }
+        // Compared BY ID, not as `[Page]`.
+        //
+        // `Page` is `Equatable` but not `Hashable`, and Swift's array `!=` on
+        // an Equatable element falls back to Obj-C `-hash` — AppKit logs "Obj-C
+        // `-hash` invoked on a Swift value of type `CrossOSCore.Page` that is
+        // Equatable but not Hashable; this can lead to severe performance
+        // problems", and it does so on every keystroke of the search field,
+        // which is the one thing running this line constantly.
+        //
+        // The ids are what identity means here anyway: the same page twice is
+        // the same page because its id matches.
+        let unchanged = pages.count == visible.count
+            && zip(pages, visible).allSatisfy { $0.id == $1.id }
+        guard !unchanged else { return }
         pages = visible
         groups = []
         for page in visible where !groups.contains(page.group) {

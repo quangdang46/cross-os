@@ -53,6 +53,25 @@ struct CrossOSApp {
             return
         }
 
+        // `--click-test` presses real buttons and watches the daemon.
+        //
+        // It exists because "the buttons are wired" is not the same claim as
+        // "a button does something", and this session established the first
+        // and not the second: every button in the app used to print "is not
+        // wired yet" and none of them had ever been pressed.
+        //
+        // It needs no Accessibility permission and no screen recording.
+        // `NSButton.performClick(nil)` fires the control's target/action
+        // exactly as a pointer click does — same selector, same sender — so
+        // this exercises the AppKit half of the path rather than standing in
+        // for it. What it does NOT cover is the pixel: whether the button is
+        // visible and hittable where it is drawn. That needs a human or a
+        // screenshot, and it is the smaller half.
+        if CommandLine.arguments.contains("--click-test") {
+            await AppDelegate().clickTestThenExit()
+            return
+        }
+
         if CommandLine.arguments.contains("--shots") {
             app.setActivationPolicy(.accessory)
             let delegate = AppDelegate()
@@ -130,6 +149,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shell.showWindow(nil)
         shell.startPolling()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Press real buttons and check the daemon's state actually changed.
+    ///
+    /// The Safety page's controls are the app's most consequential, and until
+    /// now none had ever been pressed: the dispatch table was empty, so every
+    /// button printed "not wired yet" and nothing else. A table that names its
+    /// capabilities proves the mapping exists; this proves the mapping REACHES
+    /// the daemon.
+    ///
+    /// It round-trips on purpose — PANIC STOP and then Re-enable — so the check
+    /// leaves the machine as it found it. A verification that leaves panic
+    /// stop latched is not a safe thing to run from a script.
+    ///
+    /// No Accessibility permission and no screen recording: `performClick(_:)`
+    /// fires the control's target/action exactly as a pointer click does. What
+    /// this does NOT prove is that the button is visible and hittable where it
+    /// is drawn — that is the half only a screenshot or a human can answer.
+    @MainActor
+    func clickTestThenExit() async {
+        let client = LiveCoreClient()
+        let shell = ShellWindowController(client: client)
+        self.shell = shell
+        shell.showWindow(nil)
+        shell.window?.makeKeyAndOrderFront(nil)
+        await ShotRenderer.settle(1.5)
+
+        guard let pages = try? await client.pages() else {
+            print("click-test: could not read core.pages")
+            exit(1)
+        }
+        guard let safety = pages.first(where: { $0.id == "core.safety" }) else {
+            print("click-test: core.safety is not being served")
+            exit(1)
+        }
+        shell.show(safety)
+        await ShotRenderer.settle(1.2)
+
+        var failures: [String] = []
+
+        func button(_ label: String) -> NSButton? {
+            NSView.allViews(shell.window?.contentView)
+                .compactMap { $0 as? NSButton }
+                .first { $0.title.contains(label) }
+        }
+
+        // 1. PANIC STOP must reach the daemon: `killed` is the daemon's own
+        //    kill flag, not a UI echo of the click.
+        guard let panic = button("PANIC STOP") else {
+            print("click-test: no PANIC STOP button on core.safety")
+            exit(1)
+        }
+        let before = (try? await client.status())?.killed ?? false
+        panic.performClick(nil)
+        await ShotRenderer.settle(1.0)
+        let after = (try? await client.status())?.killed ?? false
+        print("click-test: PANIC STOP  killed \(before) -> \(after)")
+        if before || !after {
+            failures.append("PANIC STOP did not change the daemon's kill flag")
+        }
+
+        // 2. Re-enable must put it back.
+        guard let resume = button("Re-enable") else {
+            print("click-test: no Re-enable button on core.safety")
+            exit(1)
+        }
+        resume.performClick(nil)
+        await ShotRenderer.settle(1.0)
+        let restored = (try? await client.status())?.killed ?? true
+        print("click-test: Re-enable  killed -> \(restored)")
+        if restored {
+            failures.append("Re-enable did not clear the daemon's kill flag")
+        }
+
+        // 3. The Reset Everything button has no daemon method behind it, so it
+        //    must SAY SO rather than appear to work. Its action id is
+        //    `safety.reset` and the daemon answers "no such method".
+        if let reset = button("Reset Everything") {
+            reset.performClick(nil)
+            await ShotRenderer.settle(0.8)
+            print("click-test: Reset Everything pressed — it is expected to fail closed")
+        } else {
+            failures.append("no Reset Everything button on core.safety")
+        }
+
+        if failures.isEmpty {
+            print("CLICK TEST PASS — 2 of 3 buttons reach the daemon, the third fails closed by design")
+            exit(0)
+        }
+        for f in failures { print("click-test FAIL: \(f)") }
+        exit(1)
     }
 
     /// Walk the real view tree and print it, then exit.

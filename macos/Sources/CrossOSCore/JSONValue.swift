@@ -13,7 +13,7 @@ import Foundation
 /// `asRecord`, `asBool`). Each of those is a runtime check that could have been
 /// a type. Here the shape is declared once and a decode failure is an error
 /// rather than a silently empty string.
-public indirect enum JSONValue: Codable, Sendable, Equatable {
+public indirect enum JSONValue: Codable, Sendable, Hashable {
     case null
     case bool(Bool)
     case number(Double)

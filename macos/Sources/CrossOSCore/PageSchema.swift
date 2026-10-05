@@ -21,7 +21,7 @@ import Foundation
 // and three aliases cover every page the daemon can currently produce.
 
 /// One settings page, as `app/backend/host.go:18-41` defines it.
-public struct Page: Sendable, Equatable {
+public struct Page: Sendable, Hashable {
     /// `"<pluginID>.<contribID>"` — the contribution's own name, never
     /// something the shell invented. A page id is namespaced and dotted, and
     /// `rendererKinds()` in the React registry asserts that no registered KIND
@@ -70,7 +70,7 @@ public struct Page: Sendable, Equatable {
 /// keep in step with Go builders that are themselves `map[string]any` — a
 /// translation bug waiting to happen, in exchange for checking nothing the
 /// registry does not already check.
-public struct PageSchema: Sendable, Equatable {
+public struct PageSchema: Sendable, Hashable {
     public var type: String?
     public var description: String?
     public var controls: [Control]
@@ -83,7 +83,7 @@ public struct PageSchema: Sendable, Equatable {
 }
 
 /// One control on a page: a `kind` and whatever that kind reads.
-public struct Control: Sendable, Equatable {
+public struct Control: Sendable, Hashable {
     public let kind: String
     public let id: String
     public let payload: [String: JSONValue]
