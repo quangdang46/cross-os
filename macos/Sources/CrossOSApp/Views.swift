@@ -87,6 +87,22 @@ final class HomeSummaryView: NSStackView {
         // below its own control — outside the clip view — and the page
         // renders with a hole where the rows go.
         setContentHuggingPriority(.required, for: .vertical)
+        // **A height floor.**
+        //
+        // This view measures from its rows, and its rows arrive from the
+        // daemon. Measured with a fresh daemon — which is what CI has, and
+        // what a first run has — both this and `ChecklistView` measured
+        // `600x0` while the data was in flight, and the audit reported
+        // "NSStackView is 0.0pt tall" on `core.home`.
+        //
+        // Every earlier "0 fail" in this repo's history was measured against
+        // a daemon that had been running for hours and already had rows. CI
+        // starts clean, so CI would have seen this.
+        //
+        // The floor is one row, which is what a group with a row in it
+        // measures; it stops the empty moment from collapsing the group and
+        // the rows replacing it a moment later.
+        heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         // Low compression resistance so "the group is the width of its pane"
         // beats the group's own intrinsic width.
         section.group.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

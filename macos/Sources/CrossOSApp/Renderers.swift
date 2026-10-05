@@ -396,7 +396,31 @@ class Card: NSStackView {
         // is what broke it.
         NSLayoutConstraint.activate([
             view.widthAnchor.constraint(equalTo: widthAnchor),
+            // The CONTENT gets the floor, not just the card.
+            //
+            // A floor on the card alone is satisfied by the card's own
+            // insets: measured, `Card 600x44` holding `NSStackView 600x0`, and
+            // the audit's zero-height check still fires on the empty stack
+            // inside it — correctly, because a group whose content is nothing
+            // is a group that renders as nothing.
+            view.heightAnchor.constraint(greaterThanOrEqualToConstant: 24),
+            // A group holding nothing is still a group, and it must be big
+            // enough to LOOK like one.
+            //
+            // `edgeInsets` alone gives an empty card 2 x 10pt: measured,
+            // `Card 600x28` wrapping `NSStackView 600x0` on `core.home` while
+            // the daemon's readiness rows were still in flight, and the audit
+            // reported it as "NSStackView is 0.0pt tall", correctly.
+            //
+            // This is the SIXTH zero-height stack that has been a real defect
+            // here — a Card, a FactRow, a PluginRow, a MenuListView, a
+            // ZoneRowView and now this. The common shape is a view that
+            // measures from its content while the content arrives later. The
+            // floor stops the empty state collapsing the group; the audit's
+            // zero-height check is what keeps it honest.
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
         ])
+        setContentHuggingPriority(.defaultLow, for: .vertical)
     }
 }
 

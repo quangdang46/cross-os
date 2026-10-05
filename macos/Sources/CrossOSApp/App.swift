@@ -62,7 +62,19 @@ struct CrossOSApp {
             // That is worth writing down rather than fixing silently, because
             // the deadlock looks exactly like a slow build and the fix —
             // moving it — looks like giving up on the measurement.
-            await AppDelegate().auditThenExit()
+            // Synchronous, NOT a top-level `await`, and this is measured
+            // rather than preferred.
+            //
+            // A top-level `await` runs the main actor with an *implicit* run
+            // loop, and in a RELEASE build that loop does not turn: `--audit`
+            // hung to the timeout with no output, while `--describe` — which
+            // drives `RunLoop.current.run(...)` explicitly — works on the same
+            // binary. So the run loop is started for it here, and the async body
+            // runs as a Task against a loop that is actually turning.
+            //
+            // A CI gate that hangs on the release binary teaches everyone to
+            // ignore red CI, which is worse than not having the gate.
+            await runAsyncThenExit { await AppDelegate().auditThenExit() }
             return
         }
 
@@ -81,7 +93,10 @@ struct CrossOSApp {
         // visible and hittable where it is drawn. That needs a human or a
         // screenshot, and it is the smaller half.
         if CommandLine.arguments.contains("--click-test") {
-            await AppDelegate().clickTestThenExit()
+            // Synchronous for the same measured reason as `--audit` above:
+            // a top-level `await` does not turn a run loop in a release
+            // build, and this one hung to the timeout with no output.
+            await runAsyncThenExit { await AppDelegate().clickTestThenExit() }
             return
         }
 
@@ -151,7 +166,45 @@ struct CrossOSApp {
     """
 }
 
+/// Run an async body against a run loop that is actually turning, then exit.
+///
+/// **Measured, not preferred.** A top-level `await` in `main()` runs the main
+/// actor with an *implicit* run loop, and in a release build that loop does not
+/// turn: `--audit` and `--click-test` both hung to the timeout with no output
+/// at all, on the same binary where `--describe` worked. `--describe` works
+/// because it drives `RunLoop.current.run(mode:before:)` itself, in a loop,
+/// with a deadline.
+///
+/// So this is that pattern with an async body: a semaphore waits for the body
+/// to finish while the run loop is pumped underneath it, which is what the
+/// socket reads and the layout passes need in order to make progress.
+///
+/// Bounded by a deadline as well as by the body finishing, so a body that
+/// never finishes exits non-zero with a line saying so rather than hanging CI.
 @MainActor
+func runAsyncThenExit(
+    timeout: TimeInterval = 120,
+    _ body: @escaping @MainActor () async -> Void
+) {
+    let done = DispatchSemaphore(value: 0)
+    Task { @MainActor in
+        await body()
+        done.signal()
+    }
+
+    let deadline = Date().addingTimeInterval(timeout)
+    while done.wait(timeout: .now()) == .timedOut {
+        if Date() >= deadline {
+            FileHandle.standardError.write(Data(
+                "timed out after \(Int(timeout))s — the run loop never finished the work\n".utf8))
+            exit(1)
+        }
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+    }
+    exit(0)
+}
+
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shell: ShellWindowController?
     private let client = LiveCoreClient()
@@ -419,6 +472,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `String?`, so a failed read printed `active unread` and then compared
     /// equal to a real profile id if the daemon ever had one. The two states
     /// are different kinds of thing and they were sharing a type.
+    @MainActor
     private func activeProfileID(_ client: any CoreClient) async -> (id: String?, read: Bool) {
         guard let rows = try? await client.profiles() else { return (nil, false) }
         return (rows.first(where: { $0.active })?.id, true)
@@ -465,12 +519,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// The stored enabled state of the first rule the daemon serves.
+    @MainActor
     private func firstRuleEnabled(_ client: any CoreClient) async -> Bool? {
         guard let rows = try? await client.matrix(), let row = rows.first else { return nil }
         return row.enabled
     }
 
     /// The id of the first rule the daemon serves.
+    @MainActor
     private func firstRuleID(_ client: any CoreClient) async throws -> String {
         guard let rows = try? await client.matrix(), let row = rows.first else {
             throw CoreError.decode(method: "config.getMatrix", underlying: DecodeShapeError.expectedArray)
@@ -490,6 +546,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Whether the daemon has a plugin switched on.
+    @MainActor
     private func pluginEnabled(_ client: any CoreClient, _ id: String) async -> Bool? {
         guard let rows = try? await client.plugins() else { return nil }
         guard let row = rows.first(where: { $0.id == id }) else { return nil }
@@ -643,6 +700,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The app's own pixels, drawn by the app. See `ShotRenderer` for why
     /// this exists instead of `screencapture` — and for what it does not
     /// include, which is the window chrome.
+    @MainActor
     func shotsThenExit() {
         let out = CommandLine.arguments
             .first { $0.hasPrefix("--out=") }
