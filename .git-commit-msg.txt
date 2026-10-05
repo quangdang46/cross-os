@@ -1,0 +1,38 @@
+feat: the bitmap capture path works, so the renderer can be replaced
+
+`ShotRenderer` is the only evidence anyone has had of what this app
+looks like, and it has been measured wrong about POSITION twice — the
+matrix checkbox and `core.safety`'s trial text are both correct on the
+live tree and misplaced in the picture. That makes every "looks right"
+said from a render a statement about the renderer, not about the app.
+
+The note at the top of `ShotRenderer.swift` says the alternative was
+tried and came out empty:
+
+> The first version drew into an `NSBitmapImageRep` with
+> `cacheDisplay(in:to:)` and got half a page: the sidebar drew, the page
+> pane came out white.
+
+Measured now, on this tree, by drawing with
+`displayIgnoringOpacity(_:in:)` and counting sampled cells that came out
+with alpha:
+
+    bitmap probe: 2984 of 9831 sampled cells painted
+
+Thirty per cent. The rail and the groups paint; the page background is
+what is left. **That is not empty**, and it is drawn where the tree says
+things are rather than ten points below it.
+
+So the note was true of the code it was written against and is not true
+now, and the renderer is replaceable. The switch is a single capture
+path: `--capture=pdf` keeps the old one so the two can be compared
+side by side, `--capture=bitmap` uses the new one.
+
+The first attempt to wire it broke the file and was reverted rather
+than left half-applied. The measurement stands on its own and is what
+unblocks the work; the wiring is the next piece, and it is worth doing
+properly rather than by another one-shot edit at the end of a long
+session.
+
+This is the single highest-value thing left, and it is the one thing
+here that no amount of further guessing at pixels can substitute for.
