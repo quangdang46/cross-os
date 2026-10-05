@@ -62,6 +62,30 @@ statement about it in a commit message was made about a picture it was not
 in. **A person looking at the real window is the only way to check it** —
 `./scripts/run.sh`.
 
+## These show the daemon's state at capture time
+
+The pictures are of a running app, so they are of whatever that daemon
+happened to be doing. `--click-test` presses PANIC STOP and then Reset
+Everything and does not put the machine back — it verifies destructive
+controls by causing them — so screenshots taken straight after a run show
+`core.home` saying interception is off and `core.safety` reporting what
+it removed.
+
+To capture the normal state, resume first:
+
+```sh
+python3 - <<'EOF'
+import json, socket
+s = socket.socket(socket.AF_UNIX); s.settimeout(5)
+s.connect("~/Library/Application Support/CrossOS/crossos.sock".replace("~", __import__("os").path.expanduser("~")))
+s.send(b'{"jsonrpc":"2.0","method":"safety.resume","id":1}\n'); s.recv(2048)
+EOF
+./scripts/screenshots.sh
+```
+
+That is why three of the files change after a `--click-test` run and do
+not change after anything else.
+
 ## Width varies with the page, and is pinned
 
 Two consecutive renders of the same build are byte-identical, so the pictures
