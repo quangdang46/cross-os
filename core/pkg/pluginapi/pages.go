@@ -284,7 +284,20 @@ func schemaFormHelp() UIContribution {
 		Controls: []map[string]any{
 			control("schemaForm", "example", map[string]any{
 				"source": "plugin:schemas",
-				"note":   "This page exists to show the path a plugin's own config form takes. It is a real rendering, not a screenshot.",
+				// Said plainly, because the page does not yet demonstrate what it used to
+				// claim. It said "This page exists to show the path a plugin's own
+				// config form takes" — and showed an empty state, because
+				// `core.pluginSchemas` is empty until a plugin ships a
+				// manifest. A page promising a demo it is not running is a page
+				// overclaiming, and it survived every audit here because an audit
+				// measures whether something is drawn, not whether the words
+				// above it are true.
+				//
+				// The schema is NOT invented to fill the gap, and the handler
+				// says why: a fabricated schema would render a form with no write
+				// path behind it, which is a control that looks configurable and
+				// silently is not — a worse lie than an empty page.
+				"note":   "This page draws a plugin's configuration form when one ships a schema. None does yet, so there is nothing to draw.",
 			}),
 		},
 	}), nil, "true")
