@@ -165,7 +165,18 @@ final class HomeSummaryView: NSStackView {
         // on the most-read page in the app.
         if let error = statusValue?.tapError, !error.isEmpty, !interception {
             section?.footnote.stringValue = "Keyboard interception is off: \(error)"
-            section?.footnote.textColor = Palette.warn
+            // SECONDARY ink, not `warn`.
+            //
+            // Orange in the middle of the page was the loudest thing on it —
+            // louder than the page title — for a sentence that repeats what the
+            // Readiness group below already says in two red rows. The urgency
+            // belongs where the reader is looking for it, and a footnote is
+            // where the reader is NOT looking.
+            //
+            // The colour is not lost: the Readiness group's rows carry "Not
+            // ready" in red, so the page still says what is wrong without the
+            // footnote competing with the title for the first glance.
+            section?.footnote.textColor = Palette.secondaryInk
             section?.footnote.isHidden = false
         } else {
             section?.footnote.isHidden = true

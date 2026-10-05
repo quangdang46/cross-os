@@ -39,7 +39,23 @@ public enum Palette {
     public static var cardBackground: NSColor { .controlBackgroundColor }
 
     /// The nav rail — a step behind the content plane rather than beside it.
-    public static var sidebarBackground: NSColor { .underPageBackgroundColor }
+    ///
+    /// The WINDOW background, not `underPageBackgroundColor`.
+    ///
+    /// `underPageBackgroundColor` is what an old-style sidebar is painted with
+    /// and it is heavy: measured on this host it resolves to `(150, 150, 150)`
+    /// in the light appearance, against a `(255, 255, 255)` content pane. That
+    /// is a 40% grey slab down 45% of the window, and it is the single ugliest
+    /// thing in the app — a colour so far from the content plane that the rail
+    /// stops being "behind" and becomes a second panel arguing with the first.
+    ///
+    /// System Settings since Ventura does NOT paint its rail that colour. It
+    /// uses the window background and separates the two panes with the split
+    /// divider, so the rail reads as part of the same surface at a glance and
+    /// separates only where you look. That is one colour instead of two, it is
+    /// what the system draws, and it follows the user's appearance in both
+    /// directions for free.
+    public static var sidebarBackground: NSColor { .windowBackgroundColor }
 
     /// A row at rest, before hover. The hover colour is `alternatingContentBackgroundColors`
     ///'s neighbour, not a hand-mixed translucent black: the system knows what
