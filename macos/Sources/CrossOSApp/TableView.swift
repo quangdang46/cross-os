@@ -103,8 +103,25 @@ final class TableView: NSStackView {
         }
         table.dataSource = self
         table.delegate = self
-        table.usesAlternatingRowBackgroundColors = true
-        table.rowHeight = 26
+        // **No stripes, and taller rows.**
+        //
+        // Alternating row backgrounds are a web table. macOS lists do not
+        // stripe: they separate rows with a hairline or with nothing at all,
+        // and they give rows room. Measured on `core.matrix`, the striped
+        // version rendered as eleven bands of two greys with a dark header bar
+        // above them, which is the one thing in the app that looks like a
+        // spreadsheet — and the matrix is the page a new user lands on to
+        // decide whether this product is worth keeping.
+        //
+        // `core.activity` was worse still: "Nothing recorded yet." sat on a
+        // stripe, which is the emptiest possible state wearing the loudest
+        // possible background.
+        table.usesAlternatingRowBackgroundColors = false
+        // 32pt is the macOS row for a list with a secondary line, and it is
+        // what makes a row read as a row rather than as a line of text. It
+        // was 26, which is a table row: dense, and dense is the wrong instinct
+        // for settings nobody is scanning quickly.
+        table.rowHeight = 32
         table.usesAutomaticRowHeights = false
 
         // The columns are resized to the table's width BY THE TABLE, and this
@@ -336,6 +353,43 @@ extension TableView: NSTableViewDataSource {
 }
 
 extension TableView: NSTableViewDelegate {
+    /// A hairline between rows, inset to the text's left edge.
+    ///
+    /// **This is what takes the place of the stripes.** A macOS list with no
+    /// background treatment separates its rows with a rule or with nothing;
+    /// with nothing at all a column of eleven rows reads as a paragraph. The
+    /// line starts where the text starts and stops at the trailing inset, so
+    /// it separates rows without drawing a box around the table — which is the
+    /// line a bordered card used to draw, at one stroke instead of four.
+    ///
+    /// No line after the LAST row, because a table that closes itself off
+    /// from the text below it is a card again by another name.
+    func tableView(_ tableView: NSTableView, willDisplayView view: NSView, forRow row: Int) {
+        let isLast = row == tableView.numberOfRows - 1
+        if let separator = view.subviews.first(where: {
+            $0.identifier?.rawValue == Self.separatorName
+        }) {
+            separator.isHidden = isLast
+            return
+        }
+
+        guard !isLast else { return }
+
+        let line = HairlineView()
+        line.identifier = NSUserInterfaceItemIdentifier(Self.separatorName)
+        line.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(line)
+        NSLayoutConstraint.activate([
+            line.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            line.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
+            line.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            line.heightAnchor.constraint(equalToConstant: 1),
+        ])
+    }
+
+    private static let separatorName = "crossos.row.separator"
+
+
     func tableView(
         _ tableView: NSTableView,
         viewFor tableColumn: NSTableColumn?,
@@ -405,5 +459,18 @@ final class ToggleTarget: NSObject {
     @objc func fire(_ sender: NSButton) {
         guard let change = boxes[ObjectIdentifier(sender)] else { return }
         change(sender.state == .on)
+    }
+}
+
+/// A one-point rule, drawn rather than layered.
+///
+/// The same reason `Card` draws its fill: a rule on a layer does not appear
+/// in a PDF context, and this table is rendered into one.
+final class HairlineView: NSView {
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Palette.hairline.setFill()
+        bounds.fill()
     }
 }
