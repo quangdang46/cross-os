@@ -44,10 +44,49 @@ enum ViewTree {
     }
 
     static func describe(_ view: NSView, indent: Int) {
+        describe(view, indent: indent, origin: Placement(x: 0, y: 0, height: 0), flipped: true)
+    }
+
+    /// A point in window space, carrying the height of the view it belongs to
+    /// so the next level down can convert a bottom-origin child.
+    private struct Placement {
+        let x: CGFloat
+        let y: CGFloat
+        let height: CGFloat
+    }
+
+    /// **Every frame printed here is in the WINDOW's coordinates: top-left
+    /// origin, y growing downward.**
+    ///
+    /// It used to print `view.frame`, which is in the PARENT's coordinates —
+    /// and an AppKit tree mixes both conventions, because `isFlipped` is a
+    /// per-view property. `TopDownDocument`, `EmptyStateView`, `HairlineView`
+    /// and the rail are flipped; `NSStackView`, `NSClipView` and every control
+    /// are not. So one printed `y` meant "from the top" and the next meant
+    /// "from the bottom", in the same tree.
+    ///
+    /// The consequence is not subtle. The printed tree puts `core.home`'s
+    /// title at `y=294`, which reads as 294pt down a 700pt pane; the render
+    /// puts its first ink at 78pt. Both were believed, and the disagreement
+    /// was charged to the renderer. **A tree whose y axis changes meaning
+    /// halfway down is not evidence about anything**, and it was being used as
+    /// evidence — including to certify the renderer wrong, which was the
+    /// conclusion six rounds of design work rested on.
+    ///
+    /// So the conversion happens once, here, and every line is comparable to
+    /// every other line and to the PNG. `TOP` on a non-flipped ancestor is
+    /// the same statement in the one convention a reader can hold.
+    private static func describe(_ view: NSView, indent: Int, origin: Placement, flipped: Bool) {
         let pad = String(repeating: "  ", count: indent)
         let frame = view.frame
         let size = "\(round(frame.width))x\(round(frame.height))"
-        let position = "(\(round(frame.minX)),\(round(frame.minY)))"
+
+        let here = flipped
+            ? Placement(x: origin.x + frame.minX, y: origin.y + frame.minY, height: frame.height)
+            : Placement(x: origin.x + frame.minX,
+                        y: origin.y + (origin.height - frame.maxY),
+                        height: frame.height)
+        let position = "(\(round(here.x)),\(round(here.y))\(flipped ? "" : " TOP"))"
 
         // A text field prints its string, because that is what a person reads
         // and a frame alone does not say whether the text is there.
@@ -88,7 +127,7 @@ enum ViewTree {
         }
 
         for subview in view.subviews {
-            describe(subview, indent: indent + 1)
+            describe(subview, indent: indent + 1, origin: here, flipped: view.isFlipped)
         }
     }
 

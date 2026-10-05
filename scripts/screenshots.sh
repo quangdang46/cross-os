@@ -38,4 +38,11 @@ echo "==> Rendering every page into $OUT"
 # half, and the navigation rail was broken the entire time.
 "$BIN" --shots --window --out="$OUT"
 
-echo "==> Done. $(find "$OUT" -name '*.png' | wc -l | tr -d ' ') screenshots in $OUT"
+echo "==> Measuring the rendered pages"
+# The images are the only artefact in this repo that is not a claim about the
+# app. So the script that makes them also checks them, and fails here rather
+# than leaving a bad picture to be committed and believed.
+python3 scripts/analyze-shot.py "$OUT"/*.png
+python3 scripts/check-rhythm.py "$OUT"/*.png
+
+echo "==> Done. $(find "$OUT" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ') screenshots in $OUT"

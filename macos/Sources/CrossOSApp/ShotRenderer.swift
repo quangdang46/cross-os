@@ -426,9 +426,71 @@ enum ShotRenderer {
             let name = page.id.replacingOccurrences(of: ".", with: "-")
             let path = "\(out)/\(name).png"
             try capture(target, to: path)
+            // The layout sidecar: the RECTANGLES, in the same coordinate space
+            // as the PNG, so the pixel check can ask a question it cannot
+            // answer from pixels alone.
+            //
+            // **This exists because classifying gaps by their SIZE was wrong.**
+            // The first version of `check-rhythm.py` bucketed every ink gap
+            // into "within a group" or "between sections" by comparing its
+            // magnitude against two brackets. Raising the section gap from 40
+            // to 56 made "between" go DOWN on twelve of fifteen pages, which
+            // is impossible if the bucket means what it says — the buckets
+            // were measuring whichever gap happened to land in a bracket, and
+            // the brackets are the very assumption under test.
+            //
+            // So the roles come from the view tree, which knows which view is
+            // a group, and the distances come from the pixels, which know
+            // where the ink actually is. Each instrument does the half it is
+            // good at, and neither is asked to guess.
+            try writeLayout(target, for: page.id, nextTo: path)
             written.append(path)
         }
         return written
+    }
+}
+
+extension ShotRenderer {
+    /// Write `<page>.layout.json`: every group-like view's rect, top-down, in
+    /// the same origin as the PNG beside it.
+    ///
+    /// `Card` is the group this app draws — the one whose `draw(_:)` is
+    /// deliberately empty, so it carries grouping through spacing alone. Its
+    /// rects are the boundaries a pixel check needs in order to tell a gap
+    /// inside a group from a gap between groups.
+    @MainActor
+    static func writeLayout(_ view: NSView, for page: String, nextTo pngPath: String) throws {
+        let scale = Int(ShotRenderer.scale)
+        let origin = view.bounds.origin
+        var groups: [[String: Any]] = []
+
+        func walk(_ node: NSView, _ x: CGFloat, _ y: CGFloat, _ height: CGFloat) {
+            for sub in node.subviews {
+                let f = sub.frame
+                // Convert to top-down within `view`, which is the frame the PNG
+                // was taken in.
+                let top: CGFloat = sub.isFlipped ? y + f.minY : y + (height - f.maxY)
+                let hereX = x + f.minX
+                if sub is CardControl || String(describing: type(of: sub)).hasPrefix("Card") {
+                    groups.append([
+                        "y0": Int((top - origin.y) * CGFloat(scale)),
+                        "y1": Int((top + f.height - origin.y) * CGFloat(scale)),
+                        "w": Int(f.width * CGFloat(scale)),
+                    ])
+                }
+                walk(sub, hereX, top, f.height)
+            }
+        }
+        walk(view, view.bounds.minX, view.bounds.minY, view.bounds.height)
+
+        let payload: [String: Any] = [
+            "page": page,
+            "scale": scale,
+            "groups": groups.sorted { ($0["y0"] as! Int) < ($1["y0"] as! Int) },
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted])
+        let url = URL(fileURLWithPath: pngPath).deletingPathExtension().appendingPathExtension("layout.json")
+        try data.write(to: url)
     }
 }
 

@@ -13,34 +13,87 @@ content pane alone. `--shots` without `--window` renders the pane, and that
 single flag is why a broken navigation rail survived eight commits: every
 layout defect in this repo was measured on half the app.
 
-## Read these as approximate, and here is why
+## These ARE positionally accurate. That was not true until this round.
 
-**The renderer gets positions wrong, and has been measured doing it three
-times.** `--shots` draws through `dataWithPDF`, and the picture it produces
-disagrees with `--describe` about where things are:
+**An earlier version of this file said the renderer got positions wrong, and
+that `--describe` was right in all three cases where they disagreed.** It was
+the other way round, and the reason is worth recording because six rounds of
+design work rested on it.
+
+`ViewTree` printed `view.frame`, which is in the **parent's** coordinates —
+and an AppKit tree mixes both conventions, because `isFlipped` is a per-view
+property. `TopDownDocument`, `EmptyStateView`, `HairlineView` and the rail are
+flipped; `NSStackView`, `NSClipView` and every control are not. So one printed
+`y` meant "from the top" and the next meant "from the bottom", in the same
+tree.
+
+The consequence was not subtle. The tree put `core.home`'s title at `y=294`,
+which reads as 294pt down a 700pt pane; the picture puts its first ink at
+78pt. Both were believed, and the disagreement was charged to the renderer.
+**A tree whose y axis changes meaning halfway down is not evidence about
+anything**, and it was being used as evidence — including to certify this
+renderer wrong.
+
+The three disagreements in the table above are all explicable by it:
 
 | what | on the live tree | in the picture |
 | --- | --- | --- |
-| matrix checkbox | `(537, 0, 44, 26)` in a `560x26` row — level with the row's text | ten points low |
-| safety trial text | leading-aligned, 106pt wide at x=-2 in a 600pt stack | centred |
+| matrix checkbox | `(537, 0, 44, 26)` in a `560x26` row | ten points low |
+| safety trial text | leading-aligned, 106pt wide at x=-2 | centred |
 | safety action buttons | `339x24`, `163x24`, `137x24` all at `x=0` | small chips drifting right |
 
-**The tree was right in all three.** So a defect read off one of these
-pictures may not exist, and a real one may look worse than it is. That is
-why the layout findings in this repo's history are the ones `--describe`
-confirmed and not the ones a screenshot suggested.
+A bottom-origin `y` read as a top-origin one moves things by the height of
+their container, which is exactly the size of the disagreements recorded —
+26pt in a row, 600pt in a stack, and a stack's own height for the buttons.
 
-The obvious replacement — drawing with `displayIgnoringOpacity` into a
-bitmap — does not work here. Measured: it paints a white blob. The note at
-the top of `ShotRenderer.swift` records the same result from an earlier
-attempt, and it is still true.
+`ViewTree` now converts as it descends, so **every frame it prints is in the
+window's coordinates: top-left origin, y growing downward**, and a non-flipped
+ancestor is marked `TOP` so the reader can see which convention applied. With
+one convention the tree and the picture agree.
 
-**So these pictures are for shape and tone, not for pixel judgement.**
-Line lengths, alignment of columns, whether a group reads as a group,
-whether a page says the wrong thing — all reliable. Whether a control is
-three points off — not. Anything that needs the last of those needs a
-person looking at the real window, which is the one thing this repo cannot
-do for itself.
+There is still one offset to hold in mind, and it is not a defect: `--shots`
+without `--window` renders `contentView`, which sits **52pt below the top of
+the window** because that is where the toolbar is. The tree measures from the
+window's top. Add the 52 and they line up.
+
+## What the pictures are still not for
+
+**Colour.** This host resolves `windowBackgroundColor` and
+`controlBackgroundColor` to the same value — `(255, 255, 255)` — so every
+page renders 97% pure white and the surface hierarchy that gives a macOS app
+its depth is absent from the picture. The cause is the machine, not the app,
+and `ShotRenderer.swift` records that three separate attempts to force an
+appearance changed nothing measurable. **No conclusion about this app's
+colours can be drawn from these images.**
+
+**Anything a person has to like.** These are for shape, rhythm and content:
+line lengths, whether a group reads as a group, whether a page says the wrong
+thing. Whether it is *beautiful* is not measurable here, and this repo cannot
+do that for itself.
+
+## Measuring the pictures instead of looking at them
+
+The images are the only artefact here that is not a claim about the app, so
+the script that makes them also checks them:
+
+```sh
+python3 scripts/analyze-shot.py docs/screenshots/*.png
+```
+
+It reports where the ink actually is, the margins, and the gaps between
+blocks — measured off the pixels rather than off the frames, because "the gap
+between section frames is 40pt" is not what a reader sees.
+
+`scripts/check-rhythm.py` asks the harder question: **does the spacing carry
+the grouping?** This app's groups draw no box on purpose, so if the spacing
+does not separate the roles, the page is a list rather than a pane. It takes
+the roles from the view tree (via a `.layout.json` sidecar the shell writes
+beside each PNG) and the distances from the pixels, because classifying gaps
+by their own size is circular — that is the assumption under test.
+
+It currently measures 3 of the 15 pages and reports the other 12 as not
+measurable, which is itself the finding: **nine pages have a single group**, so
+there is no section-to-section spacing to check on them.
 
 ## Regenerating
 

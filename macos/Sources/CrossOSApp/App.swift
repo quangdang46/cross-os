@@ -565,6 +565,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// After a real layout pass, so Auto Layout has resolved — a tree printed
     /// before the first layout pass shows frames of zero and proves nothing.
     func describeThenExit() {
+        // `--describe` takes no page. It used to take one silently, which is
+        // worse than not having it: `--describe core.matrix` printed the
+        // HOME page's tree under a heading that said matrix, and two
+        // measurements in this round were wrong because of it before it was
+        // found. `--explain=<pageID>` is the one that selects a page, and it
+        // says so.
+        //
+        // Rejecting the stray argument is the whole fix. A harness flag that
+        // ignores what it was given cannot be asserted on, because reading it
+        // looks exactly like reading the right page.
+        if let stray = CommandLine.arguments.dropFirst().first(where: {
+            !$0.hasPrefix("--") && $0 != "0"
+        }) {
+            FileHandle.standardError.write(Data("""
+                --describe takes no page argument, and "\(stray)" is not one.
+                It always describes the page the shell is showing.
+                To describe a named page:  --audit --explain=<pageID>
+
+                """.utf8))
+            exit(2)
+        }
+
         // The delegate's own `applicationDidFinishLaunching` has not run — the
         // run loop never started, which is the point of this mode — so `shell`
         // is nil. Build it here rather than starting the run loop and racing
