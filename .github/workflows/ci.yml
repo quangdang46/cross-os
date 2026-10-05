@@ -117,6 +117,22 @@ jobs:
       - name: Design audit
         run: ./.build/release/CrossOS --audit
 
+      # The click test, which is the only gate that proves a control REACHES
+      # the daemon rather than merely drawing.
+      #
+      # `--audit` measures frames and contrast. It cannot see that a checkbox
+      # clicks, sends the wrong parameter name and is refused, or that a button
+      # prints "not wired yet" and does nothing — every one of which shipped
+      # in this repo. That class of defect is invisible to every check that
+      # exists except this one, and this one was not in CI.
+      #
+      # It is destructive by design: it presses PANIC STOP and Reset
+      # Everything, which is the only way to prove they reach the daemon. The
+      # daemon is started by the step above on the runner and dies with the
+      # job, so nothing is left changed.
+      - name: Click test
+        run: ./.build/release/CrossOS --click-test
+
   build:
     strategy:
       matrix:

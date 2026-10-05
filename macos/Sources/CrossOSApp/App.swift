@@ -182,6 +182,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// is drawn — that is the half only a screenshot or a human can answer.
     @MainActor
     func clickTestThenExit() async {
+        // The daemon has to be there, and it is checked FIRST.
+        //
+        // Without a daemon every call below returns an error, the page shows
+        // its error state, and no button is found — so this test hangs rather
+        // than fails, and a CI gate that hangs is a CI gate that burns the
+        // job's whole timeout before anyone learns why. Measured: with the
+        // daemon down it exits 124 on a timeout, having printed nothing.
+        guard (try? await LiveCoreClient().status()) != nil else {
+            print("click-test: no daemon on the socket — start one with ./scripts/run.sh --no-open")
+            exit(1)
+        }
+
         let client = LiveCoreClient()
         let shell = ShellWindowController(client: client)
         self.shell = shell
