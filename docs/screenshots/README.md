@@ -13,6 +13,35 @@ content pane alone. `--shots` without `--window` renders the pane, and that
 single flag is why a broken navigation rail survived eight commits: every
 layout defect in this repo was measured on half the app.
 
+## Read these as approximate, and here is why
+
+**The renderer gets positions wrong, and has been measured doing it three
+times.** `--shots` draws through `dataWithPDF`, and the picture it produces
+disagrees with `--describe` about where things are:
+
+| what | on the live tree | in the picture |
+| --- | --- | --- |
+| matrix checkbox | `(537, 0, 44, 26)` in a `560x26` row — level with the row's text | ten points low |
+| safety trial text | leading-aligned, 106pt wide at x=-2 in a 600pt stack | centred |
+| safety action buttons | `339x24`, `163x24`, `137x24` all at `x=0` | small chips drifting right |
+
+**The tree was right in all three.** So a defect read off one of these
+pictures may not exist, and a real one may look worse than it is. That is
+why the layout findings in this repo's history are the ones `--describe`
+confirmed and not the ones a screenshot suggested.
+
+The obvious replacement — drawing with `displayIgnoringOpacity` into a
+bitmap — does not work here. Measured: it paints a white blob. The note at
+the top of `ShotRenderer.swift` records the same result from an earlier
+attempt, and it is still true.
+
+**So these pictures are for shape and tone, not for pixel judgement.**
+Line lengths, alignment of columns, whether a group reads as a group,
+whether a page says the wrong thing — all reliable. Whether a control is
+three points off — not. Anything that needs the last of those needs a
+person looking at the real window, which is the one thing this repo cannot
+do for itself.
+
 ## Regenerating
 
 ```sh
