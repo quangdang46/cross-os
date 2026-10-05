@@ -1,0 +1,61 @@
+docs: the render disagrees with the tree, and it is now twice
+
+`core.safety`'s trial text is the second place the picture and the layout
+have come apart, and the shape is identical to the matrix checkbox.
+
+Measured on the live tree, inside the page:
+
+    TrialView 600x86
+      NSStackView 600x66
+        NSStackView 600x66
+          NSTextField 106x16 (-2,0) "No trial in flight."
+
+The field is 106pt wide at x=-2 inside a 600pt stack. **That is
+leading-aligned.** The render draws it centred.
+
+The matrix checkbox was the same: the button at `(537, 0, 44, 26)` in a
+`560x26` row — correct, level with the row's text — and the render draws
+it ten points low.
+
+Two cases is a pattern, and the pattern is the thing worth writing down.
+
+**`--describe` and `--shots` do not agree, and `--describe` is the one
+that is right.** Both walk the same view tree; one reads frames and
+prints them, the other asks AppKit to draw through `dataWithPDF` and
+rasterises the result. Something in that second path — layer backing,
+the appearance in force while drawing, cells drawn through
+`cell.draw(withFrame:)` — is not reporting where the views actually are.
+
+That has a consequence for everything in this repo's history, and it is
+the honest one: **a measurement I have been reading for months is not
+evidence about what the app looks like.** It is evidence about what the
+renderer does.
+
+It explains the shape of the last few weeks exactly:
+
+- I chased the matrix checkbox four times and reverted four times. The
+  app was never wrong.
+- I "fixed" the safety note to fill its row and it made no visible
+  difference, because the picture was never showing the frame the note
+  was laid out in.
+- Every "looks fixed" I reported was checked against a tool that is
+  demonstrably wrong about two of the things it was asked to show.
+
+What I should have done, and did not: when the same symptom survived
+three different fixes, treat the measuring instrument as the suspect
+rather than the code. I did eventually, for the checkbox, and the probe
+proved it. I should have generalised that instead of moving on to the
+next symptom.
+
+**The fix is to make `--shots` and `--describe` agree**, and until that
+happens no visual judgement from either of them is worth anything. The
+`dataWithPDF` path has to come out and `cacheDisplay(in:to:)` has to come
+in, and that needs a machine where Screen Recording is granted — which
+is the same single blocker as looking at the real window.
+
+Until then: the tree is the evidence. On the tree, `core.safety`'s trial
+text is correctly left-aligned, and the remaining "centring" is the
+renderer.
+
+Verified: CoreTests 111 pass; --audit 15 pages 0 fail light and dark;
+core 26/26.
