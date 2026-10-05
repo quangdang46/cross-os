@@ -17,7 +17,7 @@ import CrossOSCore
 // MARK: - The window
 
 /// The app's main window: a nav rail and a page.
-public final class ShellWindowController: NSWindowController {
+public final class ShellWindowController: NSWindowController, NSToolbarDelegate {
     private let client: any CoreClient
     private let split: NSSplitViewController
     private let sidebar: SidebarViewController
@@ -99,6 +99,30 @@ public final class ShellWindowController: NSWindowController {
         split.addSplitViewItem(pageItem)
 
         window.contentViewController = split
+
+        // The window has a TOOLBAR, which is where macOS puts a settings
+        // window's title and its search field.
+        //
+        // The title was the first thing inside the page's scroll view, so it
+        // scrolled away with the content and the window's own title bar read
+        // "CrossOS" on every one of fifteen pages. `.unified` is what System
+        // Settings and every settings pane since Big Sur uses: the title
+        // inline on the left, controls on the right, one row.
+        //
+        // Not animated and not `displayMode`: a toolbar that fades in as the
+        // pointer approaches the title bar makes the window change shape while
+        // somebody is reading it.
+        let toolbar = NSToolbar(identifier: "CrossOSToolbar")
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        // The delegate is what actually puts the search field in the bar: a
+        // toolbar with no delegate asks for its default identifiers and gets
+        // nothing back, so the field is built and never shown.
+        toolbar.delegate = self
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
+        window.titlebarAppearsTransparent = false
+        installSearch()
         window.setContentSize(ShellWindowController.contentSize)
         window.center()
     }
@@ -161,6 +185,107 @@ public final class ShellWindowController: NSWindowController {
         window.setFrame(frame, display: true)
     }
 
+    // MARK: - Search
+
+    /// The search field, kept so the delegate can read it.
+    ///
+    /// This is the search System Settings has and this app did not: fifteen
+    /// pages with no way to find any of them. It filters the RAIL, not the
+    /// content — a settings search answers "which page is this on", and
+    /// searching the text of every control on every page would need a daemon
+    /// change this shell cannot make alone.
+    private let search = NSSearchField()
+    private var searchDelegate: SearchTarget?
+
+    /// The pages currently matching the search, or all of them when empty.
+    private var visiblePages: [Page] {
+        let text = search.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return sidebar.allPages }
+        return sidebar.allPages.filter { page in
+            page.title.localizedCaseInsensitiveContains(text)
+                || page.id.localizedCaseInsensitiveContains(text)
+                || page.group.localizedCaseInsensitiveContains(text)
+        }
+    }
+
+    private func installSearch() {
+        let target = SearchTarget { [weak self] query in
+            self?.applySearch(query)
+        }
+        searchDelegate = target
+        search.delegate = target
+        search.placeholderString = "Search settings"
+
+        // The field needs a SIZE, and a toolbar item sizes its view by the
+        // view's FRAME rather than by constraints on it. Without a frame
+        // AppKit logs "view was automatically measured but had an ambiguous
+        // height or width ... zero height or width", which is the field in the
+        // bar and invisible — the same defect as a card that measured 0 with
+        // its content outside it. `translatesAutoresizingMaskIntoConstraints`
+        // stays true here for exactly that reason: the frame IS the layout.
+        search.frame = NSRect(x: 0, y: 0, width: 220, height: 22)
+        search.translatesAutoresizingMaskIntoConstraints = true
+        search.focusRingType = .none
+        // Filtering on every keystroke, not on Return: the rail is fifteen
+        // rows and the answer arrives as the letters do.
+        search.sendsWholeSearchString = false
+        search.sendsSearchStringImmediately = true
+    }
+
+    /// The toolbar item's identifier, made once so the delegate can answer
+    /// for it without reconstructing an `NSUserInterfaceItemIdentifier` that
+    /// would not match the one the item was created with.
+    static let searchItem = NSToolbarItem.Identifier("crossos.search")
+
+    /// Narrow the rail to the pages matching `query`.
+    ///
+    /// An empty query restores every page — a search that hides the rail and
+    /// does not bring it back is a search that breaks navigation.
+    private func applySearch(_ query: String) {
+        sidebar.filter(to: visiblePages)
+    }
+
+    // MARK: - The toolbar
+
+    /// The one item, and only the one item.
+    ///
+    /// `defaultItemIdentifiers` is what the toolbar asks when it is empty, and
+    /// returning it here is what makes the search field appear at all: an item
+    /// handed to `toolbar(_:itemForItemIdentifier:willBeInsertedIntoToolbar:)`
+    /// is not shown until the delegate also says which identifiers belong.
+    public func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [Self.searchItem]
+    }
+
+    public func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [Self.searchItem]
+    }
+
+    public func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        guard itemIdentifier == Self.searchItem else { return nil }
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        // The ITEM carries the size and the field fills it.
+        //
+        // A toolbar item lays its view out from `view.frame`, and a view with
+        // no frame of its own measures to zero — AppKit logs "view was
+        // automatically measured but had an ambiguous height or width ...
+        // zero height or width", which is the search field in the bar and
+        // invisible. Same shape of defect as a card that measures 0 with its
+        // content outside it: the thing is there and nothing draws.
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 22))
+        search.frame = holder.bounds
+        search.translatesAutoresizingMaskIntoConstraints = true
+        holder.addSubview(search)
+        item.view = holder
+        item.label = "Search"
+        item.paletteLabel = "Search settings"
+        return item
+    }
+
     /// The 5s refresh, inherited from the React shell rather than invented.
     ///
     /// `App.tsx:385-389` polls every 5s and threads the result through a token
@@ -182,6 +307,23 @@ public final class ShellWindowController: NSWindowController {
                 await self?.sidebar.reload()
             }
         }
+    }
+}
+
+/// The search field's target. `NSSearchField.delegate` is weak, so the object
+/// that has to survive is held by the window controller rather than created
+/// per keystroke.
+@MainActor
+final class SearchTarget: NSObject, NSSearchFieldDelegate {
+    private let onChange: @MainActor (String) -> Void
+
+    init(onChange: @escaping @MainActor (String) -> Void) {
+        self.onChange = onChange
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        guard let field = obj.object as? NSSearchField else { return }
+        onChange(field.stringValue)
     }
 }
 
@@ -249,7 +391,6 @@ public final class SidebarViewController: NSViewController {
 
         outline.delegate = self
         outline.headerView = nil
-        outline.rowSizeStyle = .default
         // `NSTableViewStyleSourceList`, and not the `.sourceList` shorthand —
         // the shorthand has been deprecated since macOS 12 and what it selects
         // is the OLD source list: a solid accent bar down the full height of
@@ -272,7 +413,15 @@ public final class SidebarViewController: NSViewController {
         // carry without the highlight swallowing the label.
         outline.usesAlternatingRowBackgroundColors = false
         outline.floatsGroupRows = false
-        outline.indentationPerLevel = 12
+        // `.custom`, so `rowHeight` below is the row height rather than a
+        // value AppKit replaces with one of its own standard sizes.
+        //
+        // **This did not change the rendered rows.** Measured after setting
+        // it: still `NSTableRowView 260x19`, the height of its own text, not
+        // 30. The rows are sized by their cell views and `rowHeight` is not
+        // reaching them. Kept because it is the correct setting and costs
+        // nothing; the tight rail is a known open item, not a solved one.
+        outline.rowSizeStyle = .custom
         outline.rowHeight = 30
 
         let symbolColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("symbol"))
@@ -306,6 +455,33 @@ public final class SidebarViewController: NSViewController {
     public override func viewDidAppear() {
         super.viewDidAppear()
         Task { await reload() }
+    }
+
+    /// Every page the daemon serves, in the order the rail shows them.
+    var allPages: [Page] { pages }
+
+    /// Show only `visible`, keeping the daemon's own grouping and order.
+    ///
+    /// The groups are REBUILT from the filtered list rather than hidden: a
+    /// group whose every page is filtered out must disappear, and a group
+    /// left behind with nothing under it is a heading over nothing — which is
+    /// the defect this rail had once already, before the datasource was fixed.
+    ///
+    /// A selection on a page that is no longer visible is a selection
+    /// nowhere, and it is cleared rather than left pointing at a row that is
+    /// not there.
+    func filter(to visible: [Page]) {
+        guard pages != visible else { return }
+        pages = visible
+        groups = []
+        for page in visible where !groups.contains(page.group) {
+            groups.append(page.group)
+        }
+        outline.reloadData()
+        for group in groups {
+            outline.expandItem(group, expandChildren: true)
+        }
+        outline.deselectAll(nil)
     }
 
     /// Re-read the page list.

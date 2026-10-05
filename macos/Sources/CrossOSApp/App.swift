@@ -11,6 +11,17 @@ import CrossOSCore
 struct CrossOSApp {
     @MainActor
     static func main() async {
+
+        // `--help` prints and exits.
+        //
+        // There was no handler for it, so it fell through every branch and
+        // launched the real app: `./CrossOS --help` opened a window, connected
+        // to the daemon and sat there until it was killed — and looked exactly
+        // like a hang. It is the first thing anybody types.
+        if CommandLine.arguments.contains("-h") || CommandLine.arguments.contains("--help") {
+            print(usage)
+            exit(0)
+        }
         let app = NSApplication.shared
 
         // `--describe` prints the view tree and exits. It exists because this
@@ -81,6 +92,31 @@ struct CrossOSApp {
         app.setActivationPolicy(.regular)
         app.run()
     }
+
+    /// What the app is, and every flag it answers to.
+    ///
+    /// Written out rather than derived, because a `--help` that lists the
+    /// flags a developer remembers is a `--help` that is wrong the moment a
+    /// flag is added, and this file's flags are how the UI is verified.
+    static let usage = """
+    CrossOS — a cross-OS UX compatibility layer for macOS.
+
+    With no flags, opens the settings window against the running daemon.
+    Start the daemon first with ./scripts/run.sh --no-open.
+
+    Verification flags (they render or measure and then exit):
+
+      --describe           print the live view tree and exit
+      --explain=<pageID>   with --audit, print one page's tree
+      --audit              measure every page's design properties
+      --shots              render every page to PNG
+      --shots --window     …of the whole window, sidebar included
+      --out=<dir>          with --shots, where to write (default /tmp/crossos-shots-swift)
+      --geometry           print the switcher's grid arithmetic and exit
+      --probe-layers       print the window's layer tree and exit
+      --log-cols           with --shots, print each table column's geometry
+
+    """
 }
 
 @MainActor
