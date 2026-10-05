@@ -327,9 +327,20 @@ public final class PageViewController: NSViewController {
                 )
             )
         } else {
-            for control in controls {
+            for (index, control) in controls.enumerated() {
                 let view = Renderers.shared.makeView(for: control, context: context)
                 stack.addArrangedSubview(view)
+                // SECTIONS are further apart than things INSIDE one.
+                //
+                // The stack's spacing is a single number for everything, which
+                // is why a page of five sections reads as one list of five
+                // equal-weight things. macOS gives a group more air above it
+                // than the rows inside it have, and the eye groups by that gap
+                // rather than by a border — which is also why removing the
+                // borders was not enough on its own.
+                if index > 0 {
+                    stack.setCustomSpacing(Gap.group + Gap.group, after: stack.arrangedSubviews[index])
+                }
                 // Fill the pane, and hug the content vertically. Two
                 // constraints, one axis each: `.leading` alignment already
                 // keeps the row on the left, and the width is what fills.
