@@ -503,7 +503,6 @@ final class ChecklistView: NSStackView {
 final class WizardView: NSStackView {
     private let currentStep = 0
     private let stack = NSStackView()
-
     init(control: Control, context: ControlContext) {
         super.init(frame: .zero)
         // A stack in name only is a stack that measures nothing: without an
@@ -593,7 +592,13 @@ final class WizardView: NSStackView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("WizardView is created in code") }
 
+    /// The link buttons' target needs the page it navigates to, and that
+    /// lives on the context the view was built with. A closure rather than the
+    /// whole context, so this type holds no service it would never call.
+    private var navigate: (String) -> Void = { _ in }
+
     private func build(control: Control, context: ControlContext) {
+        navigate = { id in context.navigate(id) }
         let steps = control.steps
 
         for (index, step) in steps.enumerated() {
@@ -645,6 +650,56 @@ final class WizardView: NSStackView {
             column.spacing = Gap.tight
             stack.addArrangedSubview(column)
         }
+
+        // The links go LAST, after the steps. They were built first and the
+        // wizard read as two buttons floating above four numbered steps, with
+        // no way to tell they were the end of the list rather than the
+        // beginning of it.
+        buildLinks(on: stack, from: control)
+    }
+
+    /// The pages the wizard says it links to, as buttons.
+    ///
+    /// **The daemon has declared these since the page was written and the shell
+    /// has never read them.** `core.onboard` sends `aboutLink: core.about` and
+    /// `trialLink: core.safety`; `Control.link(_:)` has existed the whole time
+    /// to read them and nothing called it. So the welcome wizard — the first
+    /// thing anybody sees — told a new user to enable things and gave them no
+    /// way to reach the page that explains them or the page where the
+    /// dangerous button lives.
+    ///
+    /// Same class as `core.finder`, which promised a list and showed a
+    /// sentence: something is declared and nothing draws it.
+    private func buildLinks(on column: NSStackView, from control: Control) {
+        let links: [(String, String, String)] = [
+            ("trialLink", "Open Safety", "Where panic stop and Reset Everything live."),
+            ("aboutLink", "About CrossOS", "What it does, and what it asks for."),
+        ]
+        var made: [NSButton] = []
+        for (key, title, help) in links {
+            guard let pageID = control.link(key), !pageID.isEmpty else { continue }
+            let button = NSButton(title: title, target: self, action: #selector(followLink(_:)))
+            button.bezelStyle = .rounded
+            button.tag = 0
+            button.setAccessibilityLabel("\(title) — \(help)")
+            button.identifier = NSUserInterfaceItemIdentifier(pageID)
+            column.addArrangedSubview(button)
+            made.append(button)
+        }
+        // The first link is separated from the step above it, the two from
+        // each other by the stack's own spacing.
+        if made.count == column.arrangedSubviews.count - 1, let lastStep = column.arrangedSubviews.dropLast(made.count).last {
+            column.setCustomSpacing(Gap.group, after: lastStep)
+        }
+        guard made.count > 1 else { return }
+        for button in made {
+            button.widthAnchor.constraint(equalTo: made[0].widthAnchor).isActive = true
+        }
+    }
+
+    @objc private func followLink(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        navigate(id)
     }
 
     private func loadVerdicts(context: ControlContext) async {

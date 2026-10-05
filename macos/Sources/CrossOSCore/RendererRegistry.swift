@@ -67,6 +67,15 @@ public struct ControlContext: Sendable {
     /// is drawing for.
     public let pageId: String
 
+    /// Go to another page, by its id.
+    ///
+    /// The daemon declares cross-page links — `core.onboard` sends
+    /// `aboutLink: core.about` and `trialLink: core.safety` — and until this
+    /// existed a control had no way to act on one, so the welcome wizard named
+    /// two pages and could not reach either. `Control.link(_:)` has been there
+    /// the whole time with nothing calling it.
+    public let navigate: @Sendable (String) -> Void
+
     public init(
         service: any CoreClient,
         status: DaemonStatus? = nil,
@@ -74,7 +83,8 @@ public struct ControlContext: Sendable {
         refreshToken: Int = 0,
         note: @escaping @Sendable (String) -> Void = { _ in },
         refresh: @escaping @Sendable () -> Void = {},
-        pageId: String = ""
+        pageId: String = "",
+        navigate: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.service = service
         self.status = status
@@ -83,6 +93,7 @@ public struct ControlContext: Sendable {
         self.note = note
         self.refresh = refresh
         self.pageId = pageId
+        self.navigate = navigate
     }
 }
 

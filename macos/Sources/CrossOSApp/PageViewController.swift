@@ -250,6 +250,25 @@ public final class PageViewController: NSViewController {
     /// a real class of bug in the React shell — `WizardControl` and the
     /// behaviour matrix both re-created their rows on a refresh token bump and
     /// neither tore the old ones down.
+    /// Navigate to another page the daemon named, by id.
+    ///
+    /// An id the daemon sends that no page answers is reported in the page's
+    /// own note rather than silently ignored: a link that goes nowhere should
+    /// say so, because the alternative is a button that looks like it worked.
+    func follow(pageID: String) async {
+        guard let pages = try? await client.pages() else { return }
+        guard let target = pages.first(where: { $0.id == pageID }) else {
+            onFollowPage?(nil)
+            return
+        }
+        onFollowPage?(target)
+    }
+
+    /// Set by the window, which is what owns the rail and the page swap.
+    /// `nil` means the daemon named a page that does not exist, and the
+    /// window says so rather than leaving a button that appears to work.
+    var onFollowPage: ((Page?) -> Void)?
+
     private func rebuild(for page: Page) {
         // Everything that is not one of the three chrome views goes, and the
         // three are named rather than counted.
@@ -273,7 +292,17 @@ public final class PageViewController: NSViewController {
             status: nil,
             logs: [],
             refreshToken: 0,
-            pageId: page.id
+            pageId: page.id,
+            // A control that names another page can now send the reader
+            // there. The daemon has been declaring cross-page links the whole
+            // time — `core.onboard` sends `aboutLink` and `trialLink` — and
+            // nothing could act on one.
+            navigate: { [weak self] id in
+                guard let self else { return }
+                Task { @MainActor in
+                    await self.follow(pageID: id)
+                }
+            }
         )
 
         let controls = page.schema?.controls ?? []

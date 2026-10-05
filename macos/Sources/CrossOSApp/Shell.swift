@@ -114,6 +114,18 @@ public final class ShellWindowController: NSWindowController, NSToolbarDelegate 
         sidebar.onSelect = { [weak self] page in
             self?.show(page)
         }
+        // A control that names another page sends the reader there. The daemon
+        // declares these — `core.onboard` sends `aboutLink` and `trialLink` —
+        // and until the context carried a way to act on one, the welcome
+        // wizard named two pages and could reach neither.
+        page.onFollowPage = { [weak self] target in
+            guard let self else { return }
+            guard let target else {
+                self.announce("That page does not exist.")
+                return
+            }
+            self.show(target)
+        }
 
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
         sidebarItem.minimumThickness = 180
@@ -188,6 +200,14 @@ public final class ShellWindowController: NSWindowController, NSToolbarDelegate 
     /// view and guessing which half it landed in.
     public var pageController: NSViewController? {
         split.splitViewItems.last?.viewController
+    }
+
+    /// Say something in the page being shown.
+    ///
+    /// The window title is the only chrome a reader sees, and a link that
+    /// goes nowhere should not look like one that worked.
+    private func announce(_ message: String) {
+        window?.title = message
     }
 
     public func show(_ page: Page) {
