@@ -75,8 +75,8 @@ private final class MatrixTable: NSStackView, TableContent {
         let entry = entries[row]
         let current = stored[entry.ruleID] ?? entry.enabled
         let chord = Chord.format(entry.keys)
-        return (current, { [weak self] next in
-            Task { await self?.write(rule: entry, keys: chord, next: next) }
+        return (current, { next in
+            Task { await self.write(rule: entry, keys: chord, next: next) }
         })
     }
 

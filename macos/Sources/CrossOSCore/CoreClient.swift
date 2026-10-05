@@ -684,11 +684,28 @@ public actor LiveCoreClient: CoreClient {
     }
 
     public func setRuleEnabled(ruleID: String, enabled: Bool) async throws -> Bool {
-        let params = JSONValue.object(["rule_id": .string(ruleID), "enabled": .bool(enabled)])
+        // `ruleId`, NOT `rule_id`. The daemon answers
+        // `{"code":-32602,"message":"need {ruleId, enabled}"}` for the
+        // snake_case spelling, and this call used the snake_case one — so
+        // every checkbox in the behaviour matrix wrote nothing and reported
+        // nothing. Measured with --click-test: the click reached
+        // `ToggleTarget.fire`, and no rule's stored state moved.
+        let params = JSONValue.object(["ruleId": .string(ruleID), "enabled": .bool(enabled)])
         // The answer is an object with the stored state in it, not a bare
         // bool — the Go client unwraps `.enabled` from it.
+        //
+        // A DECODING FAILURE IS AN ERROR, not `false`. Reading a missing
+        // `enabled` as `false` turns "the daemon said something else" into
+        // "the rule is off", which is a lie about the one control whose job is
+        // to say whether the machine is remapping a key.
         let raw = try await call("config.setRuleEnabled", params)
-        let object = raw.objectValue ?? [:]
-        return object["enabled"]?.boolValue ?? false
+        guard let object = raw.objectValue,
+              let stored = object["enabled"]?.boolValue else {
+            throw CoreError.decode(
+                method: "config.setRuleEnabled",
+                underlying: DecodeShapeError.expectedObject
+            )
+        }
+        return stored
     }
 }

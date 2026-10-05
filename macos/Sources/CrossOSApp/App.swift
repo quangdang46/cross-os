@@ -201,13 +201,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             print("click-test: no PANIC STOP button on core.safety")
             exit(1)
         }
+        // The daemon may ALREADY be killed when this starts — a previous run's
+        // Reset Everything leaves it that way — so "the flag changed" is the
+        // wrong assertion and fails on a working button. What PANIC STOP must
+        // do is leave it TRUE, whatever it was: a button that leaves the flag
+        // as it found it has done nothing. Measured failing this way:
+        // `killed true -> true` reported as "PANIC STOP did not change the
+        // daemon's kill flag", against a daemon that was already stopped.
         let before = (try? await client.status())?.killed ?? false
         panic.performClick(nil)
         await ShotRenderer.settle(1.0)
         let after = (try? await client.status())?.killed ?? false
         print("click-test: PANIC STOP  killed \(before) -> \(after)")
-        if before || !after {
-            failures.append("PANIC STOP did not change the daemon's kill flag")
+        if !after {
+            failures.append("PANIC STOP did not leave the daemon's kill flag set")
         }
 
         // 2. Re-enable must put it back.
@@ -245,12 +252,156 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             failures.append("Reset Everything did not stop the daemon's tap")
         }
 
+        // 4. The WRITE paths, which matter more than the buttons: a checkbox
+        //    that does not write is a settings app that lies about what is on.
+        //
+        //    Matrix checkboxes go through `ToggleTarget` and
+        //    `config.setRuleEnabled`; plugin switches go through `PluginTarget`
+        //    and `plugin.setEnabled`. Both are read back from the daemon, so
+        //    this proves the round trip rather than the checkbox's own state.
+        if let matrix = pages.first(where: { $0.id == "core.matrix" }) {
+            shell.show(matrix)
+            await ShotRenderer.settle(1.5)
+            // The table builds its row views LAZILY, so a checkbox does not
+            // exist until the table has been asked for its rows. `sizeToFit`
+            // is what forces that, and without it the search finds nothing and
+            // reports "no checkbox" about a table that has eleven of them.
+            sizeTables(in: shell.window?.contentView)
+            await ShotRenderer.settle(0.5)
+            // A checkbox is found by asking ToggleTarget whether it has a
+            // closure behind it, not by its cell class: SwiftUI's `NSButton`
+            // on this SDK is an `NSButtonCell` with a hosting view, and
+            // guessing a class name finds nothing on a table that has eleven
+            // checkboxes in it.
+            if let box = tableButtons(in: shell.window?.contentView)
+                .first(where: { ToggleTarget.shared.isWired($0) }) {
+                // The SAME rule is read, clicked and read again.
+                //
+                // Reading `rules.first` while clicking "the first checkbox the
+                // table built" reads one rule and writes another, so the test
+                // reports `true -> true` against a daemon that worked — measured,
+                // on exactly that. What must be true is that SOME rule changed.
+                let before = (try? await client.matrix())?.map(\.enabled) ?? []
+                box.performClick(nil)
+                await ShotRenderer.settle(1.2)
+                let after = (try? await client.matrix())?.map(\.enabled) ?? []
+                let changed = zip(before, after).enumerated()
+                    .filter { $0.element.0 != $0.element.1 }
+                    .map(\.offset)
+                print("click-test: matrix checkbox  changed rule(s) \(changed.map(String.init) ?? [])")
+                if changed.isEmpty {
+                    failures.append("a matrix checkbox click changed no rule's stored state")
+                }
+                // Put back exactly what moved, so this test is not a
+                // behaviour change. The rows are read ONCE: the state being
+                // restored is `before`, not the state this click produced.
+                let rows = (try? await client.matrix()) ?? []
+                for index in changed where index < rows.count {
+                    _ = try? await client.setRuleEnabled(
+                        ruleID: rows[index].ruleID,
+                        enabled: before[index]
+                    )
+                }
+                await ShotRenderer.settle(0.6)
+            } else {
+                failures.append("no checkbox found on core.matrix")
+            }
+        } else {
+            failures.append("core.matrix is not being served")
+        }
+
+        if let extensions = pages.first(where: { $0.id == "core.extensions" }) {
+            shell.show(extensions)
+            await ShotRenderer.settle(1.5)
+            sizeTables(in: shell.window?.contentView)
+            await ShotRenderer.settle(0.5)
+            if let toggle = NSView.allViews(shell.window?.contentView)
+                .compactMap({ $0 as? NSButton })
+                .first(where: { PluginTarget.shared.isWired($0) }) {
+                let before = await pluginEnabled(client, "windows-keyboard") ?? false
+                toggle.performClick(nil)
+                await ShotRenderer.settle(1.2)
+                let after = await pluginEnabled(client, "windows-keyboard")
+                print("click-test: plugin switch   stored \(before) -> \(show(after))")
+                if let after, after == before {
+                    failures.append("a plugin switch click did not change the daemon's stored plugin state")
+                }
+                _ = try? await client.setPluginEnabled(id: "windows-keyboard", enabled: before)
+                await ShotRenderer.settle(0.6)
+            } else {
+                failures.append("no switch found on core.extensions")
+            }
+        } else {
+            failures.append("core.extensions is not being served")
+        }
+
         if failures.isEmpty {
-            print("CLICK TEST PASS — all 3 buttons reach the daemon")
+            print("CLICK TEST PASS — 3 buttons and both write paths reach the daemon")
             exit(0)
         }
         for f in failures { print("click-test FAIL: \(f)") }
         exit(1)
+    }
+
+    /// Every button inside every row of every table.
+    ///
+    /// A table's rows are not in the view hierarchy until it has built them,
+    /// and its row views are not its subviews, so the ordinary tree walk does
+    /// not reach a checkbox. `sizeToFit` forces the rows to exist; this finds
+    /// the controls inside them.
+    private func tableButtons(in root: NSView?) -> [NSButton] {
+        var out: [NSButton] = []
+        for view in NSView.allViews(root) {
+            guard let table = view as? NSTableView else { continue }
+            table.sizeToFit()
+            for row in 0..<table.numberOfRows {
+                guard let rowView = table.rowView(atRow: row, makeIfNecessary: true) else { continue }
+                out.append(contentsOf: NSView.allViews(rowView).compactMap { $0 as? NSButton })
+            }
+        }
+        return out
+    }
+
+    /// Force every table to build its rows.
+    ///
+    /// `NSTableView` hands out row views one at a time and only for rows it
+    /// has built; a table that has been laid out but never scrolled has none.
+    /// A search for a checkbox inside one therefore reports "none found"
+    /// about a table that visibly has eleven, which is a failure in the
+    /// measurement rather than in the app.
+    private func sizeTables(in root: NSView?) {
+        for view in NSView.allViews(root) {
+            (view as? NSTableView)?.sizeToFit()
+        }
+    }
+
+    /// "true"/"false"/"unread" — a nil from an unread answer is printed as
+    /// itself rather than as a Bool, so a failed read is visible in the output
+    /// instead of being silently true.
+    private func show(_ value: Bool?) -> String {
+        guard let value else { return "unread" }
+        return value ? "true" : "false"
+    }
+
+    /// The stored enabled state of the first rule the daemon serves.
+    private func firstRuleEnabled(_ client: any CoreClient) async -> Bool? {
+        guard let rows = try? await client.matrix(), let row = rows.first else { return nil }
+        return row.enabled
+    }
+
+    /// The id of the first rule the daemon serves.
+    private func firstRuleID(_ client: any CoreClient) async throws -> String {
+        guard let rows = try? await client.matrix(), let row = rows.first else {
+            throw CoreError.decode(method: "config.getMatrix", underlying: DecodeShapeError.expectedArray)
+        }
+        return row.ruleID
+    }
+
+    /// Whether the daemon has a plugin switched on.
+    private func pluginEnabled(_ client: any CoreClient, _ id: String) async -> Bool? {
+        guard let rows = try? await client.plugins() else { return nil }
+        guard let row = rows.first(where: { $0.id == id }) else { return nil }
+        return row.enabled
     }
 
     /// Walk the real view tree and print it, then exit.

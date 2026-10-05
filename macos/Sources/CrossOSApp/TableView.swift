@@ -271,6 +271,13 @@ final class ToggleTarget: NSObject {
         return self
     }
 
+    /// Whether this checkbox has a closure behind it. A control with no
+    /// closure draws and does nothing, and a click test that cannot tell the
+    /// two apart is not testing anything.
+    func isWired(_ box: NSButton) -> Bool {
+        boxes[ObjectIdentifier(box)] != nil
+    }
+
     @objc func fire(_ sender: NSButton) {
         guard let change = boxes[ObjectIdentifier(sender)] else { return }
         change(sender.state == .on)

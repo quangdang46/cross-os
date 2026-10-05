@@ -504,6 +504,11 @@ final class PluginTarget: NSObject {
         return self
     }
 
+    /// Whether this switch has a binding behind it.
+    func isWired(_ toggle: NSButton) -> Bool {
+        bindings[ObjectIdentifier(toggle)] != nil
+    }
+
     @objc func fire(_ sender: NSSwitch) {
         guard let binding = bindings[ObjectIdentifier(sender)] else { return }
         Task {
