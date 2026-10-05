@@ -335,12 +335,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             failures.append("core.extensions is not being served")
         }
 
+        // 5. Profile Apply, which is the one control that changes how the whole
+        //    product behaves. It was broken by the same parameter-name defect
+        //    (`id` where the daemon wants `profile`) and this is what proves it
+        //    is fixed THROUGH THE UI rather than at the RPC.
+        if let profilesPage = pages.first(where: { $0.id == "core.profiles" }) {
+            shell.show(profilesPage)
+            await ShotRenderer.settle(1.5)
+            let before = await activeProfileID(client)
+            if !before.read {
+                failures.append("could not read the active profile before the click")
+            }
+            if let apply = button("Apply") {
+                apply.performClick(nil)
+                await ShotRenderer.settle(1.8)
+                let after = await activeProfileID(client)
+                print("click-test: profile Apply   active \(describe(before)) -> \(describe(after))")
+                if !after.read || after.id == before.id {
+                    failures.append("Profile Apply did not change the daemon's active profile")
+                }
+                // Put it back.
+                // Put the machine back the way the test found it.
+                if let applied = after.id {
+                    _ = try? await client.deactivateProfile(id: applied)
+                    await ShotRenderer.settle(0.8)
+                }
+            } else {
+                failures.append("no Apply button on core.profiles")
+            }
+        } else {
+            failures.append("core.profiles is not being served")
+        }
+
         if failures.isEmpty {
-            print("CLICK TEST PASS — 3 buttons and both write paths reach the daemon")
+            print("CLICK TEST PASS — 3 buttons, both write paths and profile apply reach the daemon")
             exit(0)
         }
         for f in failures { print("click-test FAIL: \(f)") }
         exit(1)
+    }
+
+    /// Which profile the daemon currently has applied.
+    ///
+    /// The unread case is a separate flag rather than a sentinel STRING, which
+    /// is what the first version of this returned: `"unread"` is a
+    /// `String?`, so a failed read printed `active unread` and then compared
+    /// equal to a real profile id if the daemon ever had one. The two states
+    /// are different kinds of thing and they were sharing a type.
+    private func activeProfileID(_ client: any CoreClient) async -> (id: String?, read: Bool) {
+        guard let rows = try? await client.profiles() else { return (nil, false) }
+        return (rows.first(where: { $0.active })?.id, true)
     }
 
     /// Every button inside every row of every table.
@@ -395,6 +439,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             throw CoreError.decode(method: "config.getMatrix", underlying: DecodeShapeError.expectedArray)
         }
         return row.ruleID
+    }
+
+    /// A profile id, "none", or "unread".
+    ///
+    /// Three states, not two, and the first version collapsed two of them: a
+    /// nil id with a SUCCESSFUL read means no profile is applied, and printing
+    /// that as "unread" made a correct pre-click reading look like a failure to
+    /// read. `read` is what distinguishes them.
+    private func describe(_ state: (id: String?, read: Bool)) -> String {
+        guard state.read else { return "unread" }
+        return state.id ?? "none"
     }
 
     /// Whether the daemon has a plugin switched on.

@@ -168,7 +168,15 @@ public struct ProfileRow: Codable, Sendable, Equatable {
 public struct ProfileCapabilityRow: Codable, Sendable, Equatable {
     public var id: String
     public var label: String
-    public var description: String
+    /// Optional, because the daemon does not send it.
+    ///
+    /// It was declared non-optional, and `core.profiles` answers with
+    /// `available, enabled, id, label, live, plugin, rule_ids, total,
+    /// will_enable, will_enable_plugin` — no `description`. A required field
+    /// the daemon does not send makes the WHOLE array fail to decode, and the
+    /// Profiles page has therefore rendered "Could not read the profiles" on
+    /// every machine, every time. Found by driving the UI and reading the tree.
+    public var description: String?
     public var willEnable: Int
     public var alreadyOn: Int
 
@@ -178,6 +186,17 @@ public struct ProfileCapabilityRow: Codable, Sendable, Equatable {
         case description
         case willEnable = "will_enable"
         case alreadyOn = "already_on"
+    }
+
+    /// Decoded leniently: a capability that arrives without a field the shell
+    /// asks for must not cost the reader the whole list.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        label = try c.decode(String.self, forKey: .label)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        willEnable = try c.decodeIfPresent(Int.self, forKey: .willEnable) ?? 0
+        alreadyOn = try c.decodeIfPresent(Int.self, forKey: .alreadyOn) ?? 0
     }
 }
 

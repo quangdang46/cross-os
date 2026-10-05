@@ -153,12 +153,20 @@ private final class ZoneRowView: NSStackView {
         row.alignment = .centerY
         row.spacing = Gap.close
         row.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(row)
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor),
-            row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            row.topAnchor.constraint(equalTo: topAnchor),
-        ])
+        // ARRANGED, not `addSubview`. A plain `addSubview` positions the view
+        // but nothing measures it, and this view is a `.leading`-aligned
+        // vertical stack whose height comes from its arranged subview's — so
+        // with none, it measured 0pt and every field in it sat outside its own
+        // frame. Measured on `core.windows`: `ZoneRowView 232x0` with a
+        // `NSTextField 0x24` inside it, which the audit names as "under 20pt"
+        // because the name field is a plain `NSTextField` and measured zero.
+        //
+        // The same defect as the card that measured 0, the row that measured
+        // 0, and the plugin row's floating checkbox — and the one shape this
+        // app keeps getting wrong.
+        addArrangedSubview(row)
+        // Hug, so the row is as tall as the fields it holds.
+        setContentHuggingPriority(.required, for: .vertical)
 
         // Held so the closures can mutate the row they belong to.
         onSave = onChange
