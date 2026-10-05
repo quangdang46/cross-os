@@ -599,6 +599,22 @@ extension SidebarViewController: NSOutlineViewDataSource {
 extension SidebarViewController: NSOutlineViewDelegate {
     public func outlineView(_ outlineView: NSOutlineView, isGroupItem item: Any) -> Bool { true }
 
+    /// Every row is `rowHeight` tall, and this is what actually makes that so.
+    ///
+    /// `rowSizeStyle = .custom` and `rowHeight = 30` were both set and the
+    /// rows still measured 19pt: they were SPACED 32pt apart, but each
+    /// `NSTableRowView` was only as tall as the text in it, because the group
+    /// header returned by `viewFor` is a bare `NSTextField` and AppKit sizes a
+    /// returned view to its own fitting size.
+    ///
+    /// This delegate method is the one that overrides both, and it is the
+    /// answer for a rail whose rows are two different kinds of view — a
+    /// heading and a page — because it says the height for the row rather than
+    /// asking either kind of view what it would like to be.
+    public func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        tableView.rowHeight
+    }
+
     public func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
         // A group header is a cap, not a destination. A settings window whose
         // "Advanced" row opens onto nothing is a broken promise, and this is
