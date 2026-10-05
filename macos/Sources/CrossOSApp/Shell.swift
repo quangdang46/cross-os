@@ -240,7 +240,14 @@ public final class ShellWindowController: NSWindowController, NSToolbarDelegate 
         // Keep the window's own position and only change its size — a settings
         // window that jumps up and down the screen as the reader navigates is
         // worse than the void it was fixing.
-        frame.size = target.size
+        //
+        // The WIDTH is taken from the window's current frame rather than from
+        // `content`, because content can widen it: measured, fourteen pages
+        // rendered 908pt wide and `core.safety` rendered 926pt, so navigating
+        // to Safety and back visibly resized the window sideways. A long button
+        // label is what did it — nothing in a settings pane should be able to
+        // change how wide the window is.
+        frame.size = NSSize(width: window.frame.width, height: target.size.height)
         window.setFrame(frame, display: true)
     }
 

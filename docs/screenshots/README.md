@@ -42,6 +42,14 @@ statement about it in a commit message was made about a picture it was not
 in. **A person looking at the real window is the only way to check it** —
 `./scripts/run.sh`.
 
+## Width varies with the page, and is pinned
+
+Two consecutive renders of the same build are byte-identical, so the pictures
+are reproducible. They were not always: navigating to `core.safety` used to
+make the window **18pt wider** — a long button label widening the frame — and
+back again on the way out. The width now comes from the window's own frame
+rather than from its content, so all fifteen pages render 908pt wide.
+
 ## Reading them
 
 The window is sized to its content down to a floor set by the navigation rail,
