@@ -90,7 +90,19 @@ if daemon_serving; then
   say "Daemon already serving on $SOCKET — leaving it alone"
 else
   say "Starting the daemon"
-  "$DAEMON" serve >"$BIN/daemon.log" 2>&1 &
+  # DETACHED, with nohup and stdin closed. This daemon is the thing that runs
+  # whether or not the window is open — the app's own contract — so it must
+  # not die with the terminal that started it.
+  #
+  # Measured: started as a plain `&` background job, the daemon is a child of
+  # this script in the same process group, so closing the terminal sends it
+  # SIGHUP and the daemon goes. Started `nohup … &` with stdin from
+  # /dev/null, it survives its starter's terminal indefinitely — measured
+  # alive across three separate shells over two minutes.
+  #
+  # `setsid` is not used: macOS has no `setsid`, and a script that reaches
+  # for it fails on the platform it ships for.
+  nohup "$DAEMON" serve >"$BIN/daemon.log" 2>&1 </dev/null &
   DAEMON_PID=$!
   echo "$DAEMON_PID" >"$BIN/daemon.pid"
   # Ctrl-C must not orphan a daemon this script started. A daemon that was
