@@ -58,6 +58,27 @@ public final class ShellWindowController: NSWindowController, NSToolbarDelegate 
     /// — the last of the fifteen pages — was below the fold, which is not a
     /// cosmetic thing to leave. 700 clears it. This number is a measurement
     /// and not a formula, and it says so rather than pretending to derive it.
+
+    /// **The sidebar's selected row draws grey in `--shots`, and that is
+    /// measured-not-explained.**
+    ///
+    /// On screen a key window draws the selected row in the user's accent. The
+    /// renders show `(220, 220, 220)` — neutral grey, which is what macOS
+    /// draws for an INACTIVE window — over a 13px band at y=148pt. The pill
+    /// IS drawn and IS the right size; only its colour is wrong.
+    ///
+    /// Two causes were tried and neither changed it:
+    ///
+    ///   - `NSApp.activate(ignoringOtherApps: true)` in the shot path, on the
+    ///     theory that an accessory app never becomes key. Measured after:
+    ///     still `(220, 220, 220)`.
+    ///   - `.paneSplitter` instead of `.thin` on the divider, measured on the
+    ///     pixels rather than the tree; identical, so reverted.
+    ///
+    /// So this is recorded rather than fixed. It is very likely an environment
+    /// limitation — a CLI-invoked accessory process may not be able to take key
+    /// window status at all — but "very likely" is not a measurement, and the
+    /// thing that settles it is a person looking at the real window.
     public static let minimumHeight: CGFloat = 700
 
     public init(client: any CoreClient) {
@@ -83,7 +104,6 @@ public final class ShellWindowController: NSWindowController, NSToolbarDelegate 
 
         super.init(window: window)
 
-        split.splitView.dividerStyle = .thin
         // The sidebar's width limits live on the SPLIT VIEW ITEM, not the
         // split view — `NSSplitView` has no thickness properties of its own,
         // and setting them there is a compile error rather than a silent
@@ -110,6 +130,29 @@ public final class ShellWindowController: NSWindowController, NSToolbarDelegate 
 
         split.addSplitViewItem(sidebarItem)
         split.addSplitViewItem(pageItem)
+
+        // `.thin` is set AFTER the items exist, and that order is the fix.
+        //
+        // Set before, it had no items to size a divider between, and AppKit
+        // left it at zero: measured `NSSplitDividerView 0x700` — a real view,
+        // zero wide — so the rail and the content ran together with nothing
+        // between them. This is not the same class of bug as the layer-backed
+        // controls the PDF cannot draw; the divider is an ordinary view and it
+        // really is zero.
+        // Set AFTER the items exist, though the order makes no difference
+        // that has been measured — see below.
+        //
+        // `--describe` reports this as `NSSplitDividerView 0x700`, a real
+        // view at zero width, and it is tempting to read that as a divider
+        // that does not draw. It draws. Measured on the pixels of
+        // `--shots --window`: a 2pt `(230, 230, 230)` line at x=288pt, the
+        // same for `.thin` and for `.paneSplitter`.
+        //
+        // So the frame in the tree is misleading and the pixels are not, and
+        // this comment exists so the next person to see the zero does not go
+        // looking for a divider bug that is not there. `.thin` is what
+        // System Settings' window uses.
+        split.splitView.dividerStyle = .thin
 
         window.contentViewController = split
 
