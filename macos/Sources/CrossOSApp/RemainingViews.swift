@@ -343,6 +343,20 @@ final class RuleBuilderView: CardControl {
         for rule in userRules {
             let chord = NSTextField(labelWithString: Chord.format(rule.chord))
             chord.font = Typeface.mono
+            // The chord is a COLUMN, so every action starts at the same x.
+            //
+            // It took its own width, and the chords are not the same width:
+            // measured on `core.shortcuts`, "Ctrl+Shift+Return", "Alt+Tab on
+            // release" and "Win+Left" put their actions at three different x
+            // positions down what reads as one list — a list whose second
+            // column has no edge.
+            // `.left` inside the field, because the field is wider than the
+            // text: `labelWithString:` aligns naturally, which centres a short
+            // chord in the 190pt column and undoes the column.
+            chord.alignment = .left
+            chord.widthAnchor.constraint(equalToConstant: 190).isActive = true
+            chord.setContentHuggingPriority(.required, for: .horizontal)
+            chord.setContentCompressionResistancePriority(.required, for: .horizontal)
             let scope = NSTextField(labelWithString: rule.scope.isEmpty
                 ? "Everywhere"
                 : (rule.appIDs ?? []).map { names[$0] ?? $0 }.joined(separator: ", "))
@@ -350,10 +364,13 @@ final class RuleBuilderView: CardControl {
             scope.textColor = Palette.secondaryInk
             let action = NSTextField(labelWithString: Humanize.phrase(rule.action))
             action.font = Typeface.body
+            action.alignment = .left
             let line = NSStackView(views: [chord, action, scope])
             line.orientation = .horizontal
+            line.distribution = .fill
             line.spacing = Gap.group
             line.alignment = .firstBaseline
+            line.translatesAutoresizingMaskIntoConstraints = false
             column.addArrangedSubview(line)
         }
         replaceBody(with: column)

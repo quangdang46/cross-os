@@ -21,6 +21,27 @@ layout defect in this repo was measured on half the app.
 git add docs/screenshots && git commit
 ```
 
+## What is NOT in these pictures
+
+**The title bar and the toolbar are missing**, so the search field is not in
+any of them. `window.contentView` starts below the title bar, and
+`--shots --window` renders that view.
+
+Three ways of getting the chrome in were tried and all three failed:
+
+- capturing `contentView.superview` (the theme frame) — renders the same
+  picture, so the frame is not taller than the content
+- pulling `contentView` out of its window into a synthetic holder —
+  `Trace/BPT trap`, because a window tears down its own content view when it
+  is removed
+- `screencapture` — "could not create image from display", which is Screen
+  Recording permission
+
+So the toolbar has never been checked by a render in this repo, and any
+statement about it in a commit message was made about a picture it was not
+in. **A person looking at the real window is the only way to check it** —
+`./scripts/run.sh`.
+
 ## Reading them
 
 The window is sized to its content down to a floor set by the navigation rail,

@@ -404,11 +404,30 @@ final class ShortcutListView: CardControl {
         stack.spacing = Gap.row
 
         for row in matrixRows ?? [] {
-            let line = NSStackView(views: [
-                NSTextField(labelWithString: Chord.format(row.keys)),
-                NSTextField(labelWithString: Humanize.phrase(row.action)),
-            ])
+            // The chord is a COLUMN, so every action starts at one x.
+            //
+            // It took its own width, and chords are not one width: measured on
+            // `core.shortcuts`, "Ctrl+Shift+Return", "Alt+Tab on release" and
+            // "Win+Left" put their actions at eleven different positions down
+            // what reads as a single list — a list whose second column has no
+            // edge. `.left` inside the field as well, because a label aligns
+            // naturally by default and centres a short chord back in the column.
+            let chord = NSTextField(labelWithString: Chord.format(row.keys))
+            chord.font = Typeface.mono
+            chord.alignment = .left
+            chord.widthAnchor.constraint(equalToConstant: 190).isActive = true
+            chord.setContentHuggingPriority(.required, for: .horizontal)
+            chord.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+            let action = NSTextField(labelWithString: Humanize.phrase(row.action))
+            action.font = Typeface.body
+            action.alignment = .left
+            action.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+            let line = NSStackView(views: [chord, action])
             line.orientation = .horizontal
+            line.distribution = .fill
+            line.translatesAutoresizingMaskIntoConstraints = false
             line.spacing = Gap.group
             line.alignment = .firstBaseline
             if !row.enabled {
