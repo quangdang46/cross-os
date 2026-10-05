@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
@@ -239,6 +240,24 @@ func (c *Core) handlePluginList(_ json.RawMessage) (any, *ipc.RPCError) {
 		})
 	}
 	return out, nil
+}
+
+// enabledPlugins names the plugins currently running, sorted.
+//
+// Used by Reset Everything, which has to stop what is RUNNING and not only
+// forget what was ENABLED: the two are separate facts and a reset that only
+// forgets leaves the plugin intercepting keys.
+func (c *Core) enabledPlugins() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, 0, len(c.plugins))
+	for id, on := range c.plugins {
+		if on {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // handlePluginSetEnabled serves plugin.setEnabled: {id, enabled}. The
@@ -477,8 +496,58 @@ func (c *Core) handleSafetyReset(_ json.RawMessage) (any, *ipc.RPCError) {
 		steps = append(steps, resetStep{Step: "remove login item", Done: true, Detail: "launchd agent removed"})
 	}
 
-	// 3. Delete the settings file — the destructive step, guarded by the
-	//    audit rather than by a guess at the path.
+	// 3. Clear the RUNNING settings and write that empty document to disk.
+	//    This is the destructive step.
+	//
+	//    Deleting the file was the first version and it is wrong: the store
+	//    holds the running state in memory and writes the document on every
+	//    change, so removing the file underneath it left the process serving
+	//    the state it still had. Measured on a configured daemon — a plugin
+	//    on, ten shortcuts — `safety.reset` deleted `config.json`, reported
+	//    the step DONE, and `config.getShortcuts` still answered with all ten
+	//    and `plugin.list` still answered with the plugin on. The file was
+	//    gone and the settings were not, which is the worst of both outcomes.
+	//
+	//    `Store.Clear` returns the process to the state a fresh install loads,
+	//    through the same write path every other mutation uses, so the file
+	//    and the process agree afterwards — which is the property this
+	//    package keeps arguing for in every other comment.
+	// 2b. Stop the plugins that are RUNNING, which is not the same as
+	//     forgetting that they were enabled.
+	//
+	//     `Store.Clear` empties the persisted enable set, and that alone is
+	//     not Reset Everything: measured, `plugin.list` still answered with
+	//     `windows-keyboard` enabled and healthy after a reset that reported
+	//     every step done. The user had switched a plugin off on the Settings
+	//     page and the plugin was still intercepting.
+	if running := c.enabledPlugins(); len(running) > 0 {
+		c.mu.Lock()
+		for _, id := range running {
+			_ = c.enableLocked(id, false)
+		}
+		c.mu.Unlock()
+		steps = append(steps, resetStep{
+			Step:   "stop the plugins running",
+			Done:   true,
+			Detail: strings.Join(running, ", "),
+		})
+	}
+
+	if changed, err := c.set.Clear(); err != nil {
+		steps = append(steps, resetStep{
+			Step:   "clear the settings",
+			Done:   false,
+			Detail: err.Error(),
+		})
+	} else {
+		detail := "already empty"
+		if changed {
+			detail = "shortcuts, zones, overrides, disabled rules, enabled " +
+				"plugins, profile and onboarding cleared"
+		}
+		steps = append(steps, resetStep{Step: "clear the settings", Done: true, Detail: detail})
+	}
+
 	cfg := c.set.ConfigPath()
 	switch {
 	case cfg == "", !fileExists(cfg):

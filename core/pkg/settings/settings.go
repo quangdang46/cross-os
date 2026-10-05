@@ -854,6 +854,45 @@ func (s *Store) update(mutate func(*state)) error {
 	return nil
 }
 
+// Clear returns the store to an empty document and returns whether anything
+// changed.
+//
+// **Reset Everything cannot be done by deleting the file.** The store holds
+// the running state in memory and writes the document on every change, so
+// removing the file underneath it leaves the process serving the state it
+// still has: measured on a configured daemon, `safety.reset` deleted
+// `config.json` and reported the step done, while `config.getShortcuts` still
+// answered with all ten and `plugin.list` still answered with the plugin on.
+// The file was gone and the settings were not, which is the worst of both.
+//
+// This clears the same state a fresh install would load, through the same
+// write path every other mutation uses, so the file and the process end up
+// agreeing — which is the property the rest of this file keeps arguing for.
+func (s *Store) Clear() (bool, error) {
+	s.mu.RLock()
+	changed := len(s.shortcuts) > 0 || len(s.zones) > 0 ||
+		len(s.overrides) > 0 || len(s.disabledRules) > 0 ||
+		len(s.pluginsEnabled) > 0 || s.activeProfile != "" ||
+		s.onboardingComplete || s.panicStop
+	s.mu.RUnlock()
+	if !changed {
+		return false, nil
+	}
+	if err := s.update(func(next *state) {
+		next.shortcuts = nil
+		next.zones = nil
+		next.overrides = nil
+		next.disabledRules = nil
+		next.plugins = nil
+		next.profile = ""
+		next.onboarding = false
+		next.panicStop = false
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // snapshotLocked deep-copies the running state. Aliasing the maps and walking
 // them after the lock is released is a data race, not a style choice: Go aborts
 // the whole process on concurrent map iteration and map write. A shallow
