@@ -139,13 +139,14 @@ private final class OverridesTable: NSStackView, TableContent {
         distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
         let table = TableView(content: self)
-        addSubview(table)
-        NSLayoutConstraint.activate([
-            table.leadingAnchor.constraint(equalTo: leadingAnchor),
-            table.trailingAnchor.constraint(equalTo: trailingAnchor),
-            table.topAnchor.constraint(equalTo: topAnchor),
-            table.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
+        // ARRANGED, not `addSubview` with edge constraints. Pinning a view to
+        // all four of a stack's edges fights the width binding `TableView`
+        // makes on `viewDidMoveToSuperview`: measured on `core.commands`,
+        // `TableView 0x208` — zero wide — with the columns drawn at 489pt
+        // anyway and the alternating stripes and a vertical seam drawn past
+        // the group's rounded edge. See `TableView.viewDidMoveToSuperview`.
+        addArrangedSubview(table)
+        setContentHuggingPriority(.required, for: .vertical)
     }
 
     @available(*, unavailable)

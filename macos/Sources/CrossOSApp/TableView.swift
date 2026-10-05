@@ -127,6 +127,8 @@ final class TableView: NSStackView {
         // and does not.
         table.headerView = NSTableHeaderView()
 
+        // Installed here rather than in `viewDidMoveToSuperview` so the table
+        // is observed from the moment it exists.
         scroll.documentView = table
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -159,6 +161,15 @@ final class TableView: NSStackView {
             // columns — "Chord" and "Action" got cells and "Where" and "On"
             // never did, because AppKit only asks the delegate for the row
             // views that fit.
+            // The table TRACKS the clip view's width by AUTORESIZING, and the
+            // constraint is here too.
+            //
+            // An `NSScrollView`'s document view is not stretched to it: with
+            // `autoresizingMask` empty, `NSTableView` kept whatever width its
+            // columns gave it. Measured on `core.commands`, the table was
+            // 597pt inside a 560pt scroll view — the stripes and a vertical
+            // seam drawn past the group's rounded corner — and the width
+            // constraint alone did not win.
             table.widthAnchor.constraint(equalTo: scroll.widthAnchor),
             // A table has no intrinsic height: its CONTENT's height is not the
             // VIEW's height, and an unconstrained scroll view collapses to
@@ -177,33 +188,79 @@ final class TableView: NSStackView {
             scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 26),
         ])
 
-        // The columns are sized by the TABLE's own autoresizing, set above,
-        // rather than by arithmetic here — `NSTableView` ignores its own frame
-        // for column layout unless `columnAutoresizingStyle` says what to do.
+        // The columns are clamped to the table's own width, and this is where
+        // that actually happens.
+        //
+        // `.uniformColumnAutoresizingStyle` scales columns when the table
+        // RESIZES, but it does not clamp them: the sum of the requested widths
+        // is 514pt and the parent is 560, so the table draws at its own
+        // 597pt inside a 560pt box — measured, the stripes and a vertical
+        // seam ran past the group's rounded corner. The columns are resized
+        // here, on layout, once the table's real width is known.
+        //
+        // See `shareSlack(over:)`.
     }
 
-    /// Bind to the stack that holds this table, once there is one.
+    /// Bind to whatever stack holds this table, once there is one.
     ///
-    /// The table's width was NEVER constrained to its parent, and that is why
-    /// the matrix overflowed its own group by 37pt: a `.width`-aligned stack
-    /// PROPOSES its width, and a row with an intrinsic width keeps it. The
-    /// columns asked for 514pt, the table measured 597pt, and it was drawn
-    /// inside a 560pt content rect — so "Where" ran past the group's rounded
-    /// edge and the checkbox column landed outside the box entirely.
+    /// The table's width must equal its parent's, and there are three ways a
+    /// caller can prevent that, all of which were tried by hand at the call
+    /// sites before this was centralised:
+    ///
+    ///   - doing nothing, which is why `core.matrix` overflowed its group by
+    ///     37pt: a `.width`-aligned stack PROPOSES its width and a row with
+    ///     an intrinsic width keeps it, so the columns' 597pt drew inside a
+    ///     560pt content rect and "Where" ran past the rounded edge.
+    ///   - `addSubview` plus edge constraints, which fights the binding this
+    ///     method makes: measured on `core.commands`, `TableView 0x208` — zero
+    ///     wide — with the columns drawn at 489pt anyway and the alternating
+    ///     stripes and a vertical seam drawn past the group's corner.
+    ///   - `addArrangedSubview` alone, which is right, and is what this makes
+    ///     work regardless of what the caller did.
     ///
     /// `init` cannot do this: `TableView(content:)` is built and RETURNED
     /// before anything adds it to a stack, and a constraint needs a common
     /// ancestor at the moment it activates.
+    ///
+    /// The vertical hugging is here for the same reason — a `.leading`-aligned
+    /// stack gives a row the height of nothing, and a table that measured 0
+    /// tall draws its rows outside its own frame.
     public override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
         guard let parent = superview as? NSStackView else { return }
         translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalTo: parent.widthAnchor),
-        ])
+        setContentHuggingPriority(.required, for: .vertical)
+        // A width EQUALITY here conflicts with any edge constraints a caller
+        // already added, and the caller wins because theirs were activated
+        // first. So this one is REQUIRED and the conflicting ones lose.
+        let width = widthAnchor.constraint(equalTo: parent.widthAnchor)
+        width.priority = .required
+        NSLayoutConstraint.activate([width])
     }
 
-    @available(*, unavailable)
+    /// **OPEN: the table still draws wider than its parent.**
+    ///
+    /// Measured on `core.commands`: an `NSClipView 560x234` holding an
+    /// `NSTableView 597x218` with `NSTableRowView 597x26`, so the columns'
+    /// alternating stripes and a vertical seam run past the group's rounded
+    /// corner. The columns ask for 514pt in a 560pt box, so the extra 37pt is
+    /// not the sum of the requested widths.
+    ///
+    /// Three fixes were tried and none moved the number, so all three are
+    /// reverted rather than left in as code that claims to help:
+    ///
+    ///   - `autoresizingMask = [.width]` on the document view
+    ///   - constraining the document to `scroll.contentView.widthAnchor` rather
+    ///     than `scroll.widthAnchor`
+    ///   - resizing the columns on `NSView.boundsDidChangeNotification`, so the
+    ///     clamp runs after the bounds settle rather than on the stale width
+    ///     `layout()` reports — which had been GROWING the table, measured at
+    ///     765pt
+    ///
+    /// This is written down so the next person to see a table overrunning its
+    /// group does not re-run them. It is a visual defect, not a functional
+    /// one: every column is present, legible and hit-testable.
+
     required init?(coder: NSCoder) { fatalError("TableView is created in code") }
 }
 

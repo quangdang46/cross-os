@@ -212,13 +212,20 @@ private final class FileTypeTable: NSStackView, TableContent {
         distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
         let table = TableView(content: self)
-        addSubview(table)
-        NSLayoutConstraint.activate([
-            table.leadingAnchor.constraint(equalTo: leadingAnchor),
-            table.trailingAnchor.constraint(equalTo: trailingAnchor),
-            table.topAnchor.constraint(equalTo: topAnchor),
-            table.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
+        // ARRANGED, and no edge constraints. Pinning a view to all four of a
+        // stack's edges conflicts with the width binding `TableView` makes on
+        // `viewDidMoveToSuperview`, and the two constraints fight to a draw:
+        // measured on `core.commands`, `TableView 0x208` — zero wide — inside
+        // a group that rendered its columns at 489pt anyway and drew its
+        // alternating stripes and a vertical seam straight past the group's
+        // rounded edge.
+        //
+        // This is the same conflict as `Card.setContent` pinning content to
+        // the card's own edges and cancelling its insets, and the same
+        // conflict as `FactRow`'s `addSubview` measuring nothing. Arranged
+        // and hugging is what the layout wants.
+        addArrangedSubview(table)
+        setContentHuggingPriority(.required, for: .vertical)
     }
 
     @available(*, unavailable)
@@ -318,13 +325,14 @@ private final class TraceTable: NSStackView, TableContent {
         translatesAutoresizingMaskIntoConstraints = false
 
         let table = TableView(content: self)
-        addSubview(table)
-        NSLayoutConstraint.activate([
-            table.leadingAnchor.constraint(equalTo: leadingAnchor),
-            table.trailingAnchor.constraint(equalTo: trailingAnchor),
-            table.topAnchor.constraint(equalTo: topAnchor),
-            table.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
+        // ARRANGED, not `addSubview` with edge constraints. Pinning a view to
+        // all four of a stack's edges fights the width binding `TableView`
+        // makes on `viewDidMoveToSuperview`: measured on `core.commands`,
+        // `TableView 0x208` — zero wide — with the columns drawn at 489pt
+        // anyway and the alternating stripes and a vertical seam drawn past
+        // the group's rounded edge. See `TableView.viewDidMoveToSuperview`.
+        addArrangedSubview(table)
+        setContentHuggingPriority(.required, for: .vertical)
     }
 
     @available(*, unavailable)

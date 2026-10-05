@@ -474,6 +474,14 @@ private final class WindowTable: NSView, TableContent {
         self.windows = windows
         super.init(frame: .zero)
         let table = TableView(content: self)
+        // ARRANGED, not `addSubview` with edge constraints. Pinning a view to
+        // This view is a plain `NSView`, not a stack, so the table is pinned
+        // to all four edges — which is correct HERE and is what the other four
+        // call sites got wrong: pinning to a STACK's edges fights the width
+        // binding `TableView` makes, and `TableView` measured 0x208 with its
+        // columns drawn past the group's rounded edge. See
+        // `TableView.viewDidMoveToSuperview`.
+        table.translatesAutoresizingMaskIntoConstraints = false
         addSubview(table)
         NSLayoutConstraint.activate([
             table.leadingAnchor.constraint(equalTo: leadingAnchor),

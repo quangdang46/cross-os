@@ -600,14 +600,12 @@ final class MenuListView: NSStackView, TableContent {
         do {
             let items = try await context.service.finderMenu()
             entries = items
-            let table = TableView(content: self)
-            table.translatesAutoresizingMaskIntoConstraints = false
-            column.addArrangedSubview(table)
-            NSLayoutConstraint.activate([
-                table.leadingAnchor.constraint(equalTo: column.leadingAnchor),
-                table.trailingAnchor.constraint(equalTo: column.trailingAnchor),
-                table.widthAnchor.constraint(equalTo: column.widthAnchor),
-            ])
+            // ARRANGED alone. The three edge constraints here duplicated — and
+            // fought — the width binding `TableView` makes on itself; see
+            // `TableView.viewDidMoveToSuperview`, and `core.commands` where
+            // the same shape left it 0x208 wide with its stripes drawn past
+            // the group's rounded edge.
+            column.addArrangedSubview(TableView(content: self))
         } catch {
             column.addArrangedSubview(ErrorView(
                 headline: "Could not read the Finder menu.",
