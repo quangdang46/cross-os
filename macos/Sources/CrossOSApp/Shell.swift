@@ -42,10 +42,23 @@ public final class ShellWindowController: NSWindowController, NSToolbarDelegate 
     /// adds on top of that, which is what `frameRect(forContentRect:)` is for.
     public static let contentSize = NSSize(width: 1100, height: 720)
 
-    /// The window height floor. Below this the sidebar's fifteen rows stop
-    /// fitting and scrolling a settings window to reach its last item is a
-    /// worse answer than a little empty space.
-    public static let minimumHeight: CGFloat = 480
+    /// The window height floor, and it is set by the NAV, not by the content.
+    ///
+    /// Fifteen pages in four groups is nineteen rows at 30pt plus the rail's
+    /// own insets — about 610pt. Below that the sidebar scrolls, and a
+    /// settings window whose navigation has to be scrolled to reach its last
+    /// item is a worse answer than a little empty space below the content.
+    ///
+    /// This is why the window does not shrink further on a short page, and it
+    /// is the same trade System Settings makes: the rail fits, the content
+    /// floats, the space is at the bottom.
+    ///
+    /// Measured rather than derived from the row arithmetic, because the
+    /// arithmetic was wrong twice: at 620 the rail still scrolled and "About"
+    /// — the last of the fifteen pages — was below the fold, which is not a
+    /// cosmetic thing to leave. 700 clears it. This number is a measurement
+    /// and not a formula, and it says so rather than pretending to derive it.
+    public static let minimumHeight: CGFloat = 700
 
     public init(client: any CoreClient) {
         self.client = client
@@ -166,15 +179,22 @@ public final class ShellWindowController: NSWindowController, NSToolbarDelegate 
     /// Not animated: the window resizes on every nav click and an animation
     /// there makes the whole frame move under the pointer.
     private func fitWindowToContent() {
-        guard let window, let page = pageController?.view else { return }
-        // The page's fitting size is asked AFTER layout, or it is the previous
-        // page's number: this runs on a nav click, and the new page's controls
-        // have not loaded yet.
-        let fitting = page.fittingSize
-        guard fitting.width > 0, fitting.height > 0 else { return }
+        guard let window else { return }
+        // The height of the page's CONTENT, not of the pane it sits in.
+        //
+        // `PageViewController` holds its document to AT LEAST the clip view's
+        // height so a short page starts at the top rather than hanging from the
+        // bottom. That is right for the document and wrong for measuring a
+        // window: the document is therefore always at least as tall as the
+        // pane, so asking the page VIEW for its fitting size asks "how tall is
+        // the window" — the question the window is being asked in order to
+        // answer. Measured on `core.about`: 350pt of content in a 720pt
+        // window, and it never shrank on any navigation.
+        let height = (pageController as? PageViewController)?.contentFittingHeight ?? 0
+        guard height > 0 else { return }
         let content = NSSize(
             width: ShellWindowController.contentSize.width,
-            height: max(ShellWindowController.minimumHeight, fitting.height + Gap.plane)
+            height: max(ShellWindowController.minimumHeight, height + Gap.plane * 2)
         )
         let target = window.frameRect(forContentRect: NSRect(origin: .zero, size: content))
         var frame = window.frame
@@ -438,6 +458,10 @@ public final class SidebarViewController: NSViewController {
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
+        // An OVERLAY scroller, like the page's. The default drew a dark legacy
+        // bar down the rail's full height, which on the light rail read as a
+        // scratch on the surface rather than as a scrollbar.
+        scroll.scrollerStyle = .overlay
         scroll.drawsBackground = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
 

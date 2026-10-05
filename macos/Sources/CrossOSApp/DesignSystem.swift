@@ -228,9 +228,21 @@ public enum Typeface {
     /// A card's title.
     public static var cardTitle: NSFont { .systemFont(ofSize: NSFont.systemFontSize + 2, weight: .semibold) }
 
-    /// The page's title. `.largeTitle` is the system VARIANT, so it tracks the
-    /// user's setting rather than being a number this file owns.
-    public static var pageTitle: NSFont { .systemFont(ofSize: 22, weight: .semibold) }
+    /// The page's title.
+    ///
+    /// 26, not 22. System Settings' content title is the system's LARGE title
+    /// — `.preferredFont(forTextStyle: .largeTitle)` — which is 26pt here, and
+    /// a page title has to out-weigh a section cap by enough that the eye
+    /// knows which is which before it reads either. At 22 against an 11pt cap
+    /// the ratio was there but the title still read as a heading beside two
+    /// headings rather than as the page's name.
+    ///
+    /// `.preferredFont(forTextStyle:)` is the VARIANT, so it tracks the user's
+    /// text size rather than being a number this file owns.
+    public static var pageTitle: NSFont {
+        let large = NSFont.preferredFont(forTextStyle: .largeTitle)
+        return NSFontManager.shared.convert(large, toHaveTrait: .boldFontMask)
+    }
 
     /// A description, a hint, a detail under a label.
     public static var caption: NSFont { .systemFont(ofSize: NSFont.smallSystemFontSize) }

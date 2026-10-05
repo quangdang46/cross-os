@@ -34,8 +34,21 @@ class CardControl: NSStackView {
         // `label: "matrix"` and a heading reading "matrix" is a schema value
         // leaking into the interface.
         heading.stringValue = Humanize.phrase(control.label.isEmpty ? control.id : control.label)
-        heading.font = Typeface.cardTitle
-        heading.textColor = Palette.primaryInk
+        // A section CAP, not a card title.
+        //
+        // It was `Typeface.cardTitle` in `Palette.primaryInk` — 15pt semibold
+        // black — because it used to be a heading INSIDE the box, where a
+        // heading that big was right. It now sits ABOVE the group, labelling
+        // it, and at that weight and colour it is the loudest thing on the
+        // page: on `core.about` "License" and "Credits" read as two more
+        // headings beside "About", and the page lost the hierarchy that says
+        // which one is the page and which two are groups.
+        //
+        // `sectionCap` is what System Settings uses — small, semibold, in the
+        // secondary ink. The page title stays the loud thing on the page.
+        heading.font = Typeface.sectionCap
+        heading.textColor = Palette.secondaryInk
+        heading.alignment = .left
 
         if control.note.isEmpty {
             subtitle.isHidden = true

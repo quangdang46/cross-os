@@ -202,6 +202,18 @@ public final class PageViewController: NSViewController {
         view = container
     }
 
+    /// How tall the page's CONTENT is, ignoring the pane it is shown in.
+    ///
+    /// The window is sized to this, and it cannot use the page view's
+    /// `fittingSize` because the document is deliberately held to AT LEAST the
+    /// clip view's height — so the view's fitting height is the pane's height,
+    /// and a window sized to it never shrinks. The stack is the thing whose
+    /// height the document pads out, so the stack is what is measured.
+    var contentFittingHeight: CGFloat {
+        let fitting = stack.fittingSize
+        return fitting.height > 0 ? fitting.height : view.fittingSize.height
+    }
+
     public func show(_ page: Page) {
         currentPage = page
         titleField.stringValue = page.title
