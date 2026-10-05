@@ -849,10 +849,19 @@ final class ButtonRowView: NSStackView {
             note.usesSingleLineMode = false
             note.maximumNumberOfLines = 0
             note.translatesAutoresizingMaskIntoConstraints = false
+            // The note FILLS the gap between the button and the row's end.
+            //
+            // Leading and trailing alone do not say how WIDE it is, so a label
+            // keeps its intrinsic width and Auto Layout puts it as far from the
+            // button as it can — measured on `core.safety`, "Login item stays.
+            // Reversible via Re-enable" starting at x=1170 against a button
+            // ending at x=815, running off the right edge of the pane.
+            note.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            note.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             addSubview(note)
             NSLayoutConstraint.activate([
                 note.leadingAnchor.constraint(equalTo: button.trailingAnchor, constant: Gap.group),
-                note.trailingAnchor.constraint(equalTo: trailingAnchor),
+                note.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
                 note.firstBaselineAnchor.constraint(equalTo: button.firstBaselineAnchor),
                 note.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
                 note.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
