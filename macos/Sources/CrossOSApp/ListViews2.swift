@@ -127,6 +127,12 @@ private final class ProfileCard: NSStackView {
             // there".
             let apply = NSButton(title: "Apply", target: ApplyTarget.shared, action: nil)
             apply.bezelStyle = .rounded
+            // ⌘↩, which is what a macOS default button is on. Measured
+            // before this: every button in the app reported `key=NONE`, so
+            // applying a profile — the whole point of the page — could not be
+            // done from the keyboard.
+            apply.keyEquivalent = "\r"
+            apply.keyEquivalentModifierMask = [.command]
             apply.target = ApplyTarget.shared
             let proxy = ApplyTarget.shared.register(apply, profile: profile, service: service, note: note)
             apply.target = proxy

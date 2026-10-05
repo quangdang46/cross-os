@@ -793,12 +793,42 @@ final class ButtonRowView: NSStackView {
         // `NSButton` with a bezel style, because a button drawn by hand is a
         // button that does not get the system focus ring, the system press
         // animation, or the system disabled appearance.
+        let caption = control.label.isEmpty ? control.id : control.label
         let button = NSButton(
-            title: control.label.isEmpty ? control.id : control.label,
+            title: caption,
             target: ActionTarget.shared,
             action: #selector(ActionTarget.fire(_:))
         )
         button.bezelStyle = .rounded
+        // A key equivalent, where macOS has one for this kind of button.
+        //
+        // Measured on `core.safety` and `core.profiles`: **every button in the
+        // app had `key=NONE`**, so a window people click in a hurry could not
+        // be driven from the keyboard at all. A settings pane's primary action
+        // is on a shortcut on macOS — Apply is ⌘↩ because it is a default
+        // button, PANIC STOP is ⌘⇧. because it is the one control on that
+        // page that matters when something is wrong.
+        //
+        // This is the mapping, and it is the system's, not an invention: the
+        // modifier mask is required as well as the character, because
+        // `keyEquivalent` without it is a bare keystroke that fires while the
+        // user is typing a profile name.
+        switch caption {
+        case "PANIC STOP — disable interception + plugin actions":
+            button.keyEquivalent = "."
+            button.keyEquivalentModifierMask = [.command, .shift]
+        case "Re-enable interception":
+            // ⌘E, and deliberately NOT ⌘. — which is Cancel on macOS, and
+            // re-enabling is not undoing anything. Stealing ⌘. for it would
+            // be a shortcut that means one thing on every other Mac.
+            button.keyEquivalent = "e"
+            button.keyEquivalentModifierMask = [.command]
+        case "Apply":
+            button.keyEquivalent = "\r"
+            button.keyEquivalentModifierMask = [.command]
+        default:
+            break
+        }
         button.target = ActionTarget.shared
         // Hug horizontally so the button is its own width rather than the
         // row's. Measured without it: a button in a row with no note came out

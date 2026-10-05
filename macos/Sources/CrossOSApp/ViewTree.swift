@@ -51,6 +51,16 @@ enum ViewTree {
 
         // A text field prints its string, because that is what a person reads
         // and a frame alone does not say whether the text is there.
+        // A button's key equivalent and target. A settings window is used with
+        // two hands, and a button with no shortcut is a button the keyboard
+        // cannot reach at all.
+        if let button = view as? NSButton {
+            let keys = button.keyEquivalent
+            let name = button.target.map { String(describing: type(of: $0)) } ?? "nil"
+            print("\(pad)key=\(keys.isEmpty ? "NONE" : keys) title=\"\(button.title)\" "
+                  + "target=\(name) action=\(button.action.map { String(describing: $0) } ?? "nil")")
+        }
+
         if let field = view as? NSTextField {
             let text = field.stringValue
             // The line count the text ACTUALLY occupies, from the layout
@@ -61,6 +71,13 @@ enum ViewTree {
             // gets reported as `lines=1`. The readable-measure question — how
             // long is a line, really — is a question about the laid-out text,
             // and this is where it gets asked.
+            // A button's key equivalent, or whether it has one. A settings
+            // window is used with two hands, and a button with no shortcut is
+            // a button the keyboard cannot reach at all.
+            if let button = view as? NSButton {
+                let keys = button.keyEquivalent
+                print("\(pad)  key=\(keys.isEmpty ? "NONE" : keys) title=\(button.title) target=\(button.target == nil ? "nil" : String(describing: type(of: button.target!)))")
+            }
             let wrapped = Self.wrappedLines(field)
             let lines = max(1, field.maximumNumberOfLines == 0 ? 1 : field.maximumNumberOfLines)
             let shown = text.isEmpty ? "(empty)" : "\"\(text.prefix(60))\""
