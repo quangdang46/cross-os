@@ -20,6 +20,8 @@ class CardControl: NSStackView {
     private let heading = NSTextField(labelWithString: "")
     private let subtitle = NSTextField(labelWithString: "")
     private let bodyStack = NSStackView()
+    /// Whether this control's cap is the same word as the page title.
+    private(set) var repeatsTitle = false
     private var card: Card?
     private var cardColumn: NSStackView?
 
@@ -33,7 +35,21 @@ class CardControl: NSStackView {
         // Humanised, for the same reason a section cap is: the daemon sends
         // `label: "matrix"` and a heading reading "matrix" is a schema value
         // leaking into the interface.
-        heading.stringValue = Humanize.phrase(control.label.isEmpty ? control.id : control.label)
+        // The cap is HIDDEN when it would repeat the page's title.
+        //
+        // Measured on `core.profiles` and `core.observe`: the page said
+        // "Profiles" and then the section immediately below said "Profiles"
+        // again, and "Observe" twice. A heading that repeats the one above it
+        // is noise wearing a heading's clothes — the reader learns nothing
+        // from the second one and has to work out why it is there.
+        //
+        // The title is not known here, so the cap is marked as a repeat and
+        // `PageViewController` drops it once it can compare the two.
+        let capText = Humanize.phrase(control.label.isEmpty ? control.id : control.label)
+        heading.stringValue = capText
+        self.repeatsTitle = capText.caseInsensitiveCompare(
+            control.label.isEmpty ? control.id : control.label
+        ) == .orderedSame
         // A section CAP, not a card title.
         //
         // It was `Typeface.cardTitle` in `Palette.primaryInk` — 15pt semibold
@@ -116,6 +132,17 @@ class CardControl: NSStackView {
         addArrangedSubview(column)
         // Fill the pane. A settings card is the width of the pane it sits in.
         column.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
+    }
+
+    /// Remove the cap, when it is the same word as the page title.
+    ///
+    /// Called by `PageViewController` once the title is known. The cap is
+    /// removed rather than hidden so the group below moves up to where it
+    /// would have been.
+    func dropCap() {
+        guard let column = cardColumn else { return }
+        column.removeArrangedSubview(heading)
+        heading.removeFromSuperview()
     }
 
     @available(*, unavailable)

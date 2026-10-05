@@ -306,6 +306,13 @@ public final class PageViewController: NSViewController {
                     constant: -(Gap.plane * 2)
                 ).isActive = true
                 view.setContentHuggingPriority(.required, for: .vertical)
+                // A section cap that says what the title already said is
+                // dropped here, where the title is known. Measured on
+                // `core.profiles` and `core.observe`: the page said
+                // "Profiles" and the section under it said "Profiles" again.
+                if let card = view as? CardControl, card.repeatsTitle {
+                    card.dropCap()
+                }
             }
         }
 
