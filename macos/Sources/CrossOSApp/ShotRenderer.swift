@@ -341,6 +341,23 @@ enum ShotRenderer {
         guard let pageView = shell.pageController?.view else {
             throw ShotError.noContentView
         }
+        // The content view, which is everything BELOW the title bar.
+        //
+        // **The toolbar and the title are not in any of these pictures**, and
+        // three attempts to put them there failed:
+        //
+        //   - capturing `contentView.superview` (the theme frame): it renders
+        //     the same picture, so the frame is not taller than the content
+        //   - pulling `contentView` out of its window into a synthetic holder:
+        //     `Trace/BPT trap` — a window tears down its own content view when
+        //     it is removed, so this is the crash, not a layout failure
+        //   - `screencapture`: "could not create image from display", which is
+        //     Screen Recording permission, and is a person to grant
+        //
+        // So the toolbar — the search field included — has NEVER been
+        // verified by a render in this repo, and every "looks right" said about
+        // it was said about a picture it was not in. That is a real gap and it
+        // is recorded here rather than papered over.
         let target: NSView = wholeWindow
             ? (shell.window?.contentView ?? pageView)
             : pageView
@@ -436,3 +453,5 @@ extension NSView {
         for sub in subviews { sub.setLayersOff() }
     }
 }
+
+

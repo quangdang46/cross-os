@@ -378,6 +378,14 @@ private final class TraceTable: NSStackView, TableContent {
 /// What CrossOS can do, and what you have switched on.
 @MainActor
 final class PluginListView: CardControl {
+    /// The one reason every plugin reports, when they all report the same one.
+    ///
+    /// `core.pluginMeta` gives all three builtin plugins the same
+    /// `reason` and `loaded: false` — they are compiled from the rule table
+    /// and have no manifest. The row knows this is SHARED because it can
+    /// compare against this, and stays quiet; the list states it once.
+    static var sharedLoadReason: String = ""
+
     override init(control: Control, context: ControlContext) {
         super.init(control: control, context: context)
         Task { await load(context: context) }
@@ -401,7 +409,31 @@ final class PluginListView: CardControl {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
+        stack.distribution = .fill
         stack.spacing = Gap.row
+
+        // A reason SHARED by every plugin is one sentence for the group, not
+        // one per row. Three identical orange lines read as three problems;
+        // measured on `core.extensions`, that is what it rendered.
+        let reasons = metaRows.compactMap { row -> String? in
+            guard !row.loaded, let reason = row.reason, !reason.isEmpty else { return nil }
+            return reason
+        }
+        let shared = (reasons.count == metaRows.count && !reasons.isEmpty)
+            ? (reasons.first ?? "") : ""
+        PluginListView.sharedLoadReason = shared
+
+        if !shared.isEmpty {
+            let field = NSTextField(labelWithString: shared)
+            field.font = Typeface.caption
+            field.textColor = Palette.tertiaryInk
+            field.lineBreakMode = .byWordWrapping
+            field.usesSingleLineMode = false
+            field.maximumNumberOfLines = 0
+            stack.addArrangedSubview(field)
+            stack.setCustomSpacing(Gap.row, after: field)
+        }
+
         for meta in metaRows {
             stack.addArrangedSubview(PluginRow(
                 meta: meta,
@@ -459,14 +491,27 @@ private final class PluginRow: NSStackView {
         column.alignment = .leading
         column.spacing = Gap.tight
 
-        // A plugin that did not load says WHY, in words, in the row. A plugin
-        // listed with a switch and no reason is a control that does nothing and
-        // a person cannot tell whether it is broken or switched off.
-        if !meta.loaded, let reason = meta.reason, !reason.isEmpty {
+        // A plugin that did not load says WHY — but only when the reason is its
+        // OWN.
+        //
+        // All three builtin plugins report the same one: "no manifest is
+        // loaded — the builtin plugins are compiled from the rule table".
+        // Rendered per row, that is the same orange sentence three times on the
+        // page, which reads as three problems and is one. The shared case is
+        // stated once under the group by `PluginListView`, and the row says
+        // nothing about it.
+        //
+        // The reason stays in the row when it is specific to that plugin —
+        // one plugin failing to load for its own reason is that plugin's news.
+        let shared = PluginListView.sharedLoadReason
+        let reasonIsShared = !meta.loaded && meta.reason == shared && !shared.isEmpty
+
+        if !meta.loaded, let reason = meta.reason, !reason.isEmpty, !reasonIsShared {
             let field = NSTextField(labelWithString: reason)
             field.font = Typeface.caption
             field.textColor = Palette.warn
             field.lineBreakMode = .byWordWrapping
+            field.usesSingleLineMode = false
             field.maximumNumberOfLines = 0
             column.addArrangedSubview(field)
         } else if let permissions = meta.permissions, !permissions.isEmpty {

@@ -41,16 +41,35 @@ public final class PageViewController: NSViewController {
         titleField.font = Typeface.pageTitle
         titleField.textColor = Palette.primaryInk
 
-        descriptionField.font = Typeface.body
+        // Caption size, and it wraps.
+        //
+        // The description was body size — the same size as the text inside
+        // every group on the page — so on `core.commands` a sentence about the
+        // Finder menu was set larger than the Finder menu. It is a subtitle,
+        // not content, and it should read as one.
+        descriptionField.font = Typeface.caption
         descriptionField.textColor = Palette.secondaryInk
-        descriptionField.maximumNumberOfLines = 2
+        descriptionField.alignment = .left
+        descriptionField.lineBreakMode = .byWordWrapping
+        // `labelWithString:` sets `usesSingleLineMode`, and with it set a label
+        // ignores `byWordWrapping` and truncates instead.
+        descriptionField.usesSingleLineMode = false
+        descriptionField.maximumNumberOfLines = 0
 
-        // The page's own id, small and quiet at the foot. It is there because
-        // a person reporting a problem says "the About page is wrong" and the
-        // id is what makes that reproducible — and because a plugin page whose
-        // id is visible is a page whose provenance is not a mystery.
+        // The page's own id, at the foot, and **only when it is asked for.**
+        //
+        // The reasoning for it existing at all still holds: a person reporting
+        // a problem says "the About page is wrong" and the id is what makes
+        // that reproducible. But `core.home` at the bottom of every page in
+        // monospace is a developer string on every screen a user ever sees,
+        // and it is the single thing that makes the app read as a diagnostic
+        // tool rather than as a Mac app.
+        //
+        // `--show-ids` is how someone reports a bug without it costing every
+        // other person the noise.
         pageId.font = Typeface.mono
         pageId.textColor = Palette.tertiaryInk
+        pageId.isHidden = !CommandLine.arguments.contains("--show-ids")
 
         stack.orientation = .vertical
         // `.width`, not `.leading`. A `.leading` stack gives each row its

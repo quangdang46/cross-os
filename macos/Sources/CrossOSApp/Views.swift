@@ -163,7 +163,19 @@ final class HomeSummaryView: NSStackView {
         // And it is shown ONLY when there is something to say: a green
         // "All checks are ready" under a group of three green facts is noise,
         // on the most-read page in the app.
-        if let error = statusValue?.tapError, !error.isEmpty, !interception {
+        //
+        // And it is shown ONLY when the sentence is not ALREADY on the page.
+        // Measured on `core.home`: "interception stopped by PANIC STOP
+        // (re-enable from the Safety page)" appeared TWICE — once as this
+        // footnote and again as the detail line under "Keyboard interception"
+        // in the Readiness group. Two copies of one sentence on one screen
+        // reads as two problems and is one.
+        //
+        // The Readiness rows own the sentences they are about. This footnote is
+        // for a tap error that no readiness row carries.
+        let namedInReadiness = (try? await client.readiness())?
+            .contains { $0.detail == statusValue?.tapError } ?? false
+        if let error = statusValue?.tapError, !error.isEmpty, !interception, !namedInReadiness {
             section?.footnote.stringValue = "Keyboard interception is off: \(error)"
             // SECONDARY ink, not `warn`.
             //
