@@ -572,6 +572,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         while Date() < deadline {
             RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
         }
+        // The chrome: the title bar and toolbar sit ABOVE `contentView`, so
+        // the tree printed below never sees them. They had been built and
+        // never checked — and `--shots` cannot check them either, because a
+        // render of `contentView` has no title bar in it. So this is the only
+        // place they get looked at.
+        if let w = shell.window {
+            print("WINDOW \(Int(w.frame.width))x\(Int(w.frame.height)) style=\(w.styleMask.rawValue)")
+            print("TOOLBAR visible=\(w.toolbar?.isVisible ?? false) items=\(w.toolbar?.items.count ?? -1)")
+            if let t = w.toolbar {
+                for item in t.items {
+                    let v = item.view
+                    print("  item \(item.itemIdentifier.rawValue) view=\(v.map { String(describing: type(of: $0)) } ?? "nil") frame=\(v?.frame ?? .zero)")
+                    if let v { ViewTree.describe(v, indent: 3) }
+                }
+            }
+            print("TITLE \(w.title)")
+            print("FRAME rect=\(w.frame) contentLayoutRect=\(w.contentLayoutRect)")
+        }
+
         if let content = shell.window?.contentView {
             print("TREE")
             ViewTree.describe(content, indent: 0)
