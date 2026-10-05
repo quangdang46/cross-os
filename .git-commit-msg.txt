@@ -1,0 +1,35 @@
+docs: the first-run journey, on a daemon that has never been configured
+
+Three daemon states have now been measured — cold, configured, and this
+one, which is the one a person actually arrives at. Deleted the whole
+support directory, started the daemon, and audited before touching
+anything:
+
+    --audit   15 pages, 0 fail, 0 unmeasurable   (fresh, unconfigured)
+
+`core.onboardingState` answered with the honest thing rather than an
+optimistic one:
+
+    completed: False   current_step: "welcome"
+      enable   — no plugin is switched on yet
+      settings — adapter: tap refused (input-monitoring consent missing?)
+      verify   — 7 of 8 checks are not ready
+
+**The wizard has no "next".** There is no `core.onboardingAdvance` and
+there should not be: steps complete on real daemon state, so the reader
+cannot click past a thing that is not done. Enabling a plugin moves two
+steps at once, which is what actually happened:
+
+    before          welcome False  enable False  settings False  verify False
+    plugin enabled  welcome True   enable True   settings False  verify False
+    after complete  welcome True   enable True   settings True   verify True
+
+Four steps, three transitions, none of them driven by a button.
+
+And the audit is clean in that fourth state too — after onboarding is
+marked complete, which is a page state nothing had ever rendered.
+
+So the checks have now run against four daemon states: cold and
+unconfigured, cold and configured, warm and configured, and onboarded.
+Every earlier green result in this repo came from the second of those by
+accident, which is why a whole class of defect stayed invisible.
