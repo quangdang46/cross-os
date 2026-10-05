@@ -236,9 +236,23 @@ class Card: NSStackView {
     ///
     /// Horizontal padding is wider than vertical on purpose: the content is
     /// text, and text needs air on its line but not above and below it.
+    /// **No horizontal padding.**
+    ///
+    /// It was `Gap.group` either side, because it was the padding INSIDE a
+    /// box — content sat 20pt in from the box's edge and the title sat 20pt
+    /// left of that, so the title and the rows were on two different
+    /// verticals with the difference only visible because there was a border
+    /// to see it against.
+    ///
+    /// With no box there is nothing to pad away from, and keeping the inset
+    /// just indents every group 20pt to the right of the title it belongs to
+    /// — measured on `core.home`, "Daemon" starting a third of the way into
+    /// the pane while "Home" is hard against it.
+    ///
+    /// Vertical padding stays: rows still need air above and below them.
     static let inset = NSEdgeInsets(
-        top: Gap.row + Gap.close, left: Gap.group,
-        bottom: Gap.row + Gap.close, right: Gap.group
+        top: Gap.row, left: 0,
+        bottom: Gap.row, right: 0
     )
 
     init(title: String? = nil) {
@@ -282,42 +296,33 @@ class Card: NSStackView {
     /// column of cards with doubled lines between them. macOS separates rows
     /// INSIDE a group with a single hairline that starts at the text's left
     /// edge and stops at the trailing inset.
+    /// **The group does not draw itself.**
+    ///
+    /// It used to: a rounded `controlBackgroundColor` fill with a hairline
+    /// round it, which is the iOS and Settings.app treatment — a card on a
+    /// page. System Settings does not do that. Its content sits directly on
+    /// the window background, and a group is made of SPACING and a shared
+    /// left edge, not of a box. Measured on `core.matrix` and every page like
+    /// it: a title, a sentence, a large bordered box, a caption, another
+    /// bordered box, and forty per cent of the window empty below. That reads
+    /// as a web form with cards, which is what it looked like and what the
+    /// complaint about it was.
+    ///
+    /// The insets stay, because they are what the spacing is measured from,
+    /// and the hierarchy is now carried by the type and the rhythm instead of
+    /// by a border around everything.
+    ///
+    /// What this gives up: a group no longer reads as a unit at a glance when
+    /// its rows are all one line tall. That is the trade System Settings makes
+    /// too, and it is the trade that makes a window look like a window.
     public override func draw(_ dirtyRect: NSRect) {
-        let inset = bounds.insetBy(dx: 0.5, dy: 0.5)
-        let path = NSBezierPath(roundedRect: inset,
-                                xRadius: Radius.card, yRadius: Radius.card)
-        Palette.cardBackground.setFill()
-        path.fill()
-        Palette.hairline.setStroke()
-        path.lineWidth = 1
-        path.stroke()
-
-        // **No internal separators, and that is a decision rather than an
-        // omission.**
-        //
-        // This drew a hairline between the rows of a group, worked out by
-        // descending through the content stack until it found something that
-        // looked like a list. It was wrong twice:
-        //
-        //   - reading one level down found the COLUMN, which has one child,
-        //     and drew nothing at all: measured, no group in the app had ever
-        //     had a separator between its rows
-        //   - descending far enough to find the rows then descended TOO far on
-        //     other pages, and on `core.windows` it drew a rule between
-        //     "No snap zones." and the paragraph under it — a headline split
-        //     from its own body by a line
-        //
-        // Limiting the walk to two levels removed the second case and left no
-        // separator anywhere, which is the correct behaviour for the groups
-        // that were drawing them wrongly.
-        //
-        // A macOS inset group does not require internal separators: the fill
-        // and the rows' own padding carry the grouping, and the rules that DO
-        // exist in System Settings are per-row separators declared by the
-        // control, not guessed by the container. A view that wants one should
-        // draw it. Guessing it from the shape of somebody else's stack is what
-        // produced both of the defects above.
+        // Deliberately empty. The doc above is the reason.
     }
+
+    /// Whether a group paints a box. False everywhere, kept as a switch so
+    /// the two treatments are both expressible and the choice is stated once
+    /// rather than scattered.
+    public static let drawsABox = false
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("Card is created in code") }
@@ -390,10 +395,7 @@ class Card: NSStackView {
         // layout places the content inside its inset rect, so stating it here
         // is what broke it.
         NSLayoutConstraint.activate([
-            view.widthAnchor.constraint(
-                equalTo: widthAnchor,
-                constant: -(Card.inset.left + Card.inset.right)
-            ),
+            view.widthAnchor.constraint(equalTo: widthAnchor),
         ])
     }
 }

@@ -215,7 +215,20 @@ public final class PageViewController: NSViewController {
         measure.priority = .defaultHigh
         NSLayoutConstraint.activate([
             measure,
-            stack.centerXAnchor.constraint(equalTo: document.centerXAnchor),
+            // LEFT, not centred.
+            //
+            // Centring the measure was right while every group drew a box —
+            // the box had to go somewhere in the middle. With the boxes gone it
+            // is simply a column floating in the middle of the pane, and its
+            // rows start a third of the way in with the whole left margin
+            // empty. System Settings puts its content against the left edge of
+            // the pane and lets the right side breathe; the width is a limit
+            // on how long a line gets, not a column to centre.
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            stack.trailingAnchor.constraint(
+                lessThanOrEqualTo: document.trailingAnchor,
+                constant: -(Gap.plane * 2)
+            ),
         ])
 
         view = container
