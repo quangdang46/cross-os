@@ -344,16 +344,30 @@ enum ShotRenderer {
         let target: NSView = wholeWindow
             ? (shell.window?.contentView ?? pageView)
             : pageView
-        // The rail renders DARKER than System Settings' does, and it is not
-        // known why. Measured: `Palette.sidebarBackground` draws as
-        // `(161, 161, 161)` where System Settings' light sidebar is about
-        // `(246, 246, 248)`.
+        // The rail renders as a mid grey rather than System Settings' light
+        // sidebar, and the cause is the MACHINE, not this file.
         //
-        // Three things were tried and all three changed nothing measurable:
-        // setting `view.appearance`, wrapping the draw in
-        // `performAsCurrentDrawingAppearance`, and both together. So the cause
-        // is NOT an appearance-resolution problem, and the comment that said
-        // it was has been deleted rather than left to mislead the next reader.
+        // Measured with a standalone probe: `NSColor.underPageBackgroundColor`
+        // resolves to `(150, 150, 150)` under `NSAppearanceNameAqua` on this
+        // host, and the render draws `(161, 161, 161)` — the difference is the
+        // PDF round trip. `windowBackgroundColor` and `controlBackgroundColor`
+        // both resolve to `(255, 255, 255)` on the same host, so the palette
+        // is not globally degraded; this one colour is.
+        //
+        // It is not an accessibility setting: `accessibilityDisplayShould
+        // ReduceTransparency`, `…IncreaseContrast` and `…ReduceMotion` all
+        // read false, and no `com.apple.universalaccess` key is set. There IS
+        // a main screen, so this is not a headless fallback either — the host
+        // simply reports that colour.
+        //
+        // So `Palette.sidebarBackground` is SEMANTICALLY right and will be
+        // right on a normally-configured Mac; it is this host's palette that
+        // is out. Three fixes were tried against it first — `view.appearance`,
+        // `performAsCurrentDrawingAppearance`, and both — and all three changed
+        // nothing measurable, which is what ruled appearance-resolution out.
+        //
+        // The comment that blamed appearance resolution has been deleted
+        // rather than left to send the next reader after a ruled-out cause.
 
         var written: [String] = []
         let pages = (try? await client.pages()) ?? []
