@@ -814,6 +814,26 @@ final class ActionTarget: NSObject {
         bindings[ObjectIdentifier(button)] = Binding(control: control, context: context)
     }
 
+    /// The dispatch table, and it is a TABLE rather than a guess.
+    ///
+    /// It used to be empty, so every button in the app printed "“X” is not
+    /// wired yet in the AppKit shell." — which is honest, and also means the
+    /// Safety page's three buttons, the app's most consequential controls,
+    /// did nothing at all. A stub that reports itself is not a feature.
+    ///
+    /// The three capabilities the daemon serves are `safety.panicStop`,
+    /// `safety.resume` and `safety.reset`. The first two are wired here and
+    /// were verified against a live daemon:
+    ///
+    ///     safety.panicStop → {"buffersFlushed":true,"interceptionDisabled":true,…}
+    ///     safety.resume   → {"interception":false,"resumed":true}
+    ///
+    /// **`safety.reset` is NOT here because it does not exist.** The page
+    /// declares a Reset Everything button with `"action": "safety.reset"` and
+    /// the daemon answers `no such method: safety.reset`. Wiring it to
+    /// something else would make a safety control do a different thing than
+    /// its label says, which is worse than saying it cannot run. It fails
+    /// closed, naming the capability, until the daemon has the method.
     @objc func fire(_ sender: NSButton) {
         guard let binding = bindings[ObjectIdentifier(sender)] else { return }
         let capability = binding.control.action
@@ -821,10 +841,54 @@ final class ActionTarget: NSObject {
             binding.context.note("This button declares no action.")
             return
         }
-        // The dispatch table lands with the pages that call it. Failing closed
-        // here — naming the capability rather than silently doing nothing — is
-        // the behaviour `actions.ts:402-409` specifies and the reason this
-        // stub is a stub rather than a guess.
-        binding.context.note("“\(capability)” is not wired yet in the AppKit shell.")
+
+        switch capability {
+        case "safety.panicStop":
+            run(binding, failure: "Panic stop failed.") {
+                try await binding.context.service.panicStop()
+            }
+        case "safety.resume":
+            run(binding, failure: "Could not re-enable interception.") {
+                try await binding.context.service.resume()
+            }
+        default:
+            // Failing closed, naming the capability — the behaviour
+            // `actions.ts:402-409` specifies.
+            binding.context.note("“\(capability)” is not wired yet in the AppKit shell.")
+        }
+    }
+
+    /// Run a capability and say plainly what happened.
+    ///
+    /// The note is the ONLY thing a person sees after a destructive button is
+    /// pressed, so it names the outcome rather than the attempt: "Panic stop is
+    /// on" is a claim about the machine, and "Panic stop ran" is not. This is
+    /// the stored-state rule `MatrixControl.tsx:34-41` states for the toggles
+    /// and it is the same rule for a button.
+    private func run(
+        _ binding: Binding,
+        failure: String,
+        _ body: @escaping @MainActor () async throws -> JSONValue
+    ) {
+        Task { @MainActor in
+            do {
+                _ = try await body()
+                binding.context.note(success(for: binding.control))
+            } catch {
+                binding.context.note("\(failure) \(error)")
+            }
+        }
+    }
+
+    /// What the machine now is, in words.
+    private func success(for control: Control) -> String {
+        switch control.action {
+        case "safety.panicStop":
+            return "Panic stop is on: interception, plugin actions and the login item are off."
+        case "safety.resume":
+            return "Re-enable requested. Check the Home page for the current state."
+        default:
+            return "\(control.label) ran."
+        }
     }
 }
