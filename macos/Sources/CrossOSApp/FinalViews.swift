@@ -39,7 +39,11 @@ final class TrialView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let loaded = try? await context.service.trialState() else {
-            showError("Could not read the trial.", didNotAnswer("safety.trialState"))
+            showError(
+                "Could not read the trial.",
+                didNotAnswer("safety.trialState"),
+                onRetry: { [weak self] in Task { await self?.load(context: context) } }
+            )
             return
         }
         // The plugin's own facts, so the row can name what is being trialled
@@ -283,7 +287,11 @@ final class PaletteView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let commands = try? await context.service.commands() else {
-            showError("Could not read the commands.", didNotAnswer("core.commands"))
+            showError(
+                "Could not read the commands.",
+                didNotAnswer("core.commands"),
+                onRetry: { [weak self] in Task { await self?.load(context: context) } }
+            )
             return
         }
         // A search field and a list, because the palette's whole reason is
@@ -395,7 +403,11 @@ final class ShortcutListView: CardControl {
         // bound. Showing the matrix alone is a settings page that lists
         // defaults as though they were choices.
         guard matrixRows != nil || shortcuts != nil else {
-            showError("Could not read the shortcuts.", didNotAnswer("config.getShortcuts"))
+            showError(
+                "Could not read the shortcuts.",
+                didNotAnswer("config.getShortcuts"),
+                onRetry: { [weak self] in Task { await self?.load(context: context) } }
+            )
             return
         }
         let stack = NSStackView()

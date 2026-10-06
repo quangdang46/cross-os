@@ -537,7 +537,8 @@ final class AuditListView: CardControl {
         } catch {
             showError(
                 "Could not read the audit list.",
-                "The daemon did not answer safety.ownershipAudit. Is it running? (./scripts/run.sh) \(error)"
+                "The daemon did not answer safety.ownershipAudit. Is it running? (./scripts/run.sh) \(error)",
+                onRetry: { [weak self] in Task { await self?.load(context: context) } }
             )
         }
     }
