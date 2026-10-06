@@ -27,6 +27,8 @@ public actor SpiedCoreClient: CoreClient {
     private var overridesAnswer: [OverrideRow] = []
     private var conflictsAnswer: [ConflictRow] = []
     private var observeAnswer = ObserveStateRow(observe: false, mode: "off")
+    /// What `core.setObserve` last stored, as the daemon reports it back.
+    private var observeStoredAnswer = false
     private var appsAnswer: [AppRow] = []
     private var profilesAnswer: [ProfileRow] = []
     private var storedRuleState = false
@@ -123,6 +125,15 @@ public actor SpiedCoreClient: CoreClient {
     public func observeState() async throws -> ObserveStateRow {
         record("core.observeState")
         return observeAnswer
+    }
+
+    public func setObserve(enabled: Bool) async throws -> Bool {
+        record("core.setObserve")
+        // The daemon answers with what it STORED, not with what it was asked
+        // for. A stub that echoed the request could not catch a caller that
+        // labels the toggle from the click instead of from the recorder.
+        observeStoredAnswer = enabled
+        return observeStoredAnswer
     }
 
     public func apps() async throws -> [AppRow] {

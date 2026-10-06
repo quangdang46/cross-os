@@ -139,6 +139,14 @@ public protocol CoreClient: Sendable {
     /// What the recorder is doing (`core.observeState`).
     func observeState() async throws -> ObserveStateRow
 
+    /// Switch the recorder's dry run on or off (`core.setObserve`).
+    ///
+    /// Returns the STORED state, for the same reason `setRuleEnabled` does: a
+    /// toggle that reports success instead of position can be labelled from
+    /// the click rather than from the recorder, which is the belief, not the
+    /// state.
+    func setObserve(enabled: Bool) async throws -> Bool
+
     /// Installed apps (`core.apps`). An empty list is the answer on a platform
     /// with no enumeration, not a failure.
     func apps() async throws -> [AppRow]
@@ -750,6 +758,29 @@ public actor LiveCoreClient: CoreClient {
               let stored = object["enabled"]?.boolValue else {
             throw CoreError.decode(
                 method: "config.setRuleEnabled",
+                underlying: DecodeShapeError.expectedObject
+            )
+        }
+        return stored
+    }
+
+    /// `core.setObserve` — `{"enabled": true|false}`.
+    ///
+    /// The daemon side existed from the start and this call did not, so the
+    /// Observe page's toggle had no way to reach it: `NSButton(checkboxWithTitle: "")`
+    /// with `target: nil, action: nil`, and nothing anywhere in the shell that
+    /// assigns an action to it. The page's only control flipped visually and
+    /// wrote nothing.
+    ///
+    /// The daemon requires the flag — a payload missing it must not be read as
+    /// "stop observing" — so the parameter is not optional here either.
+    public func setObserve(enabled: Bool) async throws -> Bool {
+        let params = JSONValue.object(["enabled": .bool(enabled)])
+        let raw = try await call("core.setObserve", params)
+        guard let object = raw.objectValue,
+              let stored = object["observe"]?.boolValue else {
+            throw CoreError.decode(
+                method: "core.setObserve",
                 underlying: DecodeShapeError.expectedObject
             )
         }

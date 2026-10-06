@@ -432,6 +432,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             failures.append("core.extensions is not being served")
         }
 
+        // 5. The Observe toggle, which was DEAD for the whole life of this
+        //    port: `NSButton(checkboxWithTitle: "", target: nil, action: nil)`
+        //    with nothing in the shell assigning an action to it, while the
+        //    daemon has served `core.setObserve` from the start. The page's
+        //    only control flipped its own box and reached nothing.
+        //
+        //    Read from `core.observeState` before and after, never from the
+        //    checkbox's own `state` — a checkbox that changes its own box
+        //    proves nothing, and that is exactly what this one did.
+        if let observePage = pages.first(where: { $0.id == "core.observe" }) {
+            shell.show(observePage)
+            await ShotRenderer.settle(1.5)
+            if let toggle = NSView.allViews(shell.window?.contentView)
+                .compactMap({ $0 as? NSButton })
+                .first(where: { ObserveTarget.shared.isWired($0) }) {
+                let before = (try? await client.observeState())?.observe ?? false
+                toggle.performClick(nil)
+                await ShotRenderer.settle(1.2)
+                let after = (try? await client.observeState())?.observe
+                print("click-test: observe toggle  stored \(before) -> \(show(after))")
+                if let after, after == before {
+                    failures.append("the observe toggle click did not change the daemon's recorder state")
+                }
+                // Put it back, or this test is not idempotent.
+                _ = try? await client.setObserve(enabled: before)
+                await ShotRenderer.settle(0.6)
+            } else {
+                failures.append("no toggle found on core.observe")
+            }
+        } else {
+            failures.append("core.observe is not being served")
+        }
+
         // 5. Profile Apply, which is the one control that changes how the whole
         //    product behaves. It was broken by the same parameter-name defect
         //    (`id` where the daemon wants `profile`) and this is what proves it
@@ -465,7 +498,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if failures.isEmpty {
-            print("CLICK TEST PASS — 3 buttons, both write paths and profile apply reach the daemon")
+            print("CLICK TEST PASS — 3 buttons, 3 write paths (rule, plugin, observe) and profile apply reach the daemon")
             exit(0)
         }
         for f in failures { print("click-test FAIL: \(f)") }

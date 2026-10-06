@@ -511,6 +511,13 @@ class RowView: NSStackView {
         if let control {
             control.setContentHuggingPriority(.required, for: .horizontal)
             control.setContentCompressionResistancePriority(.required, for: .horizontal)
+            // A checkbox reports an intrinsic 16x16, so it is the only thing in
+            // this row a person can click and it is under the floor. The glyph
+            // stays 16pt — that is what AppKit draws, and growing the glyph
+            // would make it the wrong shape — but the FRAME goes to the floor
+            // so the hit area does not.
+            control.widthAnchor.constraint(greaterThanOrEqualToConstant: Measure.hitTarget).isActive = true
+            control.heightAnchor.constraint(greaterThanOrEqualToConstant: Measure.hitTarget).isActive = true
             addArrangedSubview(control)
         }
 
@@ -525,6 +532,26 @@ class RowView: NSStackView {
         // mid-air with the plugin's reason underneath and no name at all.
         heightAnchor.constraint(greaterThanOrEqualToConstant: Measure.rowHeight).isActive = true
         setContentHuggingPriority(.required, for: .vertical)
+    }
+
+    /// Clicking anywhere on a settings row should do what its checkbox does.
+    ///
+    /// The checkbox is 16pt, and two places in this app asserted — in a
+    /// comment here and in an audit exemption — that the row was what took the
+    /// click. **It was not.** `RowView` is an `NSStackView` with no
+    /// `mouseDown` and no gesture recognizer, and there is no `mouseDown` or
+    /// `NSClickGestureRecognizer` anywhere in the shell at all. So that 16pt
+    /// box was the only thing a person could click, and the audit exempted it
+    /// on the strength of a claim nothing implemented.
+    ///
+    /// Four real 16x16 targets appeared the moment the exemption went: one on
+    /// `core.observe`, three on `core.extensions`.
+    public override func mouseDown(with event: NSEvent) {
+        guard let control = arrangedSubviews.compactMap({ $0 as? NSControl }).last else {
+            super.mouseDown(with: event)
+            return
+        }
+        control.performClick(nil)
     }
 
     /// Bind to the stack that holds this row, once there is one.

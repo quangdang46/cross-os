@@ -11,6 +11,6 @@
       "w" : 1200
     }
   ],
-  "page" : "core.activity",
-  "scale" : 2
+  "scale" : 2,
+  "page" : "core.activity"
 }

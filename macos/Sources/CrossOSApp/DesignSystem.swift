@@ -290,6 +290,12 @@ public enum Measure {
     /// of as stacked boxes.
     public static let groupPadding: CGFloat = 14
 
+    /// The smallest a thing a person clicks can be.
+    ///
+    /// One value, read by the app and by the audit, because a floor the app
+    /// does not know about is a floor it cannot keep.
+    public static let hitTarget: CGFloat = 24
+
     /// The height of a row in a group. System Settings' rows are 32pt with
     /// room for a second line; a settings pane with 18pt rows reads as a list
     /// of chips.

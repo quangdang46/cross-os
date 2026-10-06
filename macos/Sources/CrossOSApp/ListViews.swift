@@ -310,7 +310,71 @@ final class ObserveToggleView: CardControl {
             showError("Could not read the recorder.", didNotAnswer("core.observeState"))
             return
         }
-        replaceBody(with: ObserveBody(state: state))
+        replaceBody(with: ObserveBody(
+            state: state,
+            service: context.service,
+            note: context.note
+        ))
+    }
+}
+
+/// Where a click on the Observe toggle goes.
+///
+/// The shape is `PluginTarget`'s, and it differs in the one place that
+/// matters: the note reports what the daemon STORED, not what was asked for.
+/// `setRuleEnabled` documents why — a control labelled from the click is
+/// labelled from the belief, and the recorder's own docs say the same thing
+/// about `core.observeState`: "a toggle that cannot say which position it is
+/// in can only ever be labelled from the click that produced it, which is the
+/// belief, not the state."
+@MainActor
+final class ObserveTarget: NSObject {
+    static let shared = ObserveTarget()
+
+    private struct Binding {
+        let next: Bool
+        let service: any CoreClient
+        let note: @Sendable (String) -> Void
+    }
+
+    private var bindings: [ObjectIdentifier: Binding] = [:]
+
+    /// Whether this button has a write behind it.
+    ///
+    /// The click test asks this rather than looking for a cell class, because
+    /// SwiftUI's `NSButton` on this SDK is an `NSButtonCell` behind a hosting
+    /// view and a class check finds nothing.
+    func isWired(_ toggle: NSButton) -> Bool {
+        bindings[ObjectIdentifier(toggle)] != nil
+    }
+
+    func register(
+        _ toggle: NSButton,
+        next: Bool,
+        service: any CoreClient,
+        note: @escaping @Sendable (String) -> Void
+    ) -> ObserveTarget {
+        bindings[ObjectIdentifier(toggle)] = Binding(next: next, service: service, note: note)
+        return self
+    }
+
+    @objc func fire(_ sender: NSButton) {
+        guard let binding = bindings[ObjectIdentifier(sender)] else { return }
+        Task {
+            do {
+                let stored = try await binding.service.setObserve(enabled: binding.next)
+                sender.state = stored ? .on : .off
+                binding.note(stored
+                    ? "The recorder is now writing a dry-run trace for everything it sees."
+                    : "The recorder is writing nothing.")
+            } catch {
+                // Put the box back. It is the one control on a page about what
+                // the product keeps, and leaving it showing a position the
+                // daemon refused is the worst thing this view can do.
+                sender.state = binding.next ? .off : .on
+                binding.note("Could not change the recorder: \(error)")
+            }
+        }
     }
 }
 
@@ -324,7 +388,17 @@ final class ObserveToggleView: CardControl {
 /// the product will keep about them, and a bare switch labelled "Record what
 /// CrossOS sees" does not.
 private final class ObserveBody: NSStackView {
-    init(state: ObserveStateRow) {
+    /// `service` and `note` because the toggle has to be able to write.
+    ///
+    /// It could not. `NSButton(checkboxWithTitle: "", target: nil, action: nil)`,
+    /// and nothing anywhere in the shell assigns an action to it —
+    /// `grep '.action ='` finds FinalViews, TableView, Views, ListViews2 and
+    /// RemainingViews, and not this file. So the page's only control flipped
+    /// its own box and reached nothing: `core.setObserve` has been served by
+    /// the daemon all along, and the shell had no client call for it.
+    init(state: ObserveStateRow,
+         service: any CoreClient,
+         note: @escaping @Sendable (String) -> Void) {
         super.init(frame: .zero)
         orientation = .vertical
         alignment = .width
@@ -347,11 +421,16 @@ private final class ObserveBody: NSStackView {
         // sentence, which is exactly this row.
         let toggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
         toggle.state = state.observe ? .on : .off
-        // The box is 16pt and the ROW is the target, which is how a macOS
-        // settings row works: the row is clickable and the checkbox is an
-        // indicator inside it. Without that the 16pt box IS the hit target
-        // and the audit is right to call it under 20.
         toggle.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        // The row was NOT the target. `RowView` has no `mouseDown` and there
+        // is no gesture recognizer anywhere in the shell, so the checkbox was
+        // the only clickable thing and it did nothing when clicked. Both
+        // halves of that are fixed: the button's frame now meets
+        // `Measure.hitTarget`, and `RowView.mouseDown` forwards a click on the
+        // label to this button so the whole row works.
+        let proxy = ObserveTarget.shared.register(toggle, next: !state.observe, service: service, note: note)
+        toggle.target = proxy
+        toggle.action = #selector(ObserveTarget.fire(_:))
 
         let row = RowView(
             label: "Record what CrossOS sees",

@@ -657,7 +657,7 @@ enum Audit {
             }
 
             // A hit target under the floor.
-            if isInteractive(view), !isIndicatorInRow(view) {
+            if isInteractive(view) {
                 let size = frame.size
                 if size.width < Self.minimumHitTarget || size.height < Self.minimumHitTarget {
                     findings.append(Finding(
@@ -802,38 +802,13 @@ enum Audit {
     /// So a checkbox inside a row is exempt, and the exemption is narrow on
     /// purpose: an unlabelled checkbox alone on a page is still a 16pt target,
     /// and that one is still a finding.
-    static func isIndicatorInRow(_ view: NSView) -> Bool {
-        guard view is NSButton, let parent = view.superview else { return false }
-        // A row, not a bare stack: the row is what carries the label and the
-        // click, and a checkbox whose parent is a `RowView` is that row's
-        // indicator rather than its only control.
-        var node: NSView? = parent
-        while let current = node {
-            if current is RowView {
-                // **Only if the row is actually a hit target.**
-                //
-                // The exemption exists because a checkbox inside a clickable
-                // row is not a 16pt target — it is a 32pt one, because the row
-                // is what takes the click. Measured on `core.extensions`, every
-                // 16x16 button sits in a `RowView 32` tall.
-                //
-                // Without this condition the exemption is a blanket pass: a
-                // checkbox in a 16pt row is a genuinely 16pt target, and the
-                // check that exists to catch exactly that would wave it
-                // through because it found the word `RowView` somewhere above
-                // it in the tree. An exemption that does not check what it
-                // exempts is a hole, not a rule.
-                return current.frame.height >= Self.minimumHitTarget
-            }
-            node = current.superview
-        }
-        return false
-    }
 
     /// 24pt, in either axis — Apple's minimum and WCAG 2.5.8's.
     ///
     /// The floor the hit-target rule reports against.
-    static let minimumHitTarget: CGFloat = 24
+    /// The floor, from the design system rather than declared here: a rule the
+    /// app cannot read is a rule the app cannot keep.
+    static let minimumHitTarget: CGFloat = Measure.hitTarget
 
     static func isInteractive(_ view: NSView) -> Bool {
         if view is NSButton || view is NSSwitch || view is NSSearchField { return true }

@@ -1,4 +1,6 @@
 {
+  "scale" : 2,
+  "page" : "core.schemaForm",
   "groups" : [
     {
       "y0" : 988,
@@ -6,11 +8,9 @@
       "w" : 1200
     },
     {
-      "y0" : 988,
       "y1" : 1292,
+      "y0" : 988,
       "w" : 1200
     }
-  ],
-  "page" : "core.schemaForm",
-  "scale" : 2
+  ]
 }
