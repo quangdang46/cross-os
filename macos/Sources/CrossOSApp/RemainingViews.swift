@@ -298,7 +298,11 @@ final class PluginDetailView: CardControl {
 
     private func load(control: Control, context: ControlContext) async {
         guard let all = try? await context.service.pluginMeta() else {
-            showError("Could not read the plugin.", didNotAnswer("core.pluginMeta"))
+            showError(
+                "Could not read the plugin.",
+                didNotAnswer("core.pluginMeta"),
+                onRetry: { [weak self] in Task { await self?.load(control: control, context: context) } }
+            )
             return
         }
         // The page names the plugin by capability id, and the id is the
