@@ -224,8 +224,8 @@ class CardControl: NSStackView {
     /// The detail names the RPC because a person reading "could not load" with
     /// no method in it has nothing to search for, and the person who can fix
     /// it — whoever runs the daemon — needs the method name, not a mood.
-    func showError(_ headline: String, _ detail: String) {
-        replaceBody(with: ErrorView(headline: headline, detail: detail))
+    func showError(_ headline: String, _ detail: String, onRetry: (() -> Void)? = nil) {
+        replaceBody(with: ErrorView(headline: headline, detail: detail, onRetry: onRetry))
     }
 }
 
@@ -252,7 +252,7 @@ func didNotAnswer(_ method: String) -> String {
 /// of the situation. A person reading it should learn the cause and the one
 /// action that changes it.
 final class ErrorView: NSStackView {
-    init(headline: String, detail: String) {
+    init(headline: String, detail: String, onRetry: (() -> Void)? = nil) {
         super.init(frame: .zero)
         orientation = .vertical
         alignment = .width
@@ -311,11 +311,43 @@ final class ErrorView: NSStackView {
         column.spacing = Gap.tight
         column.translatesAutoresizingMaskIntoConstraints = false
 
-        addSubview(column)
+        // A RETRY button, because an error that says "the daemon is not
+        // answering" and offers no way to try again is a dead end. The
+        // reader has to close the window, run ./scripts/run.sh, and reopen
+        // it — three steps for what is one button.
+        //
+        // The button is wired to a closure so the caller decides what
+        // "retry" means: re-fetch the data, reconnect the socket, or
+        // something else. The view does not know.
+        let retry = NSButton(title: "Retry", target: nil, action: nil)
+        retry.bezelStyle = .rounded
+        retry.keyEquivalent = "\r"
+        retry.translatesAutoresizingMaskIntoConstraints = false
+        if let onRetry {
+            let proxy = RetryTarget.shared.register(retry, onRetry: onRetry)
+            retry.target = proxy
+            retry.action = #selector(RetryTarget.fire(_:))
+        } else {
+            retry.isHidden = true
+        }
+
+        let buttonRow = NSStackView(views: [retry])
+        buttonRow.orientation = .horizontal
+        buttonRow.alignment = .leading
+        buttonRow.spacing = Gap.tight
+        buttonRow.translatesAutoresizingMaskIntoConstraints = false
+
+        let outer = NSStackView(views: [column, buttonRow])
+        outer.orientation = .vertical
+        outer.alignment = .leading
+        outer.spacing = Gap.group
+        outer.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(outer)
         NSLayoutConstraint.activate([
-            column.leadingAnchor.constraint(equalTo: leadingAnchor),
-            column.trailingAnchor.constraint(equalTo: trailingAnchor),
-            column.topAnchor.constraint(equalTo: topAnchor),
+            outer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            outer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            outer.topAnchor.constraint(equalTo: topAnchor),
             // The BOTTOM pin, and its absence is why three plugin rows
             // overlapped by 14pt each in the first audit run.
             //
@@ -327,12 +359,33 @@ final class ErrorView: NSStackView {
             // window B x=306 y=-21]", and the ten points between them were
             // the ten points each row claimed for itself and none of them
             // gave back.
-            column.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+            outer.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
         ])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("ErrorView is created in code") }
+}
+
+/// The retry button's target, holding the closure for one button.
+///
+/// A shared singleton because `NSButton.target` is a weak `NSObject`
+/// reference and a closure cannot be one. The per-button proxy is what
+/// carries the closure, so two retry buttons in two cards do not share state.
+@MainActor
+final class RetryTarget: NSObject {
+    static let shared = RetryTarget()
+    private var bindings: [ObjectIdentifier: () -> Void] = [:]
+
+    @discardableResult
+    func register(_ button: NSButton, onRetry: @escaping () -> Void) -> RetryTarget {
+        bindings[ObjectIdentifier(button)] = onRetry
+        return self
+    }
+
+    @objc func fire(_ sender: NSButton) {
+        bindings[ObjectIdentifier(sender)]?()
+    }
 }
 
 // MARK: - Formatting

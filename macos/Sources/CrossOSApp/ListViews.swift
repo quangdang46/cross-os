@@ -23,7 +23,15 @@ final class MatrixView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let loaded = try? await context.service.matrix() else {
-            showError("Could not read the behaviour matrix.", didNotAnswer("config.getMatrix"))
+            showError(
+                "Could not read the behaviour matrix.",
+                didNotAnswer("config.getMatrix"),
+                // The retry re-fires the same fetch. The closure escapes, so
+                // `self` must be explicit — and it is also correct, because
+                // a dead view's re-fire is a no-op spinner on a view that is
+                // already gone, not a crash.
+                onRetry: { [weak self] in Task { await self?.load(context: context) } }
+            )
             return
         }
         replaceBody(with: MatrixTable(rows: loaded, service: context.service, note: context.note))
@@ -143,7 +151,11 @@ final class OverridesView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let loaded = try? await context.service.overrides() else {
-            showError("Could not read the overrides.", didNotAnswer("config.getOverrides"))
+            showError(
+                "Could not read the overrides.",
+                didNotAnswer("config.getOverrides"),
+                onRetry: { [weak self] in Task { await self?.load(context: context) } }
+            )
             return
         }
         guard !loaded.isEmpty else {
@@ -214,7 +226,11 @@ final class ConflictResolverView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let loaded = try? await context.service.conflicts() else {
-            showError("Could not read the conflicts.", didNotAnswer("core.conflicts"))
+            showError(
+                "Could not read the conflicts.",
+                didNotAnswer("core.conflicts"),
+                onRetry: { [weak self] in Task { await self?.load(context: context) } }
+            )
             return
         }
         guard !loaded.isEmpty else {
@@ -307,7 +323,11 @@ final class ObserveToggleView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let state = try? await context.service.observeState() else {
-            showError("Could not read the recorder.", didNotAnswer("core.observeState"))
+            showError(
+                "Could not read the recorder.",
+                didNotAnswer("core.observeState"),
+                onRetry: { [weak self] in Task { await self?.load(context: context) } }
+            )
             return
         }
         replaceBody(with: ObserveBody(

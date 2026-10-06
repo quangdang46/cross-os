@@ -445,8 +445,8 @@ final class ShortcutListView: CardControl {
         }
 
         let count = NSTextField(labelWithString: shortcuts?.isEmpty == false
-            ? "\((shortcuts?.count ?? 0)) of these are bound to a chord of your own."
-            : "None are bound to a chord of your own — these are the defaults.")
+            ? "You have bound \((shortcuts?.count ?? 0)) of these to a chord of your own."
+            : "None of these are bound to a chord of your own — these are the defaults.")
         count.font = Typeface.caption
         count.textColor = Palette.secondaryInk
         count.lineBreakMode = .byWordWrapping
