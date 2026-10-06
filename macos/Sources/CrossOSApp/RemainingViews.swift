@@ -73,6 +73,11 @@ final class ZoneEditorView: CardControl {
                 onChange: { [weak self] updated in
                     guard let self, index < draft.count else { return }
                     draft[index] = updated
+                },
+                onDelete: { [weak self] in
+                    guard let self, index < draft.count else { return }
+                    draft.remove(at: index)
+                    redraw(context: context)
                 }
             ))
         }
@@ -115,8 +120,12 @@ final class ZoneEditorView: CardControl {
             fields.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
+        // `redrawFields` has no context, so it cannot call `redraw`. It is
+        // only reached right after a save re-fetched the daemon state — the
+        // button hidden keeps the signature honest rather than wiring a
+        // delete that points at the wrong index.
         for zone in draft {
-            fields.addArrangedSubview(ZoneRowView(zone: zone, onChange: { _ in }))
+            fields.addArrangedSubview(ZoneRowView(zone: zone, onChange: { _ in }, onDelete: nil))
         }
     }
 }
@@ -124,7 +133,7 @@ final class ZoneEditorView: CardControl {
 /// One zone: a name and four numbers.
 @MainActor
 private final class ZoneRowView: NSStackView {
-    init(zone: ZoneRow, onChange: @escaping (ZoneRow) -> Void) {
+    init(zone: ZoneRow, onChange: @escaping (ZoneRow) -> Void, onDelete: (() -> Void)? = nil) {
         super.init(frame: .zero)
         orientation = .vertical
         alignment = .width
@@ -153,6 +162,32 @@ private final class ZoneRowView: NSStackView {
         row.alignment = .centerY
         row.spacing = Gap.close
         row.translatesAutoresizingMaskIntoConstraints = false
+
+        // A DELETE button, because a zone editor that can add and edit but
+        // not remove is an editor with a one-way door. The React shell had
+        // one (ZoneEditorControl.tsx:14-16) and the AppKit port dropped it.
+        //
+        // The button is wired to a closure so the caller decides what
+        // "delete" means: remove the row from the draft, or something else.
+        // The view does not know.
+        let deleteButton = NSButton(title: "Delete", target: nil, action: nil)
+        deleteButton.bezelStyle = .rounded
+        deleteButton.controlSize = .small
+        deleteButton.translatesAutoresizingMaskIntoConstraints = false
+        if let onDelete {
+            let proxy = DeleteTarget.shared.register(deleteButton, onDelete: onDelete)
+            deleteButton.target = proxy
+            deleteButton.action = #selector(DeleteTarget.fire(_:))
+        } else {
+            deleteButton.isHidden = true
+        }
+
+        let outer = NSStackView(views: [row, deleteButton])
+        outer.orientation = .horizontal
+        outer.alignment = .centerY
+        outer.spacing = Gap.group
+        outer.translatesAutoresizingMaskIntoConstraints = false
+
         // ARRANGED, not `addSubview`. A plain `addSubview` positions the view
         // but nothing measures it, and this view is a `.leading`-aligned
         // vertical stack whose height comes from its arranged subview's — so
@@ -164,7 +199,7 @@ private final class ZoneRowView: NSStackView {
         // The same defect as the card that measured 0, the row that measured
         // 0, and the plugin row's floating checkbox — and the one shape this
         // app keeps getting wrong.
-        addArrangedSubview(row)
+        addArrangedSubview(outer)
         // Hug, so the row is as tall as the fields it holds.
         setContentHuggingPriority(.required, for: .vertical)
 
@@ -208,6 +243,27 @@ private final class ZoneRowView: NSStackView {
         default: store.h = value ?? .nan
         }
         onSave?(store)
+    }
+}
+
+/// The delete button's target, holding the closure for one button.
+///
+/// A shared singleton because `NSButton.target` is a weak `NSObject`
+/// reference and a closure cannot be one. The per-button proxy is what
+/// carries the closure, so two delete buttons in two rows do not share state.
+@MainActor
+final class DeleteTarget: NSObject {
+    static let shared = DeleteTarget()
+    private var bindings: [ObjectIdentifier: () -> Void] = [:]
+
+    @discardableResult
+    func register(_ button: NSButton, onDelete: @escaping () -> Void) -> DeleteTarget {
+        bindings[ObjectIdentifier(button)] = onDelete
+        return self
+    }
+
+    @objc func fire(_ sender: NSButton) {
+        bindings[ObjectIdentifier(sender)]?()
     }
 }
 
