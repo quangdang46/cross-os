@@ -446,6 +446,21 @@ final class ChecklistView: NSStackView {
             chip.font = Typeface.caption
             chip.textColor = row.ready ? Palette.okInk : Palette.dangerInk
 
+            // A warning icon beside "Not ready", so the eye catches the row
+            // that needs attention without reading the text. Without it the
+            // only signal is red text at caption size — easy to miss in a list
+            // of three rows where two are green.
+            let icon = NSImageView()
+            if !row.ready, let image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Not ready") {
+                icon.image = image
+            }
+            icon.contentTintColor = Palette.dangerInk
+            icon.translatesAutoresizingMaskIntoConstraints = false
+            icon.setContentHuggingPriority(.required, for: .horizontal)
+            icon.setContentHuggingPriority(.required, for: .vertical)
+            icon.setContentCompressionResistancePriority(.required, for: .horizontal)
+            icon.isHidden = row.ready
+
             let label = NSTextField(labelWithString: row.label)
             label.font = Typeface.body
             label.textColor = Palette.primaryInk
@@ -453,11 +468,18 @@ final class ChecklistView: NSStackView {
             // The chip is a fixed-width column so every label in the group
             // starts at the same x. Without it "Ready" and "Not ready" put
             // their labels at two different positions in one list.
-            let header = NSStackView(views: [chip, label])
+            let header = NSStackView(views: [chip, icon, label])
             header.orientation = .horizontal
-            header.alignment = .firstBaseline
+            // `.centerY`, not `.firstBaseline`: the icon is an NSImageView with
+            // no baseline, and `.firstBaseline` aligns the image view's bottom
+            // with the text's baseline — which puts the icon's centre above the
+            // text's centre, so the triangle floats above the words it warns
+            // about. `.centerY` centres both on the same line.
+            header.alignment = .centerY
             header.spacing = Gap.row
             chip.widthAnchor.constraint(equalToConstant: 70).isActive = true
+            icon.widthAnchor.constraint(equalToConstant: 14).isActive = true
+            icon.heightAnchor.constraint(equalToConstant: 14).isActive = true
 
             let column = NSStackView(views: [header])
             column.orientation = .vertical
