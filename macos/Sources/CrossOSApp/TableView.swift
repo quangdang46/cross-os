@@ -439,10 +439,6 @@ extension TableView: NSTableViewDelegate {
         field.lineBreakMode = .byTruncatingTail
         return field
     }
-
-    /// A row that is off is shown as off, never as an error. Disabling a rule
-    /// is what the control is for.
-    func tableView(_ tableView: NSTableView, rowIsSelected row: Int) -> Bool { false }
 }
 
 /// The checkbox target, holding the closure for one cell.
