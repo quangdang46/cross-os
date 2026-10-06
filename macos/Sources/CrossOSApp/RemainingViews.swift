@@ -35,7 +35,11 @@ final class ZoneEditorView: CardControl {
         do {
             draft = try await context.service.zones()
         } catch {
-            showError("Could not read the zones.", "\(error)")
+            showError(
+                "Could not read the zones.",
+                "\(error)",
+                onRetry: { [weak self] in Task { await self?.load(context: context) } }
+            )
             return
         }
         // An empty editor is a state, and the audit is right to call a stack
@@ -334,7 +338,11 @@ final class KeymapEditorView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let rows = try? await context.service.matrix() else {
-            showError("Could not read the keymap.", didNotAnswer("config.getMatrix"))
+            showError(
+                "Could not read the keymap.",
+                didNotAnswer("config.getMatrix"),
+                onRetry: { [weak self] in Task { await self?.load(context: context) } }
+            )
             return
         }
         let column = NSStackView()
@@ -457,7 +465,11 @@ final class SchemaFormView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let schemas = try? await context.service.pluginSchemas() else {
-            showError("Could not read the plugin schemas.", didNotAnswer("core.pluginSchemas"))
+            showError(
+                "Could not read the plugin schemas.",
+                didNotAnswer("core.pluginSchemas"),
+                onRetry: { [weak self] in Task { await self?.load(context: context) } }
+            )
             return
         }
         guard let schema = schemas.first else {
@@ -539,7 +551,11 @@ final class SwitcherPageView: CardControl {
             // The daemon's own words. A page that says "could not load" where
             // the answer is "accessibility permission denied" sends the person
             // looking for a bug that is a permission they have not granted.
-            showError("Could not list windows.", "\(error)")
+            showError(
+                "Could not list windows.",
+                "\(error)",
+                onRetry: { [weak self] in Task { await self?.load(context: context) } }
+            )
         }
     }
 }
