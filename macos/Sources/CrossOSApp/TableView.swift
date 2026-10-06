@@ -387,6 +387,18 @@ extension TableView: NSTableViewDelegate {
         ])
     }
 
+    /// A row is SELECTED when the table says so, and the selection is the
+    /// system's own — the focus ring, the highlight, the keyboard navigation.
+    ///
+    /// It was hardcoded `false`, which meant a table could not be selected
+    /// at all: clicking a row did nothing, arrow keys did nothing, and the
+    /// only way to interact with a row was the checkbox in its last column.
+    /// A table that cannot be selected is a list, and a list is what the
+    /// React shell built — the whole reason this is a table.
+    func tableView(_ tableView: NSTableView, rowIsSelected row: Int) -> Bool {
+        tableView.selectedRow == row
+    }
+
     private static let separatorName = "crossos.row.separator"
 
 
