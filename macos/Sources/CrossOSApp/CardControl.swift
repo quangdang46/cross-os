@@ -224,8 +224,8 @@ class CardControl: NSStackView {
     /// The detail names the RPC because a person reading "could not load" with
     /// no method in it has nothing to search for, and the person who can fix
     /// it — whoever runs the daemon — needs the method name, not a mood.
-    func showError(_ headline: String, _ detail: String) {
-        replaceBody(with: ErrorView(headline: headline, detail: detail))
+    func showError(_ headline: String, _ detail: String, onRetry: (() -> Void)? = nil) {
+        replaceBody(with: ErrorView(headline: headline, detail: detail, onRetry: onRetry))
     }
 }
 

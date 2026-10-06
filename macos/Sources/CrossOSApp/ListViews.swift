@@ -23,7 +23,15 @@ final class MatrixView: CardControl {
 
     private func load(context: ControlContext) async {
         guard let loaded = try? await context.service.matrix() else {
-            showError("Could not read the behaviour matrix.", didNotAnswer("config.getMatrix"))
+            showError(
+                "Could not read the behaviour matrix.",
+                didNotAnswer("config.getMatrix"),
+                // The retry re-fires the same fetch. The closure escapes, so
+                // `self` must be explicit — and it is also correct, because
+                // a dead view's re-fire is a no-op spinner on a view that is
+                // already gone, not a crash.
+                onRetry: { [weak self] in Task { await self?.load(context: context) } }
+            )
             return
         }
         replaceBody(with: MatrixTable(rows: loaded, service: context.service, note: context.note))
