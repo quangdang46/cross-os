@@ -453,6 +453,21 @@ final class EmptyStateView: NSStackView {
         distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
 
+        // An icon above the headline, so an empty state reads as a state
+        // rather than as a sentence. Without it the only signal is text at
+        // caption size — easy to miss in a page of controls. The icon is
+        // tertiary ink: it is decoration, not a warning, and dressing it in
+        // danger or warn would make every empty state look like a problem.
+        let icon = NSImageView()
+        if let image = NSImage(systemSymbolName: "tray", accessibilityDescription: "Empty") {
+            icon.image = image
+        }
+        icon.contentTintColor = Palette.tertiaryInk
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.setContentHuggingPriority(.required, for: .horizontal)
+        icon.setContentHuggingPriority(.required, for: .vertical)
+        icon.setContentCompressionResistancePriority(.required, for: .horizontal)
+
         let headlineField = NSTextField(labelWithString: headline)
         headlineField.font = Typeface.bodyStrong
         headlineField.textColor = Palette.primaryInk
@@ -488,8 +503,10 @@ final class EmptyStateView: NSStackView {
         // hugging priority to resist — both spacers stayed at 0pt inside a
         // 132pt state and the text stayed at its top edge.
         distribution = .gravityAreas
+        addView(icon, in: .center)
         addView(headlineField, in: .center)
         addView(detailField, in: .center)
+        setCustomSpacing(Gap.group, after: icon)
     }
 
     override var isFlipped: Bool { true }
