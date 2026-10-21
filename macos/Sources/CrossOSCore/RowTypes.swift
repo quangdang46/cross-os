@@ -230,6 +230,19 @@ public struct ZoneRow: Codable, Sendable, Equatable {
     }
 }
 
+/// The id the daemon knows a file type by.
+///
+/// **`<baseName>.<ext>`,** and a row with no base name is just `.<ext>`.
+/// The daemon stores rows under that name and refuses a row it cannot find
+/// ("no file type %q"), so a row sent under a different spelling is a row
+/// the daemon cannot find — and the shell's own `ext|baseName` identity is
+/// a DIFFERENT name for the same row, used for the toggle.
+extension FileTypeRow {
+    public var daemonID: String {
+        baseName.isEmpty ? ".\(ext)" : "\(baseName).\(ext)"
+    }
+}
+
 // MARK: - user rules
 
 /// One user rule (`config.getUserRules`).

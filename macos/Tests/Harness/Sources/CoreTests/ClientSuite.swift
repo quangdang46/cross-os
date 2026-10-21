@@ -269,6 +269,11 @@ public actor SpiedCoreClient: CoreClient {
         return tracesAnswer
     }
 
+    public func reorderFileTypes(_ rows: [FileTypeRow]) async throws -> [FileTypeRow] {
+        record("core.reorderFileTypes")
+        return fileTypesAnswer
+    }
+
     public func fileTypes() async throws -> [FileTypeRow] {
         record("core.fileTypes")
         return fileTypesAnswer
@@ -502,6 +507,34 @@ public actor SpiedCoreClient: CoreClient {
         )
         expect(!running.isIdle, "state active is not")
         expectEqual(running.remainingMS, 30_000, "remaining_ms decodes")
+
+    suite("The names the daemon knows a row by")
+
+    do {
+        // **A file type's name is `<baseName>.<ext>`,** and a row with no
+        // base name is just `.<ext>`.
+        //
+        // The daemon stores the catalog under that name and refuses a row it
+        // cannot find — "no file type %q" — so a row sent under a different
+        // spelling is a row the daemon cannot find. The shell has ANOTHER
+        // name for the same row, `ext|baseName`, and it is the one the
+        // toggle uses; the two must not be confused.
+        //
+        // Decoded from the daemon's own JSON, so the case also pins the
+        // wire shape the row arrives in.
+        let namedJSON = """
+        {"ext":"txt","baseName":"New Text File","displayName":"New Text File",
+         "menuTitle":"New Text File","template":"","enabled":true,"builtIn":true}
+        """
+        let bareJSON = """
+        {"ext":"md","baseName":"","displayName":"New Markdown",
+         "menuTitle":"New Markdown","template":"","enabled":false,"builtIn":true}
+        """
+        let named = try JSONDecoder().decode(FileTypeRow.self, from: Data(namedJSON.utf8))
+        let bare = try JSONDecoder().decode(FileTypeRow.self, from: Data(bareJSON.utf8))
+        expectEqual(named.daemonID, "New Text File.txt", "a named row")
+        expectEqual(bare.daemonID, ".md", "a row with no base name")
+    }
 
     suite("The nav, as the daemon serves it")
 

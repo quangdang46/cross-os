@@ -38,6 +38,20 @@ protocol TableContent: AnyObject {
     /// a failed write would teach people to ignore the row that actually
     /// matters (MatrixControl.tsx:12-16).
     func isDimmed(row: Int) -> Bool
+    /// Reorder the table: the row has been dragged to a new place.
+    ///
+    /// nil for a table whose order is the daemon's — the behaviour matrix is
+    /// a list of chords and dragging one would mean nothing. The Explorer's
+    /// file-type catalog is the other kind: the order IS the order Finder's
+    /// New menu offers, and the daemon has answered `core.reorderFileTypes`
+    /// since the catalog was written.
+    func reorder(row: Int, to destination: Int) -> (@MainActor () async -> Void)?
+    /// Whether this table's rows can be dragged into a new order.
+    ///
+    /// A separate question from `reorder(row:to:)` because the drag has to
+    /// be DECIDED before the row is dropped: asking `reorder` whether a
+    /// table can be reordered would mean asking for the write to find out.
+    var canReorder: Bool { get }
     /// What a double-click on the row DOES, for the tables whose rows are
     /// actions.
     ///
@@ -53,6 +67,8 @@ extension TableContent {
     func toggle(row: Int, column: Int) -> (isOn: Bool, onChange: @MainActor (Bool) -> Void)? { nil }
     func isDimmed(row: Int) -> Bool { false }
     func activate(row: Int) -> (@MainActor () async -> Void)? { nil }
+    func reorder(row: Int, to destination: Int) -> (@MainActor () async -> Void)? { nil }
+    var canReorder: Bool { false }
     /// Whether a row is the daemon's CURRENT SELECTION. Distinct from
     /// `isDimmed`, which is "off": a row can be neither, and confusing the two
     /// would draw the window you are on as an unavailable one.
@@ -523,6 +539,55 @@ final class TableView: NSStackView {
 
 extension TableView: NSTableViewDataSource {
     func numberOfRows(in tableView: NSTableView) -> Int { content.rowCount }
+
+    // MARK: Drag to reorder
+
+    /// The row can be dragged, if the table's rows can be reordered.
+    ///
+    /// nil for every table whose order is the daemon's, and nil is what
+    /// stops a drag: AppKit asks for a writer and gets none, so the row
+    /// never leaves the table.
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+        guard content.canReorder else { return nil }
+        let item = NSPasteboardItem()
+        item.setString(String(row), forType: Self.rowType)
+        return item
+    }
+
+    /// A drop is allowed, and it is a MOVE within this table.
+    ///
+    /// `.move` and not `.copy`: the row is going to a new place, and a copy
+    /// would leave two of everything.
+    func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo) -> NSDragOperation {
+        guard content.canReorder else { return [] }
+        return .move
+    }
+
+    /// The row was dropped somewhere else in the table.
+    ///
+    /// The destination is where it LANDED, and the row that was there moves
+    /// down by one — the list closes the gap rather than overwriting the
+    /// row it landed on.
+    func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo) -> Bool {
+        guard content.canReorder else { return false }
+        // Where it landed, in the TABLE's own rows: the drop's location is
+        // in the window's coordinates, and the row under it is the row the
+        // list is being asked to put it at.
+        let location = tableView.convert(info.draggingLocation, from: nil)
+        let destination = tableView.row(at: location)
+        guard destination >= 0, destination < content.rowCount else { return false }
+        // Where it came from: the row index travelled in the pasteboard,
+        // which is the only thing that survives the trip from the row the
+        // drag started on to the row it was dropped on.
+        guard let text = info.draggingPasteboard.string(forType: Self.rowType),
+              let row = Int(text), row >= 0, row != destination else { return false }
+        guard let action = content.reorder(row: row, to: destination) else { return false }
+        Task { await action() }
+        return true
+    }
+
+    /// The pasteboard type the dragged row's index travels in.
+    static let rowType = NSPasteboard.PasteboardType("public.crossos.row")
 }
 
 extension TableView: NSTableViewDelegate {

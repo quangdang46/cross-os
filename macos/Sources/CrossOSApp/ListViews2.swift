@@ -225,7 +225,9 @@ private final class FileTypeTable: NSStackView, TableContent {
     let columns: [(String, CGFloat)] = [
         ("Name", 180), ("Extension", 110), ("Menu title", 180), ("On", 44)
     ]
-    private let entries: [FileTypeRow]
+    /// The rows, in the order the daemon holds them. Not a `let`: a drag
+    /// replaces the list with the order the daemon answered.
+    private var entries: [FileTypeRow]
     private let service: any CoreClient
     private let note: @Sendable (String) -> Void
     private var stored: [String: Bool] = [:]
@@ -293,6 +295,36 @@ private final class FileTypeTable: NSStackView, TableContent {
     }
 
     func isDimmed(row: Int) -> Bool { !entries[row].enabled }
+
+    /// **The catalog can be dragged into a new order.**
+    ///
+    /// The order is the order Finder's New menu offers, and the daemon has
+    /// answered `core.reorderFileTypes` since the catalog was written — the
+    /// write takes the WHOLE list, in the new order, and refuses a list that
+    /// does not name every row exactly once, so a drag that lost a row
+    /// cannot half-apply.
+    var canReorder: Bool { true }
+
+    func reorder(row: Int, to destination: Int) -> (@MainActor () async -> Void)? {
+        guard row >= 0, row < entries.count, destination >= 0, destination < entries.count else { return nil }
+        var order = entries
+        let moved = order.remove(at: row)
+        order.insert(moved, at: destination)
+        return { [weak self] in
+            guard let self else { return }
+            do {
+                let rows = try await service.reorderFileTypes(order)
+                entries = rows
+                stored = [:]
+                table?.reload()
+                note("The New menu now offers \(rows.count) file types in the new order.")
+            } catch {
+                note("Could not reorder the file types: \(error)")
+            }
+        }
+    }
+
+
 
     private func write(entry: FileTypeRow, next: Bool) async {
         do {

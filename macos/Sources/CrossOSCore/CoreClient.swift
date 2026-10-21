@@ -136,6 +136,16 @@ public protocol CoreClient: Sendable {
     /// The file-type catalog (`core.fileTypes`).
     func fileTypes() async throws -> [FileTypeRow]
 
+    /// Put the file-type catalog in a new order (`core.reorderFileTypes`).
+    ///
+    /// The write takes the WHOLE list, in the new order, and names every
+    /// row exactly once: the daemon refuses a list that does not, so a drag
+    /// that lost a row cannot half-apply.
+    ///
+    /// The rows, not the ids: the daemon's name for a row is its own
+    /// (`<baseName>.<ext>`), and the shell should not have to spell it twice.
+    func reorderFileTypes(_ rows: [FileTypeRow]) async throws -> [FileTypeRow]
+
     /// The Finder menu items (`core:finderMenu`).
     ///
     /// Untyped on the Go side — `[]map[string]any` — so it comes back as
@@ -682,6 +692,13 @@ public actor LiveCoreClient: CoreClient {
             "plugin.setEnabled",
             .object(["id": .string(id), "enabled": .bool(enabled)])
         )
+    }
+
+    public func reorderFileTypes(_ rows: [FileTypeRow]) async throws -> [FileTypeRow] {
+        try decode([FileTypeRow].self,
+                   from: await call("core.reorderFileTypes",
+                                    .object(["ids": .array(rows.map { .string($0.daemonID) })])),
+                   method: "core.reorderFileTypes")
     }
 
     public func setFileType(entry: FileTypeRow, enabled: Bool) async throws -> [FileTypeRow] {
