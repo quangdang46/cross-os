@@ -22,6 +22,14 @@ public protocol CoreClient: Sendable {
     /// the order of this array IS the order to draw.
     func windows() async throws -> [WindowRow]
 
+    /// Bring a window to the front (`core.switcherFocus`).
+    ///
+    /// The daemon has answered this since the switcher was written — it is
+    /// the same action the commit half of the Alt+Tab gesture performs,
+    /// exposed so a shell can act on a click. The Switcher page listed the
+    /// windows and could not switch to any of them.
+    func focusWindow(id: String) async throws -> JSONValue
+
     /// The Home pane's checklist (`core.readiness`).
     func readiness() async throws -> [ReadinessRow]
 
@@ -563,6 +571,12 @@ public actor LiveCoreClient: CoreClient {
         // rejected as an error rather than decoded to a zero struct
         // (ipc_client.go:813-819), so a triggered=false is a real object.
         return try decode(SwitcherTrigger.self, from: raw, method: "core.switcherWait")
+    }
+
+    public func focusWindow(id: String) async throws -> JSONValue {
+        // `window_id`, and not `id`: the daemon reads `{window_id}` and
+        // answers "need {window_id}" for anything else.
+        try await call("core.switcherFocus", .object(["window_id": .string(id)]))
     }
 
     public func windows() async throws -> [WindowRow] {

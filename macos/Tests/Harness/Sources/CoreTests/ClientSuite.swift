@@ -89,6 +89,11 @@ public actor SpiedCoreClient: CoreClient {
         return triggerAnswer
     }
 
+    public func focusWindow(id: String) async throws -> JSONValue {
+        record("core.switcherFocus")
+        return .object(["window_id": .string(id)])
+    }
+
     public func windows() async throws -> [WindowRow] {
         record("core.windows")
         return windowsAnswer

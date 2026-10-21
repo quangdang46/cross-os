@@ -878,7 +878,9 @@ final class SwitcherPageView: CardControl {
                 ))
                 return
             }
-            let table = WindowTable(windows: windows)
+            let table = WindowTable(windows: windows,
+                                    service: context.service,
+                                    note: context.note)
             replaceBody(with: table)
         } catch {
             // The daemon's own words. A page that says "could not load" where
@@ -897,9 +899,13 @@ final class SwitcherPageView: CardControl {
 private final class WindowTable: NSView, TableContent {
     let columns: [(String, CGFloat)] = [("Window", 260), ("App", 220), ("Index", 60)]
     private let windows: [WindowRow]
+    private let service: any CoreClient
+    private let note: @Sendable (String) -> Void
 
-    init(windows: [WindowRow]) {
+    init(windows: [WindowRow], service: any CoreClient, note: @escaping @Sendable (String) -> Void) {
         self.windows = windows
+        self.service = service
+        self.note = note
         super.init(frame: .zero)
         let table = TableView(content: self)
         // ARRANGED, not `addSubview` with edge constraints. Pinning a view to
@@ -944,4 +950,24 @@ private final class WindowTable: NSView, TableContent {
     /// shell does not see — so the page draws `selected` where the row says so
     /// and resolves nothing itself.
     func isHighlighted(row: Int) -> Bool { windows[row].selected }
+
+    /// **A double-click on a window switches to it.**
+    ///
+    /// The daemon has answered `core.switcherFocus` since the switcher was
+    /// written — the same action the commit half of the Alt+Tab gesture
+    /// performs, exposed so a shell can act on a click — and this page
+    /// listed the windows without a way to act on any of them. A page called
+    /// "Switcher" that cannot switch is a page of a screenshot of one.
+    func activate(row: Int) -> (@MainActor () async -> Void)? {
+        let window = windows[row]
+        guard !window.windowID.isEmpty else { return nil }
+        return { [service, note] in
+            do {
+                _ = try await service.focusWindow(id: window.windowID)
+                note("Switched to \(window.title.isEmpty ? window.appID : window.title).")
+            } catch {
+                note("Could not switch to that window: \(error)")
+            }
+        }
+    }
 }

@@ -38,11 +38,21 @@ protocol TableContent: AnyObject {
     /// a failed write would teach people to ignore the row that actually
     /// matters (MatrixControl.tsx:12-16).
     func isDimmed(row: Int) -> Bool
+    /// What a double-click on the row DOES, for the tables whose rows are
+    /// actions.
+    ///
+    /// nil for a table whose rows are only rows — the behaviour matrix is a
+    /// list of chords and clicking one must not do anything. The Switcher
+    /// page's rows are the windows the daemon can switch to, and the daemon
+    /// has answered `core.switcherFocus` since the switcher was written; the
+    /// page could list the windows and not act on any of them.
+    func activate(row: Int) -> (@MainActor () async -> Void)?
 }
 
 extension TableContent {
     func toggle(row: Int, column: Int) -> (isOn: Bool, onChange: @MainActor (Bool) -> Void)? { nil }
     func isDimmed(row: Int) -> Bool { false }
+    func activate(row: Int) -> (@MainActor () async -> Void)? { nil }
     /// Whether a row is the daemon's CURRENT SELECTION. Distinct from
     /// `isDimmed`, which is "off": a row can be neither, and confusing the two
     /// would draw the window you are on as an unavailable one.
@@ -107,6 +117,15 @@ final class TableView: NSStackView {
         // `shareSlack(over:)` applies it once the real width is known.
         table.dataSource = self
         table.delegate = self
+        // A double-click on a row activates it, for the tables whose rows
+        // ARE actions — the Switcher page's windows, which the daemon can
+        // bring to the front.
+        //
+        // `NSTableView` sends its `action` on a double-click, which is what
+        // macOS does with a row that opens something, and the double-click is
+        // the gesture a person already has for "act on this row".
+        table.target = self
+        table.doubleAction = #selector(activateRow(_:))
         // **No stripes, and taller rows.**
         //
         // Alternating row backgrounds are a web table. macOS lists do not
@@ -539,6 +558,22 @@ extension TableView: NSTableViewDelegate {
             line.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             line.heightAnchor.constraint(equalToConstant: 1),
         ])
+    }
+
+    /// Act on the row that was double-clicked.
+    ///
+    /// The table asks its content what the row does, and the content that
+    /// has nothing to do about it says nothing — so a double-click on the
+    /// behaviour matrix is a double-click and nothing more.
+    @objc private func activateRow(_ sender: NSTableView) {
+        // The SELECTED row, with the clicked one as the fallback: a
+        // double-click selects the row it lands on, and the selection is the
+        // one a test can set — `clickedRow` is read-only and only a real
+        // click fills it in.
+        let row = sender.selectedRow >= 0 ? sender.selectedRow : sender.clickedRow
+        guard row >= 0 else { return }
+        guard let action = content.activate(row: row) else { return }
+        Task { await action() }
     }
 
     /// A row is SELECTED when the table says so, and the selection is the

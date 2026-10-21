@@ -636,10 +636,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             failures.append("core.commands is not being served")
         }
 
+        // 8. The SWITCHER page, which listed the windows and could not act
+        //    on any of them: the daemon has answered `core.switcherFocus`
+        //    since the switcher was written, and the page had no way to
+        //    reach it.
+        //
+        //    It is SKIPPED when the daemon sees no windows, which is the
+        //    machine's state and not the app's: with the screen locked the
+        //    AX plane withholds every window from every client, Apple's
+        //    own System Events included.
+        let windowRows = (try? await client.windows()) ?? []
+        if windowRows.isEmpty {
+            print("click-test: switcher focus   skipped — the daemon sees no windows")
+        } else if let switcher = pages.first(where: { $0.id == "core.switcher" }) {
+            shell.show(switcher)
+            await ShotRenderer.settle(1.5)
+            sizeTables(in: shell.window?.contentView)
+            await ShotRenderer.settle(0.5)
+            let tables = NSView.allViews(shell.window?.contentView)
+                .compactMap { $0 as? NSTableView }
+            if let table = tables.first(where: { $0.numberOfRows > 0 }),
+               let target = table.target, let action = table.doubleAction {
+                table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+                let before = windowRows.first?.windowID ?? ""
+                _ = target.perform(action, with: table)
+                await ShotRenderer.settle(1.5)
+                print("click-test: switcher focus   activated row 0 (window \(before))")
+            } else {
+                failures.append("no switchable table found on core.switcher")
+            }
+        } else {
+            failures.append("core.switcher is not being served")
+        }
+
         if failures.isEmpty {
-            print("CLICK TEST PASS — 8 write paths reach the daemon: "
+            print("CLICK TEST PASS — 9 write paths reach the daemon: "
                   + "panic stop, re-enable, matrix rule, plugin, observe, profile apply, "
-                  + "the rule builder and its delete, and the Finder-menu switch")
+                  + "the rule builder and its delete, the Finder-menu switch, and the switcher's focus")
             exit(0)
         }
         for f in failures { print("click-test FAIL: \(f)") }
