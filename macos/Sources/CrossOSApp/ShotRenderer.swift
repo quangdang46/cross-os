@@ -514,28 +514,49 @@ extension ShotRenderer {
         let origin = view.bounds.origin
         var groups: [[String: Any]] = []
 
-        func walk(_ node: NSView, _ x: CGFloat, _ y: CGFloat, _ height: CGFloat) {
+        // **The conversion is AppKit's, not a hand-rolled chain.**
+        //
+        // A child view's frame is in its PARENT's coordinates, and whether
+        // `frame.maxY` is the top or the bottom of that frame is the
+        // PARENT's flippedness — not the child's. Handing that down a tree
+        // by hand got it wrong twice: first by reading the child's own
+        // flippedness, and then by carrying the wrong height down with it.
+        //
+        // Measured: the home page's first card was reported 244pt below
+        // where it is drawn, and then 20pt below it — and the rhythm check,
+        // which compares the sidecar's rects against the ink, was told the
+        // bands were in places they were not. `convert(_:to:)` asks AppKit
+        // for the answer and AppKit knows it: one call per view, and no
+        // rule to get wrong.
+        //
+        // The PNG is the target's own bounds, top-down: the target is the
+        // window's content view and it is NOT flipped, so a rect's distance
+        // from the top of it is `height - maxY`.
+        func walk(_ node: NSView) {
             for sub in node.subviews {
-                let f = sub.frame
-                // Convert to top-down within `view`, which is the frame the PNG
-                // was taken in.
-                let top: CGFloat = sub.isFlipped ? y + f.minY : y + (height - f.maxY)
-                let hereX = x + f.minX
+                let rect = sub.convert(sub.bounds, to: view)
+                let top = view.isFlipped ? rect.minY : view.bounds.height - rect.maxY
                 if sub is CardControl || String(describing: type(of: sub)).hasPrefix("Card") {
                     groups.append([
                         "y0": Int((top - origin.y) * CGFloat(scale)),
-                        "y1": Int((top + f.height - origin.y) * CGFloat(scale)),
-                        "w": Int(f.width * CGFloat(scale)),
+                        "y1": Int((top + rect.height - origin.y) * CGFloat(scale)),
+                        "x": Int((rect.minX - origin.x) * CGFloat(scale)),
+                        "w": Int(rect.width * CGFloat(scale)),
                     ])
                 }
-                walk(sub, hereX, top, f.height)
+                walk(sub)
             }
         }
-        walk(view, view.bounds.minX, view.bounds.minY, view.bounds.height)
+        walk(view)
 
         let payload: [String: Any] = [
             "page": page,
             "scale": scale,
+            // The x of each group, so the rhythm check can measure the PAGE
+            // and not the rail beside it. The nav rail's labels run the
+            // whole height of the window, so every ink band in the picture
+            // merged into one and the check skipped every page — a check
+            // that measures the rail is a check that measures nothing.
             "groups": groups.sorted { ($0["y0"] as! Int) < ($1["y0"] as! Int) },
         ]
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted])

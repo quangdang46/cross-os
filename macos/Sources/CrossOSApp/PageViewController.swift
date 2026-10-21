@@ -327,6 +327,9 @@ public final class PageViewController: NSViewController {
                 )
             )
         } else {
+            // The description and the first section are 40pt apart, and that
+            // is the same gap two sections get.
+            stack.setCustomSpacing(Gap.group + Gap.group, after: descriptionField)
             for (index, control) in controls.enumerated() {
                 let view = Renderers.shared.makeView(for: control, context: context)
                 stack.addArrangedSubview(view)
@@ -338,8 +341,33 @@ public final class PageViewController: NSViewController {
                 // than the rows inside it have, and the eye groups by that gap
                 // rather than by a border — which is also why removing the
                 // borders was not enough on its own.
-                if index > 0 {
-                    stack.setCustomSpacing(Gap.group + Gap.group, after: stack.arrangedSubviews[index])
+                //
+                // **Two BUTTONS in a row are ACTIONS, not sections.** The
+                // Safety page's PANIC STOP, Re-enable and Reset Everything
+                // are one group of three actions, and 40pt between them read
+                // as three unrelated items: the gap between the actions was
+                // LARGER than the gap between the sections around them, so
+                // the page had no hierarchy at all — the rhythm check said
+                // 2.32x, under its 2.5x floor, because the space between the
+                // groups was smaller than the space inside one.
+                //
+                // The actions now sit 20pt apart — still twice the 2pt
+                // between a button and the sentence that explains it — and
+                // the sections around them keep their 40pt.
+                if index < controls.count - 1 {
+                    let next = controls[index + 1]
+                    let bothButtons = control.kind == "button" && next.kind == "button"
+                    // `after: view` — the view just added — and NOT an index
+                    // into `arrangedSubviews`. The stack holds the title, the
+                    // description and a hidden page-id label before the
+                    // controls, so an index into the array is off by however
+                    // many of those there are, and the spacing landed on the
+                    // wrong view: the sections stayed 40pt apart while the
+                    // code said 56.
+                    stack.setCustomSpacing(
+                        bothButtons ? Gap.group : Gap.group + Gap.group,
+                        after: view
+                    )
                 }
                 // Fill the pane, and hug the content vertically. Two
                 // constraints, one axis each: `.leading` alignment already
@@ -521,7 +549,16 @@ final class EmptyStateView: NSStackView {
         addView(icon, in: .center)
         addView(headlineField, in: .center)
         addView(detailField, in: .center)
-        setCustomSpacing(Gap.group, after: icon)
+        // **The icon sits CLOSE to the sentence it introduces.**
+        //
+        // It was `Gap.group` (20pt), and an icon 20pt above its own headline
+        // reads as a section heading rather than as the mark on a label: the
+        // rhythm check measured the gap between the icon and the words under
+        // it at 27pt — as wide as the space between two SECTIONS on the
+        // same page, which is how a page with a hierarchy loses it. The
+        // other gaps inside the state are 11pt, and the icon's is now one
+        // of them.
+        setCustomSpacing(Gap.row, after: icon)
         // **THE STATE SITS AT THE GROUP'S LEADING EDGE.**
         //
         // `.gravityAreas` splits the stack into thirds — leading, centre,

@@ -195,7 +195,14 @@ class CardControl: NSStackView {
         // later grows content stops centring.
         if view is EmptyStateView {
             view.setContentHuggingPriority(.defaultLow, for: .vertical)
-            view.heightAnchor.constraint(greaterThanOrEqualToConstant: 132).isActive = true
+            // **104pt, not 132pt.** The state is centred in whatever height
+            // it gets, so a taller floor spreads its own parts further
+            // apart: at 132pt the gap between the icon and the sentence
+            // under it measured 23pt — as wide as the space between two
+            // SECTIONS on the same page, which is how a page with a
+            // hierarchy loses it. The rhythm check said so: "core.safety —
+            // within 14pt, between 32pt, ratio 2.32x".
+            view.heightAnchor.constraint(greaterThanOrEqualToConstant: 104).isActive = true
         }
         // Now they share an ancestor, and the constraint holds the body to
         // the card's width — which is what makes a card fill its pane rather

@@ -55,9 +55,9 @@ MIN_RATIO = 2.5
 SLACK = 8
 
 
-def ink_bands(path):
+def ink_bands(path, x_range=None):
     """Contiguous runs of ink, merged across intra-block leading."""
-    rows, _w, _h, _bg = ink_map(path)
+    rows, _w, _h, _bg = ink_map(path, x_range=x_range)
     found = bands([any(r) for r in rows])
     merged = []
     for a, b in found:
@@ -68,8 +68,8 @@ def ink_bands(path):
     return merged
 
 
-def groups_for(png_path):
-    """Outer group rects from the sidecar, in pixels.
+def group_rects(png_path):
+    """Outer group rects from the sidecar, in pixels: (x, y0, y1, w).
 
     A group is reported twice — once for `CardControl`, once for the `Card` it
     wraps — and the two share a top edge. Keeping the taller one per top edge
@@ -84,9 +84,71 @@ def groups_for(png_path):
     best = {}
     for g in data.get("groups", []):
         y0, y1 = g["y0"], g["y1"]
-        if y0 not in best or y1 > best[y0]:
-            best[y0] = y1
-    return sorted((y0, y1) for y0, y1 in best.items())
+        x = g.get("x", 0)
+        w = g.get("w", 0)
+        if y0 not in best or y1 > best[y0][2]:
+            best[y0] = (x, y0, y1, w)
+    rects = sorted(best.values())
+    # **A group INSIDE another group is not a second group.**
+    #
+    # The tree reports a group twice: the card and the control that wraps
+    # it. When the control has a heading above the card the two do NOT
+    # share a top edge — the heading puts the card lower — so the dedup
+    # that keeps one per top edge kept both, and the classifier saw two
+    # overlapping groups and gave up: "0 within, 0 between — nothing to
+    # compare" on `core.commands` and `core.rules`, the two pages with the
+    # most groups on them.
+    #
+    # So CONTAINMENT decides, not the top edge: the outer rect is the
+    # boundary that matters, and an ink gap cannot be inside a group and
+    # also between two of them.
+    outer = []
+    for rect in rects:
+        inside = any(
+            other[1] <= rect[1] and other[2] >= rect[2]
+            and other[0] <= rect[0] and other[0] + other[3] >= rect[0] + rect[3]
+            for other in rects if other is not rect
+        )
+        if not inside:
+            outer.append(rect)
+    return outer
+
+
+def groups_for(png_path):
+    """The group rects as (y0, y1) pairs — what the classifier works on."""
+    rects = group_rects(png_path)
+    if rects is None:
+        return None
+    return sorted((y0, y1) for _x, y0, y1, _w in rects)
+
+
+def page_columns(png_path):
+    """The columns the PAGE occupies, in pixels.
+
+    **The rail is not the page.** The nav rail's labels run the whole height
+    of the window, so a scan of the whole picture finds ink on every row and
+    every band merges into one — the check then reported "0 within, 0
+    between — nothing to compare" and skipped every page of the fifteen. A
+    check that measures the rail measures nothing, and the thing it was
+    written to catch (spacing that carries the grouping) was therefore never
+    checked at all.
+
+    So the scan is limited to the columns the page's own groups occupy, plus
+    a margin for the title and the description, which sit beside the cards
+    rather than inside them.
+    """
+    rects = group_rects(png_path)
+    if not rects:
+        return None
+    # Eight pixels, not sixty-four: the rail's own edge is a vertical line
+    # of grey against the page's white, and a margin wide enough to reach it
+    # puts ink on every row of the picture again — which is the thing this
+    # scan was narrowed to avoid. The cards start at the content pane's
+    # inset, so the page's title and description are in range already.
+    margin = 8
+    left = min(r[0] for r in rects) - margin
+    right = max(r[0] + r[3] for r in rects) + margin
+    return (max(0, left), right)
 
 
 def classify(merged, groups):
@@ -161,12 +223,18 @@ def main(paths):
             missing_sidecar.append(png)
             continue
 
-        merged = ink_bands(png)
+        merged = ink_bands(png, x_range=page_columns(png))
         within, between, _outside = classify(merged, layout)
 
         if not within or not between:
-            print(f"  skip {os.path.basename(png)}: {len(within)} within, "
-                  f"{len(between)} between — nothing to compare")
+            # WHY it skipped, because "0 within, 0 between" reads like a
+            # measurement of nothing where the truth is that the page has
+            # nothing to measure: one group is a page with nothing to
+            # separate, and a ratio there would compare a gap to itself.
+            why = ("one group — nothing to separate"
+                   if len(layout) < 2 else
+                   f"{len(within)} within, {len(between)} between — nothing to compare")
+            print(f"  skip {os.path.basename(png)}: {why}")
             continue
 
         w = statistics.mean(within) / 2

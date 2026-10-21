@@ -36,13 +36,21 @@ def load(path):
     return im, px, w, h, bg
 
 
-def ink_map(path, tol=28):
-    """Boolean grid: is this pixel not the background?"""
+def ink_map(path, tol=28, x_range=None):
+    """Boolean grid: is this pixel not the background?
+
+    `x_range` limits the scan to a column range, which is how the rhythm
+    check measures the PAGE and not the nav rail beside it: the rail's
+    labels run the whole height of the window, so every ink band in the
+    picture merged into one and the check skipped every page.
+    """
     im, px, w, h, bg = load(path)
+    first = 0 if x_range is None else max(0, x_range[0])
+    last = w if x_range is None else min(w, x_range[1])
     rows = []
     for y in range(h):
         row = bytearray(w)
-        for x in range(w):
+        for x in range(first, last):
             r, g, b = px[x, y]
             if abs(r - bg[0]) + abs(g - bg[1]) + abs(b - bg[2]) > tol:
                 row[x] = 1
