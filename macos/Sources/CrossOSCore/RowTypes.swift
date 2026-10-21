@@ -265,6 +265,98 @@ public struct UserRuleRow: Codable, Sendable, Equatable {
     }
 }
 
+/// One entry of the rule builder's vocabulary (`config.getUserRuleVocabulary`).
+///
+/// The same shape for all six lists — a value to store and a label to show —
+/// with three optional extras: the key's key code, the capability an action
+/// performs, and the parameters that capability needs. The lists are served
+/// rather than spelled out here so that a new key, a new action or a new
+/// modifier is a change on the daemon's side alone.
+public struct VocabularyEntry: Codable, Sendable, Equatable {
+    public var value: String
+    public var label: String
+    /// The key code, for the entries that are keys.
+    public var code: Int?
+    /// The capability an action performs, for the entries that are actions.
+    public var capability: String?
+    /// What the capability needs, for the actions that take an argument.
+    public var parameters: [String: JSONValue]?
+
+    public init(value: String,
+                label: String,
+                code: Int? = nil,
+                capability: String? = nil,
+                parameters: [String: JSONValue]? = nil) {
+        self.value = value
+        self.label = label
+        self.code = code
+        self.capability = capability
+        self.parameters = parameters
+    }
+}
+
+/// Everything the rule builder's pickers need, in one answer.
+public struct UserRuleVocabulary: Codable, Sendable, Equatable {
+    public var modifiers: [VocabularyEntry]
+    public var keys: [VocabularyEntry]
+    public var actions: [VocabularyEntry]
+    public var capabilities: [VocabularyEntry]
+    public var appModes: [VocabularyEntry]
+    public var appCategories: [VocabularyEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case modifiers, keys, actions, capabilities
+        case appModes = "app_modes"
+        case appCategories = "app_categories"
+    }
+
+    public init(modifiers: [VocabularyEntry],
+                keys: [VocabularyEntry],
+                actions: [VocabularyEntry],
+                capabilities: [VocabularyEntry],
+                appModes: [VocabularyEntry],
+                appCategories: [VocabularyEntry]) {
+        self.modifiers = modifiers
+        self.keys = keys
+        self.actions = actions
+        self.capabilities = capabilities
+        self.appModes = appModes
+        self.appCategories = appCategories
+    }
+}
+
+/// A rule the user is BUILDING, before the daemon has derived its id.///
+/// The daemon owns the id — it is derived from the chord and the scope, so a
+/// rule's name always answers to what it matches — and it owns the ordering
+/// and the specificity. The user picks four things: the key, the modifiers,
+/// the scope, and the capability the rule performs.
+///
+/// `parameters` carries what the capability needs: a `window.move` rule says
+/// WHICH zone, and without the parameter the rule is a command with its
+/// argument missing.
+public struct UserRuleDraft: Sendable, Equatable {
+    public var key: String
+    public var modifiers: [String]
+    public var appModes: [String]
+    public var appIDs: [String]
+    public var capability: String
+    public var parameters: [String: JSONValue]?
+
+    public init(key: String,
+                modifiers: [String],
+                appModes: [String] = [],
+                appIDs: [String] = [],
+                capability: String,
+                parameters: [String: JSONValue]? = nil) {
+        self.key = key
+        self.modifiers = modifiers
+        self.appModes = appModes
+        self.appIDs = appIDs
+        self.capability = capability
+        self.parameters = parameters
+    }
+}
+
 // MARK: - traces
 
 /// One recorded decision, as columns (`core.traces`).

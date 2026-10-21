@@ -35,6 +35,8 @@ public actor SpiedCoreClient: CoreClient {
     private var shortcutsAnswer: [JSONValue] = []
     private var zonesAnswer: [ZoneRow] = []
     private var userRulesAnswer: [UserRuleRow] = []
+    private var vocabularyAnswer = UserRuleVocabulary(modifiers: [], keys: [], actions: [],
+                                                      capabilities: [], appModes: [], appCategories: [])
     private var commandsAnswer: [CommandRow] = []
     private var pluginMetaAnswer: [PluginMetaRow] = []
     private var schemasAnswer: [SchemaRow] = []
@@ -115,6 +117,11 @@ public actor SpiedCoreClient: CoreClient {
     public func overrides() async throws -> [OverrideRow] {
         record("config.getOverrides")
         return overridesAnswer
+    }
+
+    public func setOverride(app: String, ruleID: String, enabled: Bool) async throws -> Bool {
+        record("config.setOverride")
+        return enabled
     }
 
     public func conflicts() async throws -> [ConflictRow] {
@@ -198,6 +205,21 @@ public actor SpiedCoreClient: CoreClient {
         return userRulesAnswer
     }
 
+    public func createUserRule(_ rule: UserRuleDraft) async throws -> String {
+        record("config.setUserRule")
+        return "user.test@any"
+    }
+
+    public func deleteUserRule(id: String) async throws -> [UserRuleRow] {
+        record("config.deleteUserRule")
+        return userRulesAnswer
+    }
+
+    public func userRuleVocabulary() async throws -> UserRuleVocabulary {
+        record("config.getUserRuleVocabulary")
+        return vocabularyAnswer
+    }
+
     public func appsForRules() async throws -> [AppRow] {
         record("core.apps")
         return appsAnswer
@@ -236,6 +258,11 @@ public actor SpiedCoreClient: CoreClient {
 
     public func finderMenu() async throws -> [JSONValue] {
         record("core.finderMenu")
+        return menuAnswer
+    }
+
+    public func setMenuItemEnabled(id: String, enabled: Bool) async throws -> [JSONValue] {
+        record("core.setMenuItemEnabled")
         return menuAnswer
     }
 

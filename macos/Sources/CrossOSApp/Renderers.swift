@@ -646,7 +646,19 @@ final class MenuListView: NSStackView, TableContent {
             let item = entry.objectValue ?? [:]
             return !(item["source"]?.stringValue ?? "").isEmpty
         }
-        return hasSource ? [("Item", 260), ("Source", 180)] : [("Item", 420)]
+        // **The "On" column is the last one, and it is a TOGGLE.**
+        //
+        // The daemon's own comment calls this list "the Finder menu the user
+        // can switch items off in", and it has answered
+        // `core.setMenuItemEnabled` since the menu was written — but the
+        // shell never called it, so the list could be read and not changed.
+        // The column is here because the write is: a list of things that can
+        // be turned off, with nothing to turn them off with, is a list.
+        var out: [(String, CGFloat)] = hasSource
+            ? [("Item", 260), ("Source", 180)]
+            : [("Item", 420)]
+        out.append(("On", 44))
+        return out
     }
     /// Filled by the async load below, so it cannot be a `let`: a control
     /// whose data arrives from the daemon has to be able to change once, and
@@ -654,6 +666,8 @@ final class MenuListView: NSStackView, TableContent {
     private var entries: [JSONValue] = []
     private let service: any CoreClient
     private let note: @Sendable (String) -> Void
+    /// The table this content draws, so a write can make it redraw the row.
+    private var table: TableView?
 
     init(control: Control, context: ControlContext) {
         self.service = context.service
@@ -700,8 +714,59 @@ final class MenuListView: NSStackView, TableContent {
         let item = entries[row].objectValue ?? [:]
         switch column {
         case 0: return item["title"]?.stringValue ?? item["label"]?.stringValue ?? "(unnamed)"
-        default: return item["source"]?.stringValue ?? item["bundle"]?.stringValue ?? ""
+        case 1: return item["source"]?.stringValue ?? item["bundle"]?.stringValue ?? ""
+        default: return ""
         }
+    }
+
+    /// The switch that turns a menu item off, and back on.
+    ///
+    /// **An item this host cannot run has no switch.** The daemon sends
+    /// `supported` and a `reason` for the ones whose capability has no
+    /// adapter on this platform, and a checkbox that turns an item on when
+    /// the machine cannot run it would be a promise the machine cannot keep.
+    func toggle(row: Int, column: Int) -> (isOn: Bool, onChange: @MainActor (Bool) -> Void)? {
+        guard column == columns.count - 1 else { return nil }
+        let item = entries[row].objectValue ?? [:]
+        guard item["supported"]?.boolValue ?? true else { return nil }
+        guard let id = item["id"]?.stringValue, !id.isEmpty else { return nil }
+        let current = item["enabled"]?.boolValue ?? false
+        return (current, { [weak self] next in
+            Task { await self?.write(id: id, next: next) }
+        })
+    }
+
+    private func write(id: String, next: Bool) async {
+        do {
+            // The answer is the WHOLE table, so the rows that came back are
+            // the rows the daemon now holds — not the ones this view hoped
+            // for. A refused write leaves the list as it was.
+            let updated = try await service.setMenuItemEnabled(id: id, enabled: next)
+            entries = updated
+            table?.reload()
+            note("\(name(for: id)) is now \(next ? "in the menu" : "out of the menu").")
+        } catch {
+            table?.reload()
+            note("Could not change that menu item: \(error)")
+        }
+    }
+
+    /// The item's own name, for the note that says what changed.
+    private func name(for id: String) -> String {
+        for entry in entries {
+            let item = entry.objectValue ?? [:]
+            if item["id"]?.stringValue == id {
+                return item["title"]?.stringValue ?? item["label"]?.stringValue ?? id
+            }
+        }
+        return id
+    }
+
+    /// A row the host cannot run is drawn as off, and says why.
+    func isDimmed(row: Int) -> Bool {
+        let item = entries[row].objectValue ?? [:]
+        if item["supported"]?.boolValue == false { return true }
+        return !(item["enabled"]?.boolValue ?? false)
     }
 
     private func load(into column: NSStackView, context: ControlContext) async {
@@ -713,7 +778,9 @@ final class MenuListView: NSStackView, TableContent {
             // `TableView.viewDidMoveToSuperview`, and `core.commands` where
             // the same shape left it 0x208 wide with its stripes drawn past
             // the group's rounded edge.
-            column.addArrangedSubview(TableView(content: self))
+            let table = TableView(content: self)
+            self.table = table
+            column.addArrangedSubview(table)
         } catch {
             column.addArrangedSubview(ErrorView(
                 headline: "Could not read the Finder menu.",

@@ -229,6 +229,8 @@ private final class FileTypeTable: NSStackView, TableContent {
     private let service: any CoreClient
     private let note: @Sendable (String) -> Void
     private var stored: [String: Bool] = [:]
+    /// The table this content draws, so a write can make it redraw the row.
+    private var table: TableView?
 
     init(rows: [FileTypeRow], service: any CoreClient, note: @escaping @Sendable (String) -> Void) {
         self.entries = rows
@@ -240,6 +242,7 @@ private final class FileTypeTable: NSStackView, TableContent {
         distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
         let table = TableView(content: self)
+        self.table = table
         // ARRANGED, and no edge constraints. Pinning a view to all four of a
         // stack's edges conflicts with the width binding `TableView` makes on
         // `viewDidMoveToSuperview`, and the two constraints fight to a draw:
@@ -299,8 +302,11 @@ private final class FileTypeTable: NSStackView, TableContent {
             // which of the two is true.
             let updated = try await service.setFileType(entry: entry, enabled: next)
             stored[identity(entry)] = updated.first { identity($0) == identity(entry) }?.enabled ?? next
+            // The row answers to what was STORED.
+            table?.reload()
             note("\(entry.displayName) is now \(next ? "offered" : "hidden").")
         } catch {
+            table?.reload()
             note("Could not change \(entry.displayName): \(error)")
         }
     }

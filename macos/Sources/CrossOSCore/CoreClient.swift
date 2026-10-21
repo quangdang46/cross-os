@@ -70,6 +70,25 @@ public protocol CoreClient: Sendable {
     /// The user-rule table (`config.getUserRules`).
     func userRules() async throws -> [UserRuleRow]
 
+    /// Add a rule of the user's own (`config.setUserRule`) and take one away
+    /// (`config.deleteUserRule`).
+    ///
+    /// **The Shortcuts page promises this.** Its note says "Add a rule: an app,
+    /// an action, and a chord", and the daemon has had a way to store one
+    /// since the rule table was written — but the shell had no call site for
+    /// either method, so the builder could only LIST the rules it could not
+    /// make. A page that says "add a rule" and cannot is a broken promise,
+    /// and this is where it is kept.
+    func createUserRule(_ rule: UserRuleDraft) async throws -> String
+    func deleteUserRule(id: String) async throws -> [UserRuleRow]
+
+    /// Everything the rule builder's pickers need, in one answer
+    /// (`config.getUserRuleVocabulary`).
+    ///
+    /// The lists are served rather than spelled out in the shell, so a new
+    /// key, action or modifier is a change on the daemon's side alone.
+    func userRuleVocabulary() async throws -> UserRuleVocabulary
+
     /// Installed apps for the rule builder's app picker (`core.apps`).
     func appsForRules() async throws -> [AppRow]
 
@@ -104,6 +123,15 @@ public protocol CoreClient: Sendable {
     /// `JSONValue` exists for.
     func finderMenu() async throws -> [JSONValue]
 
+    /// Switch one Finder menu item on or off (`core.setMenuItemEnabled`).
+    ///
+    /// The daemon's own comment calls this page "the Finder menu the user can
+    /// switch items off in", and the daemon answers the whole table back so
+    /// the page never has to assume its own edit landed. Until the shell
+    /// called it, the Explorer and Finder pages listed the menu and the user
+    /// could do nothing with the list.
+    func setMenuItemEnabled(id: String, enabled: Bool) async throws -> [JSONValue]
+
     /// What CrossOS created on this machine (`safety.ownershipAudit`) — the
     /// Safety page's rollback list, and the input to Reset Everything's
     /// ownership scoping.
@@ -132,6 +160,14 @@ public protocol CoreClient: Sendable {
 
     /// The per-app overrides (`config.getOverrides`).
     func overrides() async throws -> [OverrideRow]
+
+    /// Switch one per-app override on or off (`config.setOverride`).
+    ///
+    /// The Keyboard page's override table has carried an "On" column since
+    /// the column was added, and the column did nothing: the table had no
+    /// toggle, so the cell was a blank with a heading over it — the reader
+    /// looks for what belongs under "On" and finds nothing.
+    func setOverride(app: String, ruleID: String, enabled: Bool) async throws -> Bool
 
     /// Which rule wins each contested chord (`core.conflicts`).
     func conflicts() async throws -> [ConflictRow]
@@ -603,6 +639,88 @@ public actor LiveCoreClient: CoreClient {
             "enabled": .bool(enabled),
         ])
         return try decode([FileTypeRow].self, from: await call("core.setFileType", params), method: "core.setFileType")
+    }
+
+    public func createUserRule(_ rule: UserRuleDraft) async throws -> String {
+        // The field names are the daemon's, not the shell's: the rule
+        // document is `app_modes`, `app_ids`, `device_id` — snake_case,
+        // because it is a document on disk and not a wire type the shell
+        // owns. `config.setRuleEnabled`'s sibling read them as `ruleId`
+        // where the daemon wanted `ruleId` and `config.setOverride` wants
+        // `rule_id` where the daemon wanted `rule_id`; the rule table is
+        // the third spelling, and getting it wrong fails the write with
+        // "need a rule" rather than with anything that names the field.
+        var params: [String: JSONValue] = [
+            "key": .string(rule.key),
+            "modifiers": .array(rule.modifiers.map { .string($0) }),
+            "app_modes": .array(rule.appModes.map { .string($0) }),
+            "app_ids": .array(rule.appIDs.map { .string($0) }),
+            "capability": .string(rule.capability),
+        ]
+        if let parameters = rule.parameters, !parameters.isEmpty {
+            params["parameters"] = .object(parameters)
+        }
+        // **The answer is the new rule's NAME and nothing else.**
+        //
+        // `config.setUserRule` answers `{"id":"user.ctrl+f13@any"}` — the
+        // rule it stored, named. It does NOT answer the table, which is what
+        // `config.deleteUserRule` answers, and which is what a first
+        // implementation of this read: decoding an OBJECT as an array of
+        // rows threw, the shell reported "Could not add that rule", and the
+        // rule WAS in the daemon's table the whole time. A write that
+        // succeeded and was reported as a failure is worse than one that
+        // failed.
+        let raw = try await call("config.setUserRule", .object(params))
+        guard let object = raw.objectValue,
+              let id = object["id"]?.stringValue, !id.isEmpty else {
+            throw CoreError.decode(
+                method: "config.setUserRule",
+                underlying: DecodeShapeError.expectedObject
+            )
+        }
+        return id
+    }
+
+    public func deleteUserRule(id: String) async throws -> [UserRuleRow] {
+        try decode([UserRuleRow].self,
+                   from: await call("config.deleteUserRule", .object(["id": .string(id)])),
+                   method: "config.deleteUserRule")
+    }
+
+    public func userRuleVocabulary() async throws -> UserRuleVocabulary {
+        try decode(UserRuleVocabulary.self,
+                   from: await call("config.getUserRuleVocabulary"),
+                   method: "config.getUserRuleVocabulary")
+    }
+
+    public func setMenuItemEnabled(id: String, enabled: Bool) async throws -> [JSONValue] {
+        // The answer is the WHOLE table, not the row: the daemon answers with
+        // every row so the page never has to assume its own edit landed.
+        try decode([JSONValue].self,
+                   from: await call("core.setMenuItemEnabled",
+                                    .object(["id": .string(id), "enabled": .bool(enabled)])),
+                   method: "core.setMenuItemEnabled")
+    }
+
+    public func setOverride(app: String, ruleID: String, enabled: Bool) async throws -> Bool {
+        // `rule_id`, snake_case: the daemon's `config.setOverride` reads
+        // `{app, rule_id, enabled}` and answers `need {app, rule_id, enabled}`
+        // for anything else. Its sibling `config.setRuleEnabled` reads
+        // `ruleId` — two spellings in one protocol, and the shell has to
+        // know which is which.
+        let raw = try await call("config.setOverride", .object([
+            "app": .string(app),
+            "rule_id": .string(ruleID),
+            "enabled": .bool(enabled),
+        ]))
+        guard let object = raw.objectValue,
+              let stored = object["enabled"]?.boolValue else {
+            throw CoreError.decode(
+                method: "config.setOverride",
+                underlying: DecodeShapeError.expectedObject
+            )
+        }
+        return stored
     }
 
     public func shortcuts() async throws -> [JSONValue] {

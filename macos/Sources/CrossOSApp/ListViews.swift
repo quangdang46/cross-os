@@ -48,6 +48,8 @@ private final class MatrixTable: NSStackView, TableContent {
     /// what the daemon stored, so a refused edit is visible as a refused edit
     /// rather than a toggle that sprang back with no explanation.
     private var stored: [String: Bool] = [:]
+    /// The table this content draws, so a write can make it redraw the row.
+    private var table: TableView?
 
     init(rows: [MatrixRow], service: any CoreClient, note: @escaping @Sendable (String) -> Void) {
         self.entries = rows
@@ -58,7 +60,9 @@ private final class MatrixTable: NSStackView, TableContent {
         alignment = .width
         distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
-        addArrangedSubview(TableView(content: self))
+        let table = TableView(content: self)
+        self.table = table
+        addArrangedSubview(table)
     }
 
     @available(*, unavailable)
@@ -132,8 +136,13 @@ private final class MatrixTable: NSStackView, TableContent {
             // (MatrixControl.tsx:34-41).
             let storedState = try await service.setRuleEnabled(ruleID: rule.ruleID, enabled: next)
             stored[rule.ruleID] = storedState
+            // The row answers to what was STORED, so a refused write leaves
+            // the box where the daemon left it rather than showing a click
+            // that did not happen.
+            table?.reload()
             note("\(keys.isEmpty ? rule.ruleID : keys) is now \(storedState ? "on" : "off").")
         } catch {
+            table?.reload()
             note("Could not change \(keys): \(error)")
         }
     }
@@ -165,7 +174,9 @@ final class OverridesView: CardControl {
             ))
             return
         }
-        replaceBody(with: OverridesTable(rows: loaded))
+        replaceBody(with: OverridesTable(rows: loaded,
+                                         service: context.service,
+                                         note: context.note))
     }
 }
 
@@ -173,19 +184,27 @@ final class OverridesView: CardControl {
 private final class OverridesTable: NSStackView, TableContent {
     let columns: [(String, CGFloat)] = [("App", 180), ("Action", 200), ("Chord", 140), ("On", 44)]
     private let overrides: [OverrideRow]
+    private let service: any CoreClient
+    private let note: @Sendable (String) -> Void
+    /// The STORED state, per override, after a write — the same rule the
+    /// matrix table follows: the row shows what the daemon stored, so a
+    /// refused edit is visible as a refused edit rather than as a toggle that
+    /// sprang back with no explanation.
+    private var stored: [String: Bool] = [:]
+    /// The table this content draws, so a write can make it redraw the row.
+    private var table: TableView?
 
-    init(rows: [OverrideRow]) {
+    init(rows: [OverrideRow], service: any CoreClient, note: @escaping @Sendable (String) -> Void) {
         self.overrides = rows
+        self.service = service
+        self.note = note
         super.init(frame: .zero)
         orientation = .vertical
         alignment = .width
         distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
-        orientation = .vertical
-        alignment = .width
-        distribution = .fill
-        translatesAutoresizingMaskIntoConstraints = false
         let table = TableView(content: self)
+        self.table = table
         // ARRANGED, not `addSubview` with edge constraints. Pinning a view to
         // all four of a stack's edges fights the width binding `TableView`
         // makes on `viewDidMoveToSuperview`: measured on `core.commands`,
@@ -211,7 +230,39 @@ private final class OverridesTable: NSStackView, TableContent {
         }
     }
 
-    func isDimmed(row: Int) -> Bool { !overrides[row].enabled }
+    /// **The "On" column is a toggle, which is what it was drawn to be.**
+    ///
+    /// The column was there from the start and did nothing: the table had no
+    /// `toggle`, so the cell under "On" was blank — the reader looks for what
+    /// belongs there and finds nothing. The daemon has answered
+    /// `config.setOverride` since the overrides were written; the shell had
+    /// no call site for it, so an override could be read and never changed.
+    func toggle(row: Int, column: Int) -> (isOn: Bool, onChange: @MainActor (Bool) -> Void)? {
+        guard column == 3 else { return nil }
+        let entry = overrides[row]
+        let current = stored[entry.ruleID] ?? entry.enabled
+        return (current, { [weak self] next in
+            Task { await self?.write(entry: entry, next: next) }
+        })
+    }
+
+    private func write(entry: OverrideRow, next: Bool) async {
+        do {
+            let storedState = try await service.setOverride(app: entry.app,
+                                                             ruleID: entry.ruleID,
+                                                             enabled: next)
+            stored[entry.ruleID] = storedState
+            // The row answers to what was STORED. A refused write leaves the
+            // box where the daemon left it, and the note says why.
+            table?.reload()
+            note("\(entry.app) — \(Humanize.phrase(entry.action)) is now \(storedState ? "on" : "off").")
+        } catch {
+            table?.reload()
+            note("Could not change the override for \(entry.app): \(error)")
+        }
+    }
+
+    func isDimmed(row: Int) -> Bool { !(stored[overrides[row].ruleID] ?? overrides[row].enabled) }
 }
 
 // MARK: - conflicts

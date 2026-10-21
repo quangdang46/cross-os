@@ -1,16 +1,16 @@
 {
   "groups" : [
     {
-      "w" : 1200,
       "y0" : 988,
-      "y1" : 1360
+      "y1" : 1360,
+      "w" : 1200
     },
     {
-      "y1" : 1292,
+      "w" : 1200,
       "y0" : 988,
-      "w" : 1200
+      "y1" : 1292
     }
   ],
-  "scale" : 2,
-  "page" : "core.schemaForm"
+  "page" : "core.schemaForm",
+  "scale" : 2
 }

@@ -226,13 +226,23 @@ final class TableView: NSStackView {
         // row's cells rather than the ones the clip view shows. That is
         // fixed in `ShotRenderer`, where the clip view is the truth.
         //
-        // The row height here is the HEIGHT OF THE BOX, not of a row: it
-        // is a guess at how much of the list to show before the list
-        // starts scrolling, and the rows themselves are 32pt whatever this
-        // says.
+        // **The row height is 32pt, and this used to say 26.** The table's
+        // rows are 32pt — `table.rowHeight = 32` above — so a box of
+        // `rows * 26 + 26` is a whole row SHORT of the table it holds.
+        // Measured on `core.commands`: the menu table measured 234pt inside
+        // a 208pt box, and its last row — "Duplicate with Name" — was cut
+        // in half. Every table in the app was a row short, and the row it
+        // lost was always the last one.
+        //
+        // The header is 10pt: a table of N rows measures N*32 + 10.
         let rows = CGFloat(max(1, content.rowCount))
+        // The cap is in WHOLE ROWS, so a list that does not fit ends
+        // between two rows rather than through the middle of one. Half a row
+        // is a row nobody can read.
+        let visibleRows = 12
+        let shownRows = min(rows, CGFloat(visibleRows))
         NSLayoutConstraint.activate([
-            scroll.heightAnchor.constraint(equalToConstant: min(rows * 26 + 26, 320)),
+            scroll.heightAnchor.constraint(equalToConstant: shownRows * 32 + 10),
             scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 26),
         ])
 
@@ -413,6 +423,18 @@ final class TableView: NSStackView {
             print("cols=\(d) table=\(Int(table.bounds.width)) clip=\(Int(scroll.bounds.width))")
             fflush(stdout)
         }
+    }
+
+    /// Redraw the rows from the content.
+    ///
+    /// **A view-based table CACHES its cell views**, so a row whose stored
+    /// state changed keeps drawing the old value until its cell is
+    /// recreated. That is how a checkbox kept showing a click the daemon had
+    /// REFUSED: the note said "the daemon kept Ctrl+C off" and the box beside
+    /// it stayed on. One call, and the row answers to what was stored.
+    func reload() {
+        table.reloadData()
+        needsLayout = true
     }
 
     /// The columns are fitted to the BOX the table lives in.

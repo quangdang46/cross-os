@@ -497,12 +497,168 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             failures.append("core.profiles is not being served")
         }
 
+        // 6. The RULE BUILDER, which the page promises and the shell could
+        //    not do: "Add a rule: an app, an action, and a chord".
+        //
+        //    The daemon has answered `config.setUserRule` and
+        //    `config.deleteUserRule` since the rule table was written, and the
+        //    shell had no call site for either — so the builder could only
+        //    LIST the rules it could not make. This presses the real button
+        //    and reads the daemon's own table back.
+        if let rulesPage = pages.first(where: { $0.id == "core.rules" }) {
+            shell.show(rulesPage)
+            await ShotRenderer.settle(1.5)
+            var before = (try? await client.userRules()) ?? []
+            // **The test's chord must not already exist.** The daemon refuses
+            // an exact duplicate — the same chord and the same scope — so a
+            // run that left its rule behind would make the next run add
+            // nothing and report a broken builder over a working one. The
+            // rule it removes is put back at the end.
+            let clash = before.first { $0.chord == "Ctrl+F13" }
+            if let clash {
+                _ = try? await client.deleteUserRule(id: clash.id)
+                before.removeAll { $0.id == clash.id }
+            }
+            // The chord needs a modifier: the builder refuses a bare key, and
+            // a rule on a bare "Left" would take the arrow keys away.
+            let modifier = NSView.allViews(shell.window?.contentView)
+                .compactMap { $0 as? NSButton }
+                .first { $0.title == "Ctrl" && $0.state == .off }
+            modifier?.performClick(nil)
+            // A FUNCTION key, so the rule this test makes is one nobody
+            // would miss: a rule on "Left" would take the arrow keys away,
+            // and a test that leaves one behind is a test that broke the
+            // machine.
+            if let key = NSView.allViews(shell.window?.contentView)
+                .compactMap({ $0 as? NSPopUpButton })
+                .first(where: { $0.item(withTitle: "F13") != nil }) {
+                key.selectItem(withTitle: "F13")
+            }
+            await ShotRenderer.settle(0.4)
+            if let add = button("Add rule") {
+                add.performClick(nil)
+                await ShotRenderer.settle(1.8)
+                let after = (try? await client.userRules()) ?? []
+                print("click-test: rule builder    rules \(before.count) -> \(after.count)")
+                if after.count <= before.count {
+                    failures.append("the rule builder's button added no rule to the daemon's table")
+                }
+                // **The rule THIS test made, by id.** The count alone is not
+                // enough: a builder that added a rule AND lost an old one
+                // would leave the count where it started, and the test would
+                // report a working builder over a broken table.
+                let made = after.first { fresh in
+                    !before.contains { $0.id == fresh.id }
+                }
+                // And take it away again — with the rule's OWN Delete button,
+                // which is the other half of the promise.
+                //
+                // **The button that matches the rule's ID, not the first
+                // button that says "Delete".** Every rule's button says
+                // "Delete", so "the first one" is "whichever rule happens to
+                // be first" — and a test that clicks it deletes the
+                // person's own rule and calls the count unchanged.
+                if let made,
+                   let remove = NSView.allViews(shell.window?.contentView)
+                    .compactMap({ $0 as? NSButton })
+                    .first(where: { $0.identifier?.rawValue == made.id }) {
+                    remove.performClick(nil)
+                    await ShotRenderer.settle(1.8)
+                    let left = (try? await client.userRules()) ?? []
+                    print("click-test: rule delete     rules \(after.count) -> \(left.count)")
+                    if left.contains(where: { $0.id == made.id }) {
+                        failures.append("the rule's Delete button did not take that rule away")
+                    }
+                } else {
+                    failures.append("no Delete button for the rule the builder made")
+                }
+                // **Put the machine back.** The rule the test made is removed
+                // above; if the delete did not land, it is removed here, and
+                // any rule that was there before and is not there now is
+                // written back. A test that leaves the person's rules
+                // different is a test that changed their machine.
+                let left = (try? await client.userRules()) ?? []
+                for rule in after where !left.contains(where: { $0.id == rule.id }) {
+                    _ = try? await client.deleteUserRule(id: rule.id)
+                }
+                for rule in before where !left.contains(where: { $0.id == rule.id }) {
+                    _ = try? await client.createUserRule(UserRuleDraft(
+                        key: rule.key,
+                        modifiers: rule.modifiers ?? [],
+                        appModes: rule.appModes ?? [],
+                        appIDs: rule.appIDs ?? [],
+                        capability: rule.capability,
+                        parameters: rule.parameters
+                    ))
+                }
+                await ShotRenderer.settle(0.6)
+            } else {
+                failures.append("no Add rule button on core.rules")
+            }
+        } else {
+            failures.append("core.rules is not being served")
+        }
+
+        // 7. The FINDER MENU switches, which the daemon's own comment calls
+        //    "the Finder menu the user can switch items off in" — and which
+        //    the shell could not switch off, because there was no call site
+        //    for `core.setMenuItemEnabled` at all.
+        if let explorer = pages.first(where: { $0.id == "core.commands" }) {
+            shell.show(explorer)
+            await ShotRenderer.settle(1.5)
+            sizeTables(in: shell.window?.contentView)
+            await ShotRenderer.settle(0.5)
+            let before = await menuEnabled(client)
+            // The menu list is the page's FIRST table, so its checkbox is the
+            // first wired one the table built.
+            if let box = tableButtons(in: shell.window?.contentView)
+                .first(where: { ToggleTarget.shared.isWired($0) }) {
+                box.performClick(nil)
+                await ShotRenderer.settle(1.5)
+                let after = await menuEnabled(client)
+                let changed = before.enumerated()
+                    .filter { after[$0.offset].enabled != $0.element.enabled }
+                    .map(\.offset)
+                print("click-test: menu switch     changed item(s) \(changed.map(String.init) ?? [])")
+                if changed.isEmpty {
+                    failures.append("a Finder-menu switch click changed no item's stored state")
+                }
+                // Put back exactly what moved.
+                for index in changed where index < before.count {
+                    _ = try? await client.setMenuItemEnabled(id: before[index].id,
+                                                            enabled: before[index].enabled)
+                }
+                await ShotRenderer.settle(0.6)
+            } else {
+                failures.append("no switch found on the Explorer's menu list")
+            }
+        } else {
+            failures.append("core.commands is not being served")
+        }
+
         if failures.isEmpty {
-            print("CLICK TEST PASS — 3 buttons, 3 write paths (rule, plugin, observe) and profile apply reach the daemon")
+            print("CLICK TEST PASS — 8 write paths reach the daemon: "
+                  + "panic stop, re-enable, matrix rule, plugin, observe, profile apply, "
+                  + "the rule builder and its delete, and the Finder-menu switch")
             exit(0)
         }
         for f in failures { print("click-test FAIL: \(f)") }
         exit(1)
+    }
+
+    /// What the daemon says about each Finder menu item, by id.
+    ///
+    /// The read is from the DAEMON and not from the table's own cells: a
+    /// checkbox that changes its own box proves nothing, which is what the
+    /// observe toggle did for its whole life.
+    @MainActor
+    private func menuEnabled(_ client: any CoreClient) async -> [(id: String, enabled: Bool)] {
+        let rows = (try? await client.finderMenu()) ?? []
+        return rows.compactMap { row in
+            guard let item = row.objectValue,
+                  let id = item["id"]?.stringValue else { return nil }
+            return (id, item["enabled"]?.boolValue ?? false)
+        }
     }
 
     /// Which profile the daemon currently has applied.
