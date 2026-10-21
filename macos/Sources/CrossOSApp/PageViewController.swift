@@ -464,6 +464,21 @@ final class EmptyStateView: NSStackView {
         }
         icon.contentTintColor = Palette.tertiaryInk
         icon.translatesAutoresizingMaskIntoConstraints = false
+        // **The icon is GIVEN A SIZE.**
+        //
+        // An `NSImageView` with an SF Symbol and no frame measures the
+        // symbol's own natural size, and "tray" is a shallow trapezoid: it
+        // came out 30x20 in the render, a smudge the width of a thumbnail
+        // that reads as a broken image rather than as an illustration. A
+        // state wants to be seen at a glance, and 20pt of pale grey is not
+        // seen at a glance.
+        icon.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        // The image SCALES to the frame. Without this the frame is 28pt and
+        // the symbol is drawn at its own size inside it — "tray" is a shallow
+        // trapezoid 13pt wide, and it came out as a smudge the width of a
+        // thumbnail. An SF Symbol is a vector, so scaling it up is crisp.
+        icon.imageScaling = .scaleProportionallyUpOrDown
         icon.setContentHuggingPriority(.required, for: .horizontal)
         icon.setContentHuggingPriority(.required, for: .vertical)
         icon.setContentCompressionResistancePriority(.required, for: .horizontal)

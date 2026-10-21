@@ -431,6 +431,14 @@ public final class SidebarViewController: NSViewController {
     private let scroll = NSScrollView()
     private var pages: [Page] = []
     private var groups: [String] = []
+    /// The row views the rail has made, by page id.
+    ///
+    /// The ink of a selected row is the rail's own, so the rail has to be
+    /// able to find the row it drew. Asking the outline for a row by INDEX
+    /// did not find them — measured, the selection ink was applied to
+    /// nothing, and the selected row's label stayed near-black on the accent
+    /// pill at 1.3:1.
+    private var rowViews: [String: SidebarRowView] = [:]
 
     /// Called with the page a person picked. Set by the window.
     var onSelect: ((Page) -> Void)?
@@ -592,6 +600,7 @@ public final class SidebarViewController: NSViewController {
             && zip(pages, visible).allSatisfy { $0.id == $1.id }
         guard !unchanged else { return }
         pages = visible
+        rowViews = [:]
         groups = []
         for page in visible where !groups.contains(page.group) {
             groups.append(page.group)
@@ -601,6 +610,7 @@ public final class SidebarViewController: NSViewController {
             outline.expandItem(group, expandChildren: true)
         }
         outline.deselectAll(nil)
+        updateSelectionInk()
     }
 
     /// Re-read the page list.
@@ -613,6 +623,7 @@ public final class SidebarViewController: NSViewController {
         do {
             let served = try await client.pages()
             pages = served
+            rowViews = [:]
             groups = []
             for page in served where !groups.contains(page.group) {
                 groups.append(page.group)
@@ -677,6 +688,7 @@ public final class SidebarViewController: NSViewController {
         }) else { return }
         outline.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         outline.scrollRowToVisible(index)
+        updateSelectionInk()
     }
 
     private func selectRow(for page: Page) {
@@ -687,6 +699,7 @@ public final class SidebarViewController: NSViewController {
         }) else { return }
         outline.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         outline.scrollRowToVisible(index)
+        updateSelectionInk()
         onSelect?(page)
     }
 }
@@ -747,20 +760,26 @@ extension SidebarViewController: NSOutlineViewDelegate {
 
     public func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         if let group = item as? String {
-            let cap = NSTextField(labelWithString: group.uppercased())
-            cap.font = Typeface.sectionCap
-            cap.textColor = Palette.secondaryInk
-            // A section header gets space ABOVE it, so the rail reads as
-            // separated groups rather than one continuous list. Without this
-            // the four sections (HOME, SHORTCUTS, ACTIVITY, ADVANCED) blur
-            // together — the eye cannot tell where one group ends and the
-            // next begins. 12pt above a header, 0pt above a page row: the
-            // header is set apart, the rows stay tight under it.
-            cap.translatesAutoresizingMaskIntoConstraints = false
-            return cap
+            // The cap is in a cell view of its own, for the same reason the
+            // page rows are: a source list draws the text it recognises as
+            // cell text in the system's unemphasized shade, and a cap in
+            // that shade is not a cap — measured, "HOME" came out at
+            // 1.69:1 on the rail, which is a word you cannot read.
+            return SidebarGroupCapView(group)
         }
         guard let page = item as? Page else { return nil }
-        return SidebarRowView(page)
+        let row = SidebarRowView(page)
+        rowViews[page.id] = row
+        // The row knows whether it is the selected one as soon as it is made,
+        // so a rail that is drawn before any selection change still has the
+        // right ink in it.
+        let rows = flatRows
+        let index = rows.firstIndex { candidate in
+            if case .page(let p) = candidate { return p.id == page.id }
+            return false
+        }
+        row.setSelected(index == outlineView.selectedRow)
+        return row
     }
 
     /// Every row is `rowHeight` tall, and this is what actually makes that so.
@@ -791,22 +810,118 @@ extension SidebarViewController: NSOutlineViewDelegate {
     }
 
     public func outlineViewSelectionDidChange(_ notification: Notification) {
+        updateSelectionInk()
         let rows = flatRows
         guard outline.selectedRow >= 0, outline.selectedRow < rows.count else { return }
         if case .page(let page) = rows[outline.selectedRow] {
             onSelect?(page)
         }
     }
+
+    /// Paint the selected row in the accent's ink and the rest in the
+    /// ordinary label ink.
+    ///
+    /// The rail draws its own labels rather than handing them to the source
+    /// list as cell text — that is what made them legible — and the price of
+    /// drawing them is that the system no longer recolours them for the
+    /// selection. So the rail does it: `onAccent` over the accent pill, and
+    /// the ordinary ink everywhere else.
+    private func updateSelectionInk() {
+        let rows = flatRows
+        var selectedID: String?
+        if outline.selectedRow >= 0, outline.selectedRow < rows.count,
+           case .page(let page) = rows[outline.selectedRow] {
+            selectedID = page.id
+        }
+        for (id, rowView) in rowViews {
+            rowView.setSelected(id == selectedID)
+        }
+    }
+}
+
+/// A group cap in the nav rail: "HOME", "SHORTCUTS", and the rest.
+///
+/// It is a cell view of its own and the label is NOT bound as its
+/// `textField`, for the same reason `SidebarRowView` does the same thing: a
+/// source list draws the text it recognises as cell text in the system's
+/// unemphasized shade, and a cap in that shade is not a cap.
+final class SidebarGroupCapView: NSTableCellView {
+    init(_ group: String) {
+        super.init(frame: .zero)
+
+        let cap = NSTextField(labelWithString: group.uppercased())
+        cap.font = Typeface.sectionCap
+        cap.textColor = Palette.secondaryInk
+        // A section header gets space ABOVE it, so the rail reads as
+        // separated groups rather than one continuous list. Without this the
+        // four sections (HOME, SHORTCUTS, ACTIVITY, ADVANCED) blur
+        // together — the eye cannot tell where one group ends and the next
+        // begins. 12pt above a header, 0pt above a page row: the header is
+        // set apart, the rows stay tight under it.
+        cap.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(cap)
+        NSLayoutConstraint.activate([
+            cap.leadingAnchor.constraint(equalTo: leadingAnchor),
+            cap.centerYAnchor.constraint(equalTo: centerYAnchor),
+            cap.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("SidebarGroupCapView is created in code") }
 }
 
 /// One nav row: a symbol and a title, both drawn by the system.
 final class SidebarRowView: NSTableCellView {
+    private let title: NSTextField
+    private let icon: NSImageView
+
+    /// Whether this row is the selected one, and so is drawn on the accent.
+    ///
+    /// **The rail draws its own selection ink, because it draws its own
+    /// labels.** A source list recolours the cell's `textField` for the
+    /// selected row — white on the accent — and this rail does not use the
+    /// cell's text field (see below), so it has to do the recolouring
+    /// itself. Measured before this: the selected row's label was drawn in
+    /// near-black on the accent pill, which is 1.3:1 and unreadable.
+    private var isSelected = false {
+        didSet { if isSelected != oldValue { applyInk() } }
+    }
+
+    /// Put the row into the selected or the unselected state.
+    func setSelected(_ selected: Bool) {
+        isSelected = selected
+    }
+
+    private func applyInk() {
+        let ink = isSelected ? Palette.onSelection : Palette.primaryInk
+        title.textColor = ink
+        icon.contentTintColor = isSelected ? Palette.onSelection : Palette.secondaryInk
+    }
+
     init(_ page: Page) {
+        let title = NSTextField(labelWithString: page.title)
+        let imageView = NSImageView()
+        self.title = title
+        self.icon = imageView
         super.init(frame: .zero)
 
-        let title = NSTextField(labelWithString: page.title)
         title.font = Typeface.body
         title.lineBreakMode = .byTruncatingTail
+        // **The ink is STATED, and that is the fix.**
+        //
+        // A source list draws an unselected row's label in the system's
+        // "unemphasized" shade, and on a light rail that shade is
+        // (220, 220, 220) on a (245, 245, 245) rail — 1.26:1, measured on
+        // `--shots --window`. The nav rail is the one thing on every screen,
+        // and it was drawn at a contrast where the words are barely there.
+        // A reader could see that SOMETHING was written and not what it
+        // said, which is the definition of an unusable label.
+        //
+        // System Settings draws its unselected sidebar labels in the
+        // ordinary label ink, and so does this rail now. The row is still
+        // told apart by its SELECTION, not by being pale.
+        title.textColor = Palette.primaryInk
         title.translatesAutoresizingMaskIntoConstraints = false
         addSubview(title)
 
@@ -814,7 +929,6 @@ final class SidebarRowView: NSTableCellView {
         // draws it; a name the system does not know is nil, and a nil symbol
         // leaves the title alone rather than a gap. That is the whole contract
         // with `core.pages`.
-        let imageView = NSImageView()
         if let image = NSImage(systemSymbolName: page.symbol, accessibilityDescription: page.title) {
             imageView.image = image
         }
@@ -833,7 +947,14 @@ final class SidebarRowView: NSTableCellView {
             title.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
 
-        textField = title
+        // NOT set as the cell's `textField`.
+        //
+        // A source list draws the cell's TEXT FIELD in the system's
+        // unemphasized shade, whatever colour the field is told to use:
+        // measured, the nav labels came out (191, 191, 191) on a
+        // (245, 245, 245) rail — 1.69:1, where a word is barely a word.
+        // Binding the label as the cell's text field is what invites that
+        // treatment; the rail draws its own labels here.
     }
 
     @available(*, unavailable)

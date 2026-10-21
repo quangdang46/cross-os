@@ -546,6 +546,20 @@ static int cxax_acquire_app(pid_t pid, int windows, int *err) {
             return 0;
         }
         cxax_record_windows_read(pid, windows);
+        // **The call into the app is BOUNDED.**
+        //
+        // An AX attribute read is a message INTO the application that owns
+        // the window, and an application that is slow to answer — or that
+        // has stopped answering — holds the whole list up. Measured: listing
+        // the windows on this machine took 6.26 SECONDS, and the shell's
+        // client has one connection, so every page that asked for anything
+        // after the Switcher page waited for it. The Activity page's table
+        // was never drawn because its load had not landed when the picture
+        // was taken.
+        //
+        // `AXUIElementSetMessagingTimeout` is the system's own bound, and it
+        // is set on the ELEMENT so it covers the read that follows.
+        AXUIElementSetMessagingTimeout(appEl, 0.15);
         CFTypeRef ref = NULL;
         AXError e = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute, &ref);
         if (e != kAXErrorSuccess || ref == NULL) {

@@ -133,9 +133,22 @@ public enum Palette {
     /// colour the text will actually sit on, and `controlAccentColor` follows
     /// the user's choice: a person who picked a yellow accent would otherwise
     /// get white text on yellow at 1.6:1.
+    ///
+    /// **It is a DYNAMIC colour, and that is the fix.** Resolved eagerly, at
+    /// the moment a row is selected, the accent is GREY — the application is
+    /// in the background at that point, and macOS greys the accent for a
+    /// background application — so white-on-grey measured 3.9:1 and the ink
+    /// came out BLACK. Drawn on the accent, which is blue by then, the same
+    /// label measured 1.3:1. Measured, the selected nav row's label was
+    /// near-black on the blue pill.
+    ///
+    /// A dynamic colour is resolved when it is DRAWN, which is the only time
+    /// the question "what is the text sitting on" has an answer.
     public static var onAccent: NSColor {
-        let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB) ?? .controlAccentColor
-        return contrastRatio(.white, accent) >= 4.5 ? .white : .black
+        NSColor(name: nil) { appearance in
+            let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB) ?? .controlAccentColor
+            return contrastRatio(.white, accent) >= 4.5 ? .white : .black
+        }
     }
 
     /// The WCAG relative-luminance contrast between two resolved colours.
@@ -208,6 +221,26 @@ public enum Palette {
                 alpha: rgb.alphaComponent
             )
         } ?? colour
+    }
+
+    /// The ink for a label drawn ON a selection — a selected sidebar row.
+    ///
+    /// The same question `onAccent` asks, asked of the thing the label
+    /// actually sits on: the selection fill, which is
+    /// `selectedContentBackgroundColor` — the colour AppKit paints the
+    /// selected row with.
+    ///
+    /// **`controlAccentColor` is NOT that colour.** Measured, the selected
+    /// row is painted (0, 100, 225) and `controlAccentColor` resolves to a
+    /// grey in the same draw, so an ink computed against the accent came out
+    /// black on a blue pill at 3.9:1. The selection fill is the question's
+    /// subject; the accent is only where the fill comes from.
+    public static var onSelection: NSColor {
+        NSColor(name: nil) { appearance in
+            let fill = NSColor.selectedContentBackgroundColor.usingColorSpace(.sRGB)
+                ?? NSColor.controlAccentColor
+            return contrastRatio(.white, fill) >= 4.5 ? .white : .black
+        }
     }
 
     /// A destructive action's INK. Readable at caption size, unlike `danger`.

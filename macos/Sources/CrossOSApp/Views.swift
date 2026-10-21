@@ -235,10 +235,23 @@ final class FactRow: NSStackView {
             }
         }
 
+        /// The badge's INK, and the ink is what is read.
+        ///
+        /// **This was `Palette.ok` and `Palette.danger`, the system's FILL
+        /// colours, and they fail as text.** Measured on `core.home`: the
+        /// "Running" badge came out (52, 199, 89) on white — 2.22:1, where
+        /// WCAG AA asks 4.5:1 for text this size. The design system already
+        /// carries the answer in `okInk` and `dangerInk`, which are the same
+        /// hues taken far enough towards black to be read; the badge was
+        /// simply not using them.
+        ///
+        /// The "Ready" chip on the same page, one screen down, already used
+        /// `okInk` and measured 8.3:1. Two chips, one page, one readable and
+        /// one not.
         var color: NSColor {
             switch self {
-            case .healthy: return Palette.ok
-            case .unhealthy: return Palette.danger
+            case .healthy: return Palette.okInk
+            case .unhealthy: return Palette.dangerInk
             case .neutral: return Palette.secondaryInk
             }
         }

@@ -1,4 +1,5 @@
 {
+  "page" : "core.activity",
   "groups" : [
     {
       "y0" : 1016,
@@ -7,10 +8,9 @@
     },
     {
       "w" : 1200,
-      "y1" : 1320,
-      "y0" : 1016
+      "y0" : 1016,
+      "y1" : 1320
     }
   ],
-  "scale" : 2,
-  "page" : "core.activity"
+  "scale" : 2
 }

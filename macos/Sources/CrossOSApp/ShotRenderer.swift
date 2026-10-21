@@ -200,7 +200,28 @@ enum ShotRenderer {
                     hasAlpha: true, isPlanar: false,
                     colorSpaceName: .deviceRGB,
                     bytesPerRow: 0, bitsPerPixel: 0
-                ), let pieceContext = NSGraphicsContext(bitmapImageRep: piece) else { continue }
+                ) else { continue }
+                // **The piece's SIZE is the frame's size, in points, and it
+                // is set BEFORE the context is made.**
+                //
+                // A bitmap rep is created in PIXELS, and its point size
+                // defaults to the pixel size — so a context made from it
+                // measures in pixels while the cell was handed a frame in
+                // points, and the cell drew into the top-left QUARTER of
+                // the piece. The piece was then composited into a rect of
+                // the right size, so every control drawn this way came out
+                // at HALF its real size: measured, the Apply button is
+                // 59x24 in the live tree and drew as 29x11.
+                //
+                // A button at half size is not a button; it is a web button
+                // dropped into a native window, and it is what every
+                // screenshot in this repo has been showing.
+                //
+                // The size has to be set first because the CONTEXT reads it
+                // when it is made — setting it afterwards leaves the context
+                // measuring in pixels, which is the bug.
+                piece.size = frame.size
+                guard let pieceContext = NSGraphicsContext(bitmapImageRep: piece) else { continue }
 
                 NSGraphicsContext.saveGraphicsState()
                 NSGraphicsContext.current = pieceContext
@@ -295,8 +316,25 @@ enum ShotRenderer {
         // that visibly has eleven checkboxes in it.
         if let table = node as? NSTableView {
             table.sizeToFit()
+            // **Only the rows the table is SHOWING.**
+            //
+            // A table that scrolls has rows outside its clip view, and this
+            // walk asked for all of them: measured on `core.matrix`, the
+            // last rows' checkboxes were drawn past the bottom of the table
+            // and over the sentence below it, with their text missing — a
+            // picture of a table that has spilled out of itself.
+            //
+            // The clip view is the truth about what is on screen, and the
+            // row's own frame says where it is; a row outside the clip is
+            // not drawn by AppKit either.
+            let clip = table.enclosingScrollView?.contentView
             for row in 0..<table.numberOfRows {
                 guard let rowView = table.rowView(atRow: row, makeIfNecessary: true) else { continue }
+                if let clip {
+                    let visible = clip.bounds.intersection(
+                        rowView.convert(rowView.bounds, to: clip))
+                    guard !visible.isEmpty else { continue }
+                }
                 for cellView in rowView.subviews {
                     out.append(contentsOf: collectCells(cellView, root: root))
                 }

@@ -213,10 +213,22 @@ final class TableView: NSStackView {
         // the `activate` block above because `.isActive = true` returns
         // `[Any]` and the parameter is `[NSLayoutConstraint]` — a type
         // mismatch that reads as a layout problem and is a type problem.
+        //
+        // **A table that is taller than its box SCROLLS, and that is what
+        // the cap is for.** The rows that do not fit are not lost: the
+        // scroll view holds them and a reader scrolls to them. What they
+        // were doing — in the renders — was being drawn OUTSIDE the table,
+        // over the sentence below it, because the shot renderer drew every
+        // row's cells rather than the ones the clip view shows. That is
+        // fixed in `ShotRenderer`, where the clip view is the truth.
+        //
+        // The row height here is the HEIGHT OF THE BOX, not of a row: it
+        // is a guess at how much of the list to show before the list
+        // starts scrolling, and the rows themselves are 32pt whatever this
+        // says.
         let rows = CGFloat(max(1, content.rowCount))
         NSLayoutConstraint.activate([
-            scroll.heightAnchor.constraint(equalToConstant: rows * 26 + 26),
-            scroll.heightAnchor.constraint(lessThanOrEqualToConstant: 320),
+            scroll.heightAnchor.constraint(equalToConstant: min(rows * 26 + 26, 320)),
             scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 26),
         ])
 
@@ -310,7 +322,21 @@ final class TableView: NSStackView {
     }
 
     @objc private func clipResized() {
-        let width = scroll.contentSize.width
+        // **The SCROLL VIEW's own width.**
+        //
+        // Not `contentSize`, which is the size of the DOCUMENT: when the
+        // table is wider than the box, `contentSize` reports the table's
+        // own width and `fitColumns(to:)` was handed the width it was
+        // trying to fit INTO, so it scaled nothing. Measured on
+        // `core.activity`, four columns asked for 1060pt in a 600pt group
+        // and the last one ran off the right edge of the window with its
+        // text cut in half.
+        //
+        // The scroll view's bounds are the box. The clip view's bounds are
+        // the same number only once the clip has been laid out, and the
+        // notification this method answers fires before that — measured, the
+        // table's width came back zero and the table drew nothing at all.
+        let width = scroll.bounds.width
         guard width > 0 else { return }
         table.setFrameSize(NSSize(width: width, height: table.frame.height))
         fitColumns(to: width)
@@ -418,19 +444,29 @@ extension TableView: NSTableViewDelegate {
             let proxy = ToggleTarget.shared.register(checkbox, onChange: toggle.onChange)
             checkbox.target = proxy
             checkbox.action = #selector(ToggleTarget.fire(_:))
-            // The checkbox is CENTRED in its row, both ways. A cell view is
-            // given the column's frame and left to place itself, and an
-            // `NSButton` aligns itself to the BOTTOM of what it is given: the
-            // matrix's eleven checkboxes alternated between two heights down
-            // the last column, which reads as a rendering fault rather than
-            // as a column of checkboxes.
-            checkbox.frame = NSRect(
-                x: 0,
-                y: ((checkbox.frame.height - tableView.rowHeight) / 2).rounded(),
-                width: checkbox.frame.width,
-                height: tableView.rowHeight
-            )
-            return checkbox
+            // The checkbox lives in a CELL VIEW and is CENTRED in it, both
+            // ways.
+            //
+            // It used to be the cell view itself — the bare `NSButton` —
+            // with a hand-computed origin to nudge it up into the row. An
+            // `NSButton` given a frame aligns itself to the BOTTOM of what
+            // it is given, so the nudging was a fight with AppKit's own
+            // layout: measured on `core.matrix`, every checkbox sat about
+            // 14pt BELOW the row it belonged to, which is a column of
+            // checkboxes that belong to the row below.
+            //
+            // A cell view is given the column's frame and lays its own
+            // contents out, so centring the button in the cell is the
+            // whole fix and there is no number to get wrong.
+            let cell = NSTableCellView()
+            cell.translatesAutoresizingMaskIntoConstraints = false
+            checkbox.translatesAutoresizingMaskIntoConstraints = false
+            cell.addSubview(checkbox)
+            NSLayoutConstraint.activate([
+                checkbox.centerXAnchor.constraint(equalTo: cell.centerXAnchor),
+                checkbox.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            ])
+            return cell
         }
 
         let field = NSTextField(labelWithString: content.text(row: row, column: index))

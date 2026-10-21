@@ -130,7 +130,7 @@ private final class ProfileCard: NSStackView {
             // row somebody is looking at says "broken" rather than "already
             // there".
             let apply = NSButton(title: "Apply", target: ApplyTarget.shared, action: nil)
-            apply.bezelStyle = .rounded
+            apply.bezelStyle = .push
             // ⌘↩, which is what a macOS default button is on. Measured
             // before this: every button in the app reported `key=NONE`, so
             // applying a profile — the whole point of the page — could not be

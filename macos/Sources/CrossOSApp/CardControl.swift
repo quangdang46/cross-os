@@ -320,7 +320,7 @@ final class ErrorView: NSStackView {
         // "retry" means: re-fetch the data, reconnect the socket, or
         // something else. The view does not know.
         let retry = NSButton(title: "Retry", target: nil, action: nil)
-        retry.bezelStyle = .rounded
+        retry.bezelStyle = .push
         retry.keyEquivalent = "\r"
         retry.translatesAutoresizingMaskIntoConstraints = false
         if let onRetry {
@@ -553,6 +553,22 @@ enum Explain {
             return """
             The daemon is not answering. Start it with ./scripts/run.sh \
             --no-open, then reopen this window.
+
+            Reported by the daemon as: \(raw)
+            """
+        }
+        // The connection was CLOSED, which is a different failure from a
+        // connection that was never made: the daemon was there and then it
+        // was not.
+        //
+        // Measured on the Switcher page, the detail read
+        // `read: Error Domain=CrossOS Code=2 "(null)"` — a raw `NSError`
+        // with no description of its own, which is the one string in
+        // Foundation that reads as a bug report rather than as a sentence.
+        if lower.contains("closed the connection") || lower.contains("stopped answering") {
+            return """
+            The daemon stopped answering. It may have quit — start it again \
+            with ./scripts/run.sh, then reopen this window.
 
             Reported by the daemon as: \(raw)
             """

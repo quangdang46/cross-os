@@ -206,6 +206,30 @@ public enum CoreError: Error, CustomStringConvertible {
             return "\(method): timed out"
         }
     }
+
+    /// The sentence a person reads.
+    ///
+    /// `description` is for a log line: it names the method and the code.
+    /// This is for a screen, where the reader is not debugging anything and
+    /// has no idea what `core.windows` is.
+    ///
+    /// **The transport case used to put an `NSError` on the screen.**
+    /// Measured on the Switcher page: `read: Error Domain=CrossOS Code=2
+    /// "(null)"` — the daemon had closed the socket, the error had no
+    /// `localizedDescription` of its own, and the raw `NSError` description
+    /// is the one string in Foundation that reads as a bug report.
+    public var humanDescription: String {
+        switch self {
+        case .rpc(_, let message, _):
+            return message
+        case .transport(_, let method):
+            return "The daemon stopped answering (\(method)). It may have quit; start it again with ./scripts/run.sh."
+        case .decode(let method, _):
+            return "The daemon's answer to \(method) did not look right. This is a bug in CrossOS."
+        case .timeout(let method):
+            return "The daemon did not answer \(method) in time."
+        }
+    }
 }
 
 // MARK: - The live client
@@ -365,7 +389,12 @@ public actor LiveCoreClient: CoreClient {
         }
         if error != nil || isComplete {
             tearDown(error: error.map { CoreError.transport(underlying: $0, method: "read") }
-                ?? CoreError.transport(underlying: NSError(domain: "CrossOS", code: 2), method: "read"))
+                ?? CoreError.transport(
+                    underlying: NSError(
+                        domain: "CrossOS", code: 2,
+                        userInfo: [NSLocalizedDescriptionKey:
+                            "the daemon closed the connection"]),
+                    method: "read"))
             return
         }
         if connection != nil { beginReading() }
