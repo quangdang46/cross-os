@@ -143,6 +143,18 @@ cd macos && ./.build/debug/CrossOS --geometry   # print the switcher's arithmeti
 cd macos && ./.build/debug/crossos-probe pages  # the 15 pages the daemon serves
 ```
 
+**Build the daemon with `./scripts/build-core.sh`, never `go -C core build`.** Go's
+build cache keys a cgo package on the CONTENT of its `.go` files and its
+compiler flags — and nothing else. `platform/darwin/adapter/ax_bridge.c` and the
+tap bridge are plain `.c` files the cgo preambles reach with `#include`, so a
+file reached that way is invisible to the cache: editing the C changes nothing
+and the old object is linked back in. `scripts/build-core.sh` stamps the C
+sources' content into `CGO_CFLAGS`, which does invalidate the cache. The
+symptom is a bug that survives three rebuilds with a byte-identical faulting
+address — the fix "did not compile", and the real cause is upstream of the code
+you are looking at. `scripts/build-core.sh --test` runs the Go suite through the
+same stamp.
+
 The test suite is an **executable, not a `.testTarget`**, and that is an
 environment fact rather than a preference: neither XCTest nor swift-testing is
 importable from the Command Line Tools toolchain. The assertions live in

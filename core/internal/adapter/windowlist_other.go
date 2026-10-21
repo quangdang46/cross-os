@@ -50,6 +50,11 @@ func axWindowsReadsTotal() int         { return 0 }
 func axWindowsReadsForPID(pid int) int { return 0 }
 func axWindowsReadsReset()             {}
 
+// axOnScreenWindowIDs has no counterpart off darwin: there is no WindowServer
+// to ask for a front-to-back order. An empty answer is the honest one — the
+// order is unknown, not empty.
+func axOnScreenWindowIDs() []uint32 { return nil }
+
 // axPhysicalWindows has no counterpart off darwin: there is no WindowServer
 // walk to expose, and the shim answers with the capability gap rather than an
 // empty list so a caller that reaches for it cannot mistake silence for a

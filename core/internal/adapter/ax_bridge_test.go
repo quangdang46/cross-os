@@ -10,6 +10,7 @@ package adapter
 
 import (
 	"errors"
+	"runtime"
 	"testing"
 )
 
@@ -26,6 +27,37 @@ func TestAXFocusedDenialIsTyped(t *testing.T) {
 	}
 	if fw.BundleID == "" || fw.W <= 0 || fw.H <= 0 {
 		t.Fatalf("success path returned an implausible window: %+v", fw)
+	}
+}
+
+// An APPLICATION element is not a window, and the seam must say so.
+//
+// Measured on this machine with the screen locked: the frontmost
+// "application" is the loginwindow, and its AX "window" is the application
+// element itself — role AXApplication, a 0x0 frame, the title "loginwindow".
+// Reported as the focused window that is a fiction, and the daemon's poll
+// caches it, so a rule scoped to an application could be scoped to the
+// screen saver and match it.
+//
+// The answer is the truth: there is no window, so there is nothing focused.
+func TestAXFocusedThatIsNotAWindowIsTyped(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the AX bridge and the WindowServer only exist on darwin")
+	}
+	if !axAXTrusted() {
+		t.Skip("this binary has no accessibility grant")
+	}
+	q := NewWindowQuery(&Driver{})
+	fw, err := q.Focused()
+	if err != nil {
+		// The only typed answer that is not a denial is "no window".
+		if !errors.Is(err, errNoFocusedWindow) && !errors.Is(err, ErrPermissionDenied) {
+			t.Fatalf("Focused: %v, want a typed error", err)
+		}
+		return
+	}
+	if fw.Role == axRoleApplication || fw.W <= 0 || fw.H <= 0 {
+		t.Fatalf("the seam reported something that is not a window as one: %+v", fw)
 	}
 }
 

@@ -1383,28 +1383,33 @@ var tapLog = &daemonTapLog{}
 
 func (d *daemonTapLog) Log(stage, msg string) {
 	d.mu.Lock()
-	changed := !d.dropped0(stage, msg)
+	// A repeat of what is already showing is dropped and counted; anything
+	// else is a new message, and it is printed.
+	//
+	// **The comparison was inverted, and it was inverted in the direction
+	// that hides the message that matters.** `dropped0` reported whether
+	// the message was NEW, the code negated it into `changed`, and then
+	// printed only when `changed` was true — so the FIRST message was
+	// swallowed and every repeat after it was printed. Measured: 340KB of
+	// `adapter: ax focused failed (AXError -25204)` and nothing else, which
+	// is the symptom this sink exists to prevent, and the one line that
+	// said WHY it happened never appeared at all.
+	repeat := d.stage == stage && d.message == msg
 	suppressed := d.dropped
-	if changed {
-		d.stage, d.message, d.dropped = stage, msg, 0
-	} else {
+	if repeat {
 		d.dropped++
+	} else {
+		d.stage, d.message, d.dropped = stage, msg, 0
 	}
 	d.mu.Unlock()
 
-	if !changed {
+	if repeat {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "crossos: [%s] %s\n", stage, msg)
 	if suppressed > 0 {
 		fmt.Fprintf(os.Stderr, "crossos: [%s] (previous message repeated %d times)\n", stage, suppressed)
 	}
-}
-
-// dropped0 reports whether this is a message the sink has not already shown.
-// Callers hold the lock.
-func (d *daemonTapLog) dropped0(stage, msg string) bool {
-	return d.stage != stage || d.message != msg
 }
 
 // dispatch executes an authorized capability through the adapter seam

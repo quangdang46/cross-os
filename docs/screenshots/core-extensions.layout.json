@@ -1,4 +1,5 @@
 {
+  "page" : "core.extensions",
   "scale" : 2,
   "groups" : [
     {
@@ -8,9 +9,8 @@
     },
     {
       "y0" : 944,
-      "w" : 1200,
-      "y1" : 1360
+      "y1" : 1360,
+      "w" : 1200
     }
-  ],
-  "page" : "core.extensions"
+  ]
 }

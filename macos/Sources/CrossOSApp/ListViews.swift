@@ -519,7 +519,31 @@ final class AuditListView: CardControl {
                 line.textColor = Palette.primaryInk
                 line.lineBreakMode = .byTruncatingMiddle
                 line.maximumNumberOfLines = 1
+                // The text is LEFT aligned, and the field is the width of the
+                // row. Measured: the rows were drawn against the RIGHT edge
+                // of the pane, and the longest one — a full path to the
+                // config file — ran off the right of the window with its end
+                // cut away. A list of what the product owns is read from the
+                // left, and the longest path is the one that must be
+                // truncated in the MIDDLE, which is what
+                // `byTruncatingMiddle` is for.
+                line.alignment = .left
+                // The field is the WIDTH OF THE ROW, not the width of its
+                // text. A label resists being wider than its text, and a
+                // stack's `.width` alignment is only a proposal: measured,
+                // the rows kept their own width and were laid out against
+                // the RIGHT edge of the pane, with the longest one — a full
+                // path to the config file — running off the window.
+                line.setContentHuggingPriority(.defaultLow, for: .horizontal)
+                line.translatesAutoresizingMaskIntoConstraints = false
                 column.addArrangedSubview(line)
+                // The field IS the width of the row. The column's width is
+                // pinned to the card's by `replaceBody`, so this is not
+                // circular — and without it a label keeps the width of its
+                // own text, and the rows were laid out against the RIGHT
+                // edge of the pane with the longest one — a full path to
+                // the config file — running off the window.
+                line.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
 
                 // The owner and the moment, in the second tone. "What is this
                 // and is it mine" is the question the list exists to answer,
@@ -531,9 +555,18 @@ final class AuditListView: CardControl {
                 detail.textColor = Palette.secondaryInk
                 detail.lineBreakMode = .byTruncatingMiddle
                 detail.maximumNumberOfLines = 1
+                detail.alignment = .left
+                detail.setContentHuggingPriority(.defaultLow, for: .horizontal)
+                detail.translatesAutoresizingMaskIntoConstraints = false
                 column.addArrangedSubview(detail)
+                detail.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
             }
             replaceBody(with: column)
+            // The column's alignment is set AGAIN, after the card has taken
+            // it: `Card.setContent` sets a stack's alignment to `.leading`
+            // for the card's own sake, and it does so to the view it is
+            // given — which here is the column.
+            column.alignment = .leading
         } catch {
             showError(
                 "Could not read the audit list.",

@@ -45,11 +45,21 @@ class CardControl: NSStackView {
         //
         // The title is not known here, so the cap is marked as a repeat and
         // `PageViewController` drops it once it can compare the two.
-        let capText = Humanize.phrase(control.label.isEmpty ? control.id : control.label)
+        let raw = control.label.isEmpty ? control.id : control.label
+        let capText = Humanize.phrase(raw)
         heading.stringValue = capText
-        self.repeatsTitle = capText.caseInsensitiveCompare(
-            control.label.isEmpty ? control.id : control.label
-        ) == .orderedSame
+        // **A cap repeats the page's title when the label is a SINGLE WORD
+        // the humaniser leaves as it is** — "Profiles", "Safety", "Keyboard".
+        // A page's title is one of those, and the cap under it would say
+        // the same word twice.
+        //
+        // The test used to be "the humanised cap equals the label", and
+        // that is true of every label which is already a phrase: the Safety
+        // page's "What CrossOS created" was humanised to itself, compared
+        // equal to itself, and DROPPED — a heading that vanished because
+        // it was spelled correctly.
+        self.repeatsTitle = !raw.contains(" ")
+            && capText.caseInsensitiveCompare(raw) == .orderedSame
         // A section CAP, not a card title.
         //
         // It was `Typeface.cardTitle` in `Palette.primaryInk` — 15pt semibold
@@ -485,18 +495,40 @@ enum Humanize {
     static func phrase(_ word: String) -> String {
         if let known = phrases[word] { return known }
         guard !word.isEmpty else { return word }
+        // **Only an IDENTIFIER is humanised.**
+        //
+        // The job is turning a schema value into a sentence: `copyPath` is
+        // "Copy path" and `fileTypes` is "File types". A string that already
+        // reads as English is not an identifier, and running it through the
+        // splitter only mangles it.
+        //
+        // Measured on the Safety page: the daemon's label "What CrossOS
+        // created" came out as "What cross o s created" — the product's own
+        // name, broken into three lower-case words and spaced out, on the
+        // page whose job is to say what the product owns.
+        //
+        // Two things mark a string as a phrase rather than an identifier: it
+        // contains a space, or it starts with a capital. The matrix sends
+        // "Left Half" and "Open Window Switcher" in that Title Case, and
+        // splitting on the capital produced "Left  half" — a doubled gap on
+        // every sentence with no table entry, which is most of the Action
+        // column.
+        if word.contains(" ") { return word }
+        if word.first?.isUppercase == true { return word }
         // camelCase to words, then capitalise the first. A word that is one
         // letter is left alone: "x" is an axis name here, not a word.
         //
-        // The split must not ADD a space where the daemon already wrote one.
-        // The matrix sends "Left Half" and "Open Window Switcher" in that Title
-        // Case, and splitting on the capital produced "Left  half" and "Open
-        // window  switcher" — a doubled gap on every sentence with no table
-        // entry, which is most of the Action column.
+        // The split is at a capital that FOLLOWS A LOWERCASE LETTER, which
+        // is the camelCase boundary and nothing else: splitting at every
+        // capital turned "AXFocused" into "a x focused".
         var out = ""
-        for (index, character) in word.enumerated() {
-            if character.isUppercase, index > 0, out.last != " " { out += " " }
+        var previous: Character?
+        for character in word {
+            if character.isUppercase, let previous, previous.isLowercase {
+                out += " "
+            }
             out += String(character).lowercased()
+            previous = character
         }
         guard let first = out.first else { return out }
         return String(first).uppercased() + out.dropFirst()

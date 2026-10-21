@@ -24,6 +24,7 @@
 #import <ApplicationServices/ApplicationServices.h>
 #import <CoreFoundation/CoreFoundation.h>
 #import <string.h>
+#import <stdlib.h>
 
 typedef struct {
     int ok;            // 1 on success
@@ -296,7 +297,40 @@ typedef struct {
     cxax_wrow *out;
     int max;
     int n;
+    // The window ids already yielded, so the second walk can add only the
+    // rows the first one did not carry.
+    unsigned int *seen;
+    int seenCount;
+    int seenCap;
 } cxax_fill_ctx;
+
+// cxax_seen_add remembers a window id, growing the set when it is full.
+static void cxax_seen_add(cxax_fill_ctx *c, unsigned int wid) {
+    if (c->seenCount >= c->seenCap) {
+        int cap = c->seenCap == 0 ? 256 : c->seenCap * 2;
+        unsigned int *grown =
+            (unsigned int *)realloc(c->seen, (size_t)cap * sizeof(unsigned int));
+        if (grown == NULL) {
+            // The set stays as it is. A window id that is not remembered is
+            // a window that may be yielded twice, which is a duplicate row —
+            // far better than a walk that cannot finish.
+            return;
+        }
+        c->seen = grown;
+        c->seenCap = cap;
+    }
+    c->seen[c->seenCount++] = wid;
+}
+
+// cxax_seen_has reports whether a window id was already yielded.
+static int cxax_seen_has(cxax_fill_ctx *c, unsigned int wid) {
+    for (int i = 0; i < c->seenCount; i++) {
+        if (c->seen[i] == wid) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
 static void cxax_fill_yield(const cxax_wrow *row, void *vctx) {
     cxax_fill_ctx *c = (cxax_fill_ctx *)vctx;
@@ -304,20 +338,97 @@ static void cxax_fill_yield(const cxax_wrow *row, void *vctx) {
         c->out[c->n] = *row;
     }
     c->n++;
+    cxax_seen_add(c, row->window_id);
+}
+
+// cxax_fill_new_yield yields a row the set has not seen: the windows the
+// on-screen list does not carry.
+static void cxax_fill_new_yield(const cxax_wrow *row, void *vctx) {
+    cxax_fill_ctx *c = (cxax_fill_ctx *)vctx;
+    if (cxax_seen_has(c, row->window_id)) {
+        return;
+    }
+    cxax_fill_yield(row, vctx);
 }
 
 // cxax_list_windows walks the full window set — not just the on-screen one, so
 // a minimized window is a row rather than a gap. Pass a NULL out to count, the
 // same two-pass shape the app list uses, so no window is dropped by a cap and
 // no second call is needed to tell "full" from "complete".
+//
+// **THE ON-SCREEN LIST COMES FIRST, because it is the only list that carries
+// a focus order.** The WindowServer answers it front to back; the ALL list
+// does not, and a row read from it answers "where is this window" but not
+// "what is in front of it".
+//
+// Measured on this machine, with the system saying Finder was frontmost: the
+// on-screen list answers 38 (Finder) then 1759 (Docker) then 97 (WezTerm) —
+// it agrees with the system. The ALL list answers 1759 first and puts
+// Finder twenty-two rows down, among the cursor views and the menu strips,
+// and it does not even carry the on-screen windows in a stable order.
+//
+// That order is the switcher's focus order: the row's position in this walk
+// is its MRU rank, and the rank is what the switcher sorts by and what the
+// "current window" is read from. So the walk order has to come from the
+// list that has one.
+//
+// The ALL list follows, for the windows the on-screen list does not carry —
+// which is where a minimized window lives.
 int cxax_list_windows(cxax_wrow *out, int max) {
     cxax_fill_ctx c;
     c.out = out;
     c.max = max;
     c.n = 0;
-    cxax_walk_windows(kCGWindowListOptionAll | kCGWindowListExcludeDesktopElements,
+    c.seen = NULL;
+    c.seenCount = 0;
+    c.seenCap = 0;
+    cxax_walk_windows(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
                       cxax_fill_yield, &c);
+    cxax_walk_windows(kCGWindowListOptionAll | kCGWindowListExcludeDesktopElements,
+                      cxax_fill_new_yield, &c);
+    free(c.seen);
     return c.n;
+}
+
+// cxax_onscreen_window_ids writes the ids of the on-screen normal-layer
+// windows into `out`, in the WindowServer's own front-to-back order, and
+// returns how many there are.
+//
+// **This is the order the whole focus-order design rests on, read on its
+// own.** The on-screen list is the only one the WindowServer answers front
+// to back; the ALL list interleaves the windows of every space, the cursor
+// views and the menu strips, and answers "where is this window" but not
+// "what is in front of it".
+//
+// It is a separate read on purpose: the merged walk that builds the rows
+// and this one must be able to disagree, or the order cannot be checked
+// against anything.
+int cxax_onscreen_window_ids(unsigned int *out, int max) {
+    @autoreleasepool {
+        CFArrayRef list = CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+            kCGNullWindowID);
+        if (list == NULL) {
+            return 0;
+        }
+        CFIndex n = CFArrayGetCount(list);
+        int count = 0;
+        for (CFIndex i = 0; i < n; i++) {
+            CFDictionaryRef info = (CFDictionaryRef)CFArrayGetValueAtIndex(list, i);
+            if (info == NULL || CFGetTypeID(info) != CFDictionaryGetTypeID()) {
+                continue;
+            }
+            if (cxax_cf_int(info, kCGWindowLayer, -1) != 0) {
+                continue;
+            }
+            if (out != NULL && count < max) {
+                out[count] = (unsigned int)cxax_cf_int(info, kCGWindowNumber, 0);
+            }
+            count++;
+        }
+        CFRelease(list);
+        return count;
+    }
 }
 
 // cxax_front_wid reports the window the user is looking at when the frontmost
@@ -577,6 +688,21 @@ static int cxax_acquire_app(pid_t pid, int windows, int *err) {
             if (w == NULL) {
                 continue;
             }
+            // **THE WINDOW ELEMENT IS BOUNDED TOO.**
+            //
+            // The timeout above covers the batched read on the application
+            // element. Every call after it is made on the WINDOW element —
+            // the frame read below, the title read, and the raise that a
+            // focus performs — and a timeout is per element, so an
+            // unbounded window element leaves those three unbounded.
+            //
+            // Measured: a focus that stalled on a busy application took
+            // 3.24 SECONDS, and the switcher is on screen while it happens.
+            // The bound is the same one the application element gets, and
+            // the cost of hitting it is the same one the design already
+            // pays: an application that cannot answer in time has its
+            // windows left unnamed, and an unnamed window is not listed.
+            AXUIElementSetMessagingTimeout(w, 0.15);
             // The element's FRAME is what identifies it, and it is read
             // publicly. The window id it used to be keyed by came from a
             // private function that faults; see `cxax_elem_find`.
@@ -723,6 +849,24 @@ int cxax_app_titles(pid_t pid, const unsigned int *wids, const double *bounds,
     return max;
 }
 
+// cxax_wait_front waits for an application to become the frontmost one, for
+// at most `budget` seconds, and reports whether it did.
+//
+// The wait is a RUN LOOP and not a sleep: the activation lands on the
+// WindowServer's own turn, and the run loop is what lets that turn happen
+// while this thread waits for it.
+static int cxax_wait_front(pid_t pid, double budget) {
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:budget];
+    while ([deadline timeIntervalSinceNow] > 0) {
+        NSRunningApplication *front = [[NSWorkspace sharedWorkspace] frontmostApplication];
+        if (front != nil && [front processIdentifier] == pid) {
+            return 1;
+        }
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    }
+    return 0;
+}
+
 // cxax_focus_window raises the window with the given frame and brings its
 // application forward. The element comes from the cache when it is there and
 // from the one batched read when it is not, so a repeated focus on the same
@@ -768,6 +912,28 @@ int cxax_focus_window(pid_t pid, double x, double y, double w, double h,
             }
             return 0;
         }
+        // **THE APP'S KEY WINDOW IS SET TO THE ONE THAT WAS ASKED FOR.**
+        //
+        // The raise orders an application's windows among themselves. It
+        // does not say which of them the application brings forward when it
+        // is activated, and that is a different window: an application with
+        // several windows has a key window, and the activation puts THAT
+        // one in front.
+        //
+        // Measured on this machine: Tailscale's settings window was raised
+        // — the raise reported success — and the window that came forward
+        // was not it. The window the user picked has to be the app's
+        // focused window for the activation to bring it forward, so it is
+        // set to be.
+        {
+            AXUIElementRef appEl = AXUIElementCreateApplication(pid);
+            if (appEl != NULL) {
+                // The same bound as every other call into an application.
+                AXUIElementSetMessagingTimeout(appEl, 0.15);
+                AXUIElementSetAttributeValue(appEl, kAXFocusedAttribute, el);
+                CFRelease(appEl);
+            }
+        }
         NSRunningApplication *app =
             [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
         if (app != nil) {
@@ -780,13 +946,44 @@ int cxax_focus_window(pid_t pid, double x, double y, double w, double h,
             // front window read straight afterwards reads the OLD front. The
             // wait is for the app to become front, and never longer than the
             // budget — the switcher is on screen while this happens.
-            NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:0.8];
-            while ([deadline timeIntervalSinceNow] > 0) {
-                NSRunningApplication *front = [[NSWorkspace sharedWorkspace] frontmostApplication];
-                if (front != nil && [front processIdentifier] == pid) {
-                    break;
+            int landed = cxax_wait_front(pid, 0.4);
+            if (!landed) {
+                // **A REFUSED ACTIVATION IS ASKED AGAIN.**
+                //
+                // Measured on this machine: the activation is sometimes
+                // swallowed. The window still comes to the front — the
+                // raise above is what does that, and it happens before the
+                // activation is asked for — but the application does not
+                // become the frontmost one, so the keyboard stays where it
+                // was. Asking again lands it.
+                //
+                // The budget is split rather than doubled, so the whole
+                // wait is what it was: the user is waiting on the switcher
+                // dismissing, and the window they asked for is already in
+                // front.
+                [app activateWithOptions:0];
+                landed = cxax_wait_front(pid, 0.4);
+            }
+            if (!landed) {
+                // **A REFUSAL IS REPORTED, NOT ABSORBED.**
+                //
+                // The application was asked to come forward and did not: the
+                // keyboard stayed where it was. Saying "focused" would be a
+                // lie the user finds out from their next keystroke going
+                // somewhere else — and the caller cannot tell a refusal from
+                // a success by the return value alone.
+                //
+                // The window IS in front — the raise did that — so this is
+                // a partial answer, and it is the honest one: the keyboard
+                // did not come over.
+                //
+                // The return value is 2, and not 0, so the caller can tell
+                // this from an AX failure: the raise worked, the platform
+                // did not hand the activation over.
+                if (err != NULL) {
+                    *err = 0;
                 }
-                [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+                return 2;
             }
         }
         if (err != NULL) {
@@ -799,6 +996,22 @@ int cxax_focus_window(pid_t pid, double x, double y, double w, double h,
 // The grant, as one boolean. Read before any call into another app, so a
 // machine without accessibility consent pays nothing and learns immediately.
 int cxax_ax_trusted(void) { return AXIsProcessTrusted() ? 1 : 0; }
+
+// **The screen's lock state is NOT read from the session dictionary.**
+//
+// `CGSessionCopyCurrentDictionary()` is the public way to ask, and it was
+// tried: the daemon hung on it. Measured — two threads stuck in it for the
+// life of the process, the stack ending in
+// `CGSLookupServerRootPort → bootstrap_look_up → mach_msg`, an XPC lookup
+// that nothing was answering. The screen was locked at the time, and a
+// locked screen is exactly when the answer would be wanted.
+//
+// A daemon that blocks on a system call to answer a question it can answer
+// for free is worse than a daemon that never answers it, and the question
+// has a free answer: the AX plane itself. A locked screen answers the
+// focused-window query with the APPLICATION element — role AXApplication, a
+// 0x0 frame — and an application element is never a window. That is read
+// from the element already in hand, costs nothing, and cannot hang.
 
 // Per-app and total batched-acquisition counts, with a reset. These are the
 // measurement the window seam is held to: a minimized window and an on-screen

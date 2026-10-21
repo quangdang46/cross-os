@@ -373,6 +373,13 @@ final class FactRow: NSStackView {
 /// you press…Security.adapter: tap refused" — four sentences, one line, no
 /// gaps. The fix was a column, and a column is what this is.
 final class ChecklistView: NSStackView {
+    /// How far a readiness reason is indented, so it sits under the TITLE
+    /// rather than under the status chip.
+    ///
+    /// The chip is 70pt, the gap is 10 and the icon is 14 with a 10pt gap
+    /// after it: 70 + 10 + 14 + 10 = 104.
+    static let detailIndent: CGFloat = 104
+
     init(control: Control, context: ControlContext) {
         super.init(frame: .zero)
         // A stack in name only is a stack that measures nothing: without an
@@ -472,7 +479,14 @@ final class ChecklistView: NSStackView {
             icon.setContentHuggingPriority(.required, for: .horizontal)
             icon.setContentHuggingPriority(.required, for: .vertical)
             icon.setContentCompressionResistancePriority(.required, for: .horizontal)
-            icon.isHidden = row.ready
+            // **The icon KEEPS ITS SLOT when there is nothing to warn
+            // about.** A hidden view is removed from a stack's layout
+            // entirely — spacing and all — so a ready row's title sat
+            // 10pt to the left of a not-ready row's title, and a list whose
+            // whole job is to be scanned had two different left edges. The
+            // image is emptied instead of hidden, so the column is a column.
+            //
+            // The image is nil rather than empty, so nothing is drawn.
 
             let label = NSTextField(labelWithString: row.label)
             label.font = Typeface.body
@@ -509,7 +523,33 @@ final class ChecklistView: NSStackView {
                 detail.lineBreakMode = .byWordWrapping
                 detail.maximumNumberOfLines = 0
                 detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-                column.addArrangedSubview(detail)
+                // The frame is AutoLayout's, not the autoresizing mask's.
+                // A label's mask wins over a constraint on it, and the
+                // indent below was ignored for exactly that reason: the
+                // reason sat at the group's left margin with the indent
+                // measured in the file and nowhere on the screen.
+                detail.translatesAutoresizingMaskIntoConstraints = false
+                // **The reason is INDENTED to the title's edge.**
+                //
+                // It used to start at the group's left margin, under the
+                // chip, so the sentence read as a second line of the STATUS
+                // rather than of the thing the status is about: "Not ready /
+                // windows-keyboard is not switched on / ⚠ Windows shortcuts".
+                //
+                // The title starts after the chip, the gap and the icon, so
+                // the reason starts there too.
+                let holder = NSView()
+                holder.translatesAutoresizingMaskIntoConstraints = false
+                holder.addSubview(detail)
+                column.addArrangedSubview(holder)
+                NSLayoutConstraint.activate([
+                    detail.leadingAnchor.constraint(
+                        equalTo: holder.leadingAnchor, constant: ChecklistView.detailIndent),
+                    detail.trailingAnchor.constraint(equalTo: holder.trailingAnchor),
+                    detail.topAnchor.constraint(equalTo: holder.topAnchor),
+                    detail.bottomAnchor.constraint(equalTo: holder.bottomAnchor),
+                    holder.widthAnchor.constraint(equalTo: column.widthAnchor),
+                ])
             }
 
             // Rows breathe. `stack.spacing = 0` because the group draws the
@@ -942,10 +982,34 @@ final class ButtonRowView: NSStackView {
             addSubview(note)
             NSLayoutConstraint.activate([
                 note.leadingAnchor.constraint(equalTo: button.trailingAnchor, constant: Gap.group),
-                note.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+                // The note FILLS the gap: its trailing edge IS the row's
+                // trailing edge.
+                //
+                // It was `lessThanOrEqualTo`, which says the note may end
+                // anywhere before the row's end — and a label with a low
+                // hugging priority keeps its INTRINSIC width, so it ended
+                // 22pt past the row and the window's edge. Measured on
+                // `core.safety`: "Login item stays. Reversible via Re-…"
+                // ran off the right of the screen with its second line cut
+                // in half.
+                //
+                // With the edge EQUAL, the note's width is what is left of
+                // the row after the button, and a sentence that does not fit
+                // wraps onto a second line — which is what a sentence is for.
+                note.trailingAnchor.constraint(equalTo: trailingAnchor),
                 note.firstBaselineAnchor.constraint(equalTo: button.firstBaselineAnchor),
-                note.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
-                note.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+                // The note SPANS the row's height, and the row takes the
+                // note's height. It was `top >= ` and `bottom <= `, which
+                // says the note fits INSIDE the row — and the row is 32pt
+                // while a two-line note with its first line on the button's
+                // baseline needs more than that, so the second line was
+                // clipped away. Measured: "Login item stays. Reversible via
+                // Re-enable." showed its first line and lost "enable."
+                //
+                // With the note's edges EQUAL to the row's, the row is as
+                // tall as the note needs and the sentence is whole.
+                note.topAnchor.constraint(equalTo: topAnchor),
+                note.bottomAnchor.constraint(equalTo: bottomAnchor),
             ])
         }
 

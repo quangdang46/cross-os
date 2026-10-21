@@ -8,3 +8,31 @@ var errTapNotWired = errors.New("adapter: native bridge not yet wired (spike-pro
 
 // errZeroWindow rejects move/resize against a zero window id pre-bridge.
 var errZeroWindow = errors.New("adapter: zero window id")
+
+// errNoFocusedWindow reports that there is no focused window to act on.
+//
+// **It is not a permission problem.** The accessibility grant can be present
+// and correct while the Accessibility plane has no window to name — a locked
+// screen answers with the application element, and an application with no
+// windows answers the same way. So this keeps its own identity: a caller
+// that mapped it onto ErrPermissionDenied would send the user to System
+// Settings to grant a permission they already granted.
+var errNoFocusedWindow = errors.New("adapter: no focused window")
+
+// ErrFocusRefused reports that the window was raised but the platform did
+// not hand the activation over.
+//
+// **The raise worked.** The window is in front; the application did not
+// become the frontmost one, so the keyboard stayed where it was. macOS
+// swallows an activation now and then — measured on this machine, about one
+// time in twelve — and it is the platform's call, not the daemon's.
+//
+// It keeps its own identity because the caller has to tell it apart from a
+// failure: a refusal is a window the user can see and a keyboard that is
+// somewhere else, and a switcher that says "could not focus" about it is
+// more useful than one that says "focused" and lets the next keystroke go
+// to another application.
+//
+// It is exported because the refusal crosses the wire as a message, and a
+// caller that reads the message needs to recognise this one.
+var ErrFocusRefused = errors.New("adapter: the activation was refused")

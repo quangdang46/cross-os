@@ -354,6 +354,22 @@ class Card: NSStackView {
     /// leading/trailing pair silently overrides `edgeInsets` and puts every
     /// line of text on the hairline.
     func setContent(_ view: NSView) {
+        // **The card's previous content is REPLACED, not joined.**
+        //
+        // `setContent` used to add, and a card that had its content set
+        // twice kept BOTH: `SectionView` gives its card an empty body, and
+        // a caller that fills the group with its own column added a second
+        // child. Measured on `core.home`: `Card 600x148` holding an empty
+        // `NSStackView 600x24` and then the rows — 24pt of nothing between
+        // the "Status" cap and the first fact, on every page that fills a
+        // section's group.
+        //
+        // A card has ONE content. Saying "set" and adding is how a gap gets
+        // into a layout that nobody put there.
+        arrangedSubviews.forEach {
+            removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
         // `view` is already a vertical stack in most cases; adopting it means
         // the card's height IS the content's height, with no intermediate
         // view to mis-measure.

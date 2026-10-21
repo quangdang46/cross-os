@@ -113,8 +113,13 @@ func TestErrorsSurfaced(t *testing.T) {
 	// The same contract on the Accessibility side, and the same answer: a
 	// machine that has granted the consent has no denial to report, so the
 	// assertion is made where there is one.
+	//
+	// "No focused window" is the other typed answer, and it is NOT a denial:
+	// the grant can be present and correct while the Accessibility plane has
+	// no window to name, and telling the user to grant a permission they
+	// already granted would be a lie about the machine.
 	if _, err := q.Focused(); err != nil {
-		if !errors.Is(err, ErrPermissionDenied) {
+		if !errors.Is(err, ErrPermissionDenied) && !errors.Is(err, errNoFocusedWindow) {
 			t.Fatalf("Focused: %v, want a typed denial", err)
 		}
 	}

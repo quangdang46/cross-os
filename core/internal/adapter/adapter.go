@@ -55,6 +55,15 @@ type FocusedWindow struct {
 	X, Y, W, H float64
 }
 
+// axRoleApplication is the Accessibility role of an APPLICATION element.
+//
+// It is the role that says "this is not a window", and it is the answer the
+// plane gives when the frontmost application has no window to point at — a
+// locked screen, or an application that only lives in the menu bar. The
+// constant lives here, and not in the darwin seam, because the test file
+// that reads it is built for every GOOS.
+const axRoleApplication = "AXApplication"
+
 // MoveResize requests an AX/UIA move/resize. Validated by Core first.
 type MoveResize struct {
 	ID           uint32

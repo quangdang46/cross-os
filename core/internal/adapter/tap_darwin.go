@@ -56,6 +56,29 @@ func (q *darwinQuery) Focused() (FocusedWindow, error) {
 	if err != nil {
 		return FocusedWindow{}, q.driver.ReportError("query", err)
 	}
+	// **AN APPLICATION ELEMENT IS NOT A WINDOW.**
+	//
+	// The Accessibility plane answers the focused-window query with the
+	// frontmost application's OWN element when that application has no
+	// window to point at, and the element says so: the role is
+	// AXApplication, and the frame is 0x0. Measured on this machine with
+	// the screen locked: the frontmost "application" is the loginwindow,
+	// and its AX "window" is the loginwindow's own application element.
+	//
+	// Reported as the focused window, that is a fiction — a window of no
+	// size, owned by the screen saver — and the daemon's poll caches it,
+	// so a rule scoped to an application could be scoped to the screen
+	// saver and match it.
+	//
+	// The truth is simpler: there is no window, so there is nothing
+	// focused. The caller keeps whatever it last knew, which was true when
+	// it was true.
+	//
+	// The empty frame is the same answer said the other way round: a window
+	// with no size is not something to aim a rule at.
+	if fw.Role == axRoleApplication || fw.W <= 0 || fw.H <= 0 {
+		return FocusedWindow{}, q.driver.ReportError("query", errNoFocusedWindow)
+	}
 	return fw, nil
 }
 

@@ -179,22 +179,56 @@ func axAppTitles(pid int, ids []uint32, bounds [][4]float64) (map[uint32]string,
 // reason it is in `axAppTitles`.
 func axFocusWindow(pid int, frame [4]float64) error {
 	var code C.int
-	// The RETURN VALUE says whether the window was raised; `code` carries the
-	// AX error when it was not. Reading `code` for the outcome would report
-	// a failure on every success, because a successful raise sets it to zero.
+	// The RETURN VALUE says what happened; `code` carries the AX error when
+	// something failed. Reading `code` for the outcome would report a
+	// failure on every success, because a successful raise sets it to zero.
+	//
+	// The three answers are kept apart because the caller has to act on
+	// them differently: 1 is "the window is focused", 0 is "the raise
+	// failed, and here is the AX error", and 2 is "the raise worked and the
+	// platform did not hand the activation over" — a refusal, which is not
+	// the daemon's to fix and is not a failure of the raise.
 	raised := C.cxax_focus_window(C.int(pid),
 		C.double(frame[0]), C.double(frame[1]), C.double(frame[2]), C.double(frame[3]),
 		&code)
-	if raised == 0 {
+	switch raised {
+	case 1:
+		return nil
+	case 2:
+		return ErrFocusRefused
+	default:
 		return axError("focus", int(code))
 	}
-	return nil
 }
 
 // axFrontWindowID is the window the frontmost application is showing, or 0
 // when that is not a fact the physical plane can answer.
 func axFrontWindowID() uint32 {
 	return uint32(C.cxax_front_wid())
+}
+
+// axOnScreenWindowIDs is the WindowServer's own front-to-back order of the
+// on-screen normal-layer windows.
+//
+// It is read on its own, separately from the walk that builds the rows, so
+// the order the rows claim can be CHECKED against the order the platform
+// reports. A list and the witness to its order that come from the same
+// walk cannot disagree, and a walk that is not in front-to-back order would
+// never be caught.
+func axOnScreenWindowIDs() []uint32 {
+	n := int(C.cxax_onscreen_window_ids(nil, 0))
+	if n == 0 {
+		return nil
+	}
+	buf := make([]C.uint, n)
+	if got := int(C.cxax_onscreen_window_ids(&buf[0], C.int(n))); got < n {
+		n = got
+	}
+	out := make([]uint32, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, uint32(buf[i]))
+	}
+	return out
 }
 
 // axWindowsReadsTotal, axWindowsReadsForPID and axWindowsReadsReset expose the

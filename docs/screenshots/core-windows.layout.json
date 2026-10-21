@@ -1,6 +1,6 @@
 {
-  "page" : "core.windows",
   "scale" : 2,
+  "page" : "core.windows",
   "groups" : [
     {
       "y0" : 1056,
@@ -8,8 +8,8 @@
       "w" : 1200
     },
     {
-      "y0" : 1056,
       "w" : 1200,
+      "y0" : 1056,
       "y1" : 1360
     }
   ]
