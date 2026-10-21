@@ -503,6 +503,14 @@ func TestFocusRefusesAWindowThatIsNotThere(t *testing.T) {
 // A bridge error reaches the stage log, not only the caller. Without it the
 // denial and the capability gap are the same line in a bug report.
 func TestWindowListerReportsErrorsToTheStageLog(t *testing.T) {
+	// The LIST half of this needs a denial to report, and a denial is a
+	// machine without the accessibility grant. On a machine WITH the grant
+	// the list succeeds and there is nothing to report, so the test is
+	// skipped there rather than failing for a reason that is not about the
+	// code under test — the same rule the live clauses use in reverse.
+	if runtime.GOOS == "darwin" && axAXTrusted() {
+		t.Skip("this machine has the accessibility grant, so the list cannot fail and there is no query line to report")
+	}
 	log := &memLog{}
 	l := NewWindowLister(&Driver{Log: log})
 	l.ListWindows()

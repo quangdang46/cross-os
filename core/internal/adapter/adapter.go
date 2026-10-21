@@ -95,6 +95,17 @@ type WindowRow struct {
 	X, Y, W, H float64
 	OnScreen   bool
 	Minimized  bool
+	// MRU is the window's rank in the platform's front-to-back order: 0 is
+	// the window the user is looking at, higher is further back.
+	//
+	// It is carried beside the row rather than BEING the row's position,
+	// because the list is sorted for stability — bundle id, then window id —
+	// and a stable order is not a focus order. The switcher needs both: a
+	// list that reshuffles between polls reads as the switcher losing track
+	// of the windows it just showed, and a switcher that draws its current
+	// window in the middle of the list reads as a switcher that does not
+	// know which window is current.
+	MRU int
 }
 
 // minimizedFrom decodes one batched row into a minimized flag. The ordered-in

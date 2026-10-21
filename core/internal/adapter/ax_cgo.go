@@ -19,6 +19,22 @@ package adapter
 */
 import "C"
 
+// **The C file above is #included, not compiled as a cgo source, and Go's build
+// cache does not track it.** The cache key for a cgo package is the content of
+// the .go files and the compiler flags; a .c file reached through an #include
+// is invisible to it. So editing platform/darwin/adapter/ax_bridge.c and
+// rebuilding produces the SAME binary — the change compiles nowhere and the
+// daemon keeps the old bridge.
+//
+// Measured: the SIGBUS fix in cxax_app_titles was edited, rebuilt, and
+// tested against a binary that did not contain it, which is why the crash
+// reproduced with a byte-identical address three times over.
+//
+// The build stamps the C sources' content into the compiler flags, so a
+// change to any of them changes the action id and the bridge is recompiled.
+// See scripts/build-core.sh, which every build goes through.
+
+
 import (
 	"fmt"
 )
@@ -118,21 +134,34 @@ func axListWindows() ([]WindowRow, error) {
 	return out, nil
 }
 
-// axAppTitles resolves titles for the given window ids of one process. This is
+// axAppTitles resolves titles for the given windows of one process. This is
 // the semantic plane acquired lazily: the bridge spends at most one batched
 // kAXWindows read on the app and answers from the elements that read returned.
-func axAppTitles(pid int, ids []uint32) (map[uint32]string, error) {
+//
+// `bounds` is each window's frame — x, y, w, h — in the same order as `ids`.
+// The frame is how an Accessibility element is matched to the physical row it
+// belongs to: the AX plane reports a window's frame in the same coordinates
+// CGWindowList reports its bounds, and measured on this machine the two are
+// the same four numbers to the point. The private API that used to do this
+// matching faulted and took the daemon down with it; see the bridge.
+func axAppTitles(pid int, ids []uint32, bounds [][4]float64) (map[uint32]string, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
 	wids := make([]C.uint, len(ids))
+	frames := make([]C.double, len(ids)*4)
 	for i, id := range ids {
 		wids[i] = C.uint(id)
+		frames[i*4+0] = C.double(bounds[i][0])
+		frames[i*4+1] = C.double(bounds[i][1])
+		frames[i*4+2] = C.double(bounds[i][2])
+		frames[i*4+3] = C.double(bounds[i][3])
 	}
 	const titleCap = 512
 	buf := make([]C.char, len(ids)*titleCap)
 	var code C.int
-	C.cxax_app_titles(C.int(pid), &wids[0], &buf[0], C.int(titleCap), C.int(len(ids)), &code)
+	C.cxax_app_titles(C.int(pid), &wids[0], &frames[0], &buf[0], C.int(titleCap),
+		C.int(len(ids)), &code)
 	if code != 0 {
 		return nil, axError("app titles", int(code))
 	}
@@ -145,10 +174,18 @@ func axAppTitles(pid int, ids []uint32) (map[uint32]string, error) {
 	return out, nil
 }
 
-// axFocusWindow raises the window and brings its application forward.
-func axFocusWindow(id uint32, pid int) error {
+// axFocusWindow raises the window with the given frame and brings its
+// application forward. The frame is the window's identity here, for the
+// reason it is in `axAppTitles`.
+func axFocusWindow(pid int, frame [4]float64) error {
 	var code C.int
-	if C.cxax_focus_window(C.uint(id), C.int(pid), &code) == 0 {
+	// The RETURN VALUE says whether the window was raised; `code` carries the
+	// AX error when it was not. Reading `code` for the outcome would report
+	// a failure on every success, because a successful raise sets it to zero.
+	raised := C.cxax_focus_window(C.int(pid),
+		C.double(frame[0]), C.double(frame[1]), C.double(frame[2]), C.double(frame[3]),
+		&code)
+	if raised == 0 {
 		return axError("focus", int(code))
 	}
 	return nil
@@ -169,3 +206,9 @@ func axWindowsReadsTotal() int { return int(C.cxax_windows_reads_total()) }
 func axWindowsReadsForPID(pid int) int { return int(C.cxax_windows_reads_for_pid(C.int(pid))) }
 
 func axWindowsReadsReset() { C.cxax_windows_reads_reset() }
+
+
+
+
+
+

@@ -50,7 +50,12 @@ mkdir -p "$BIN"
 
 # --- daemon -----------------------------------------------------------------
 say "Building the daemon"
-go -C core build -o "$DAEMON" ./cmd/crossos/
+# The build goes through scripts/build-core.sh rather than `go build` directly,
+# because Go's build cache does not track the C files the cgo preambles
+# #include — so a plain `go build` after editing the AX or tap bridge produces
+# a binary that does not contain the change. The script stamps the C sources'
+# content into the compiler flags, which closes that hole.
+"$ROOT/scripts/build-core.sh" >/dev/null
 
 # --- shell ------------------------------------------------------------------
 # The shell is a Swift package now, and SwiftPM's own staleness rules are the

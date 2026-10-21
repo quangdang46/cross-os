@@ -118,12 +118,18 @@ func (s *switcherService) rows() ([]winswitch.Row, error) {
 		return nil, err
 	}
 	out := make([]winswitch.Row, 0, len(raw))
-	for i, w := range raw {
+	for _, w := range raw {
 		out = append(out, winswitch.Row{
-			ID:             strconv.FormatUint(uint64(w.ID), 10),
-			AppID:          w.BundleID,
-			Title:          w.Title,
-			LastFocusOrder: i,
+			ID:    strconv.FormatUint(uint64(w.ID), 10),
+			AppID: w.BundleID,
+			Title: w.Title,
+			// The MRU rank the window plane measured — the platform's own
+			// front-to-back order — and NOT the row's position in the list.
+			// The list is sorted for stability, and a stable order is not a
+			// focus order: the switcher reads its current window as the
+			// first row, and with the list's own index that was whichever
+			// window happened to sort first by bundle id.
+			LastFocusOrder: w.MRU,
 			Minimized:      w.Minimized,
 		})
 	}

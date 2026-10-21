@@ -67,11 +67,24 @@ func (q *darwinLister) ListWindows() ([]WindowRow, error) {
 		if r.BundleID == "" || r.Title == "" || isSurface(r.OnScreen, r.W, r.H) {
 			continue
 		}
+		// The list arrives front to back, so the row's position HERE is its
+		// MRU rank. It is recorded before the sort below, because the sort
+		// is a stability measure and a stable order is not a focus order.
+		r.MRU = len(out)
 		out = append(out, r)
 	}
 	// The window switcher polls this. A list that reshuffles between polls
 	// reads as the switcher losing track of the windows it just showed, so the
 	// order is fixed: bundle id, then window id.
+	//
+	// **The focus order travels beside the list, not inside it.** The
+	// switcher reads its current window as the FIRST row — "the current
+	// window is the front tile whenever the list has one", and the default
+	// pick steps over it to reach the window you were on before. A list
+	// sorted by bundle id has no front window in it, so the tile the user
+	// was on was drawn in the middle of the list and the pick stepped over
+	// the wrong row. The MRU rank above is what carries that, and the
+	// switcher orders by it.
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].BundleID != out[j].BundleID {
 			return out[i].BundleID < out[j].BundleID
@@ -85,8 +98,20 @@ func (q *darwinLister) ListWindows() ([]WindowRow, error) {
 // most one batched read per application. Screen Recording already answers
 // kCGWindowName on a machine that granted it, in which case there is nothing
 // left to ask and this loop never runs.
+//
+// **One application's failure is that application's failure.** A single app
+// whose Accessibility server answers badly used to abort the whole list, and
+// the Switcher page showed "Could not list windows." with an empty list under
+// it — every other app's windows thrown away because one of them misbehaved.
+// A window list that is missing ONE app's windows is a far better answer
+// than a window list that is empty, so a failure here is recorded and the
+// walk continues.
+//
+// The error is still returned when NO application could be named, because
+// that is a fact about the machine and not about one app.
 func (q *darwinLister) fillTitles(rows []WindowRow) error {
 	byApp := make(map[int][]uint32)
+	frames := make(map[int][][4]float64)
 	var order []int
 	for _, r := range rows {
 		if r.Title != "" {
@@ -96,16 +121,23 @@ func (q *darwinLister) fillTitles(rows []WindowRow) error {
 			order = append(order, r.PID)
 		}
 		byApp[r.PID] = append(byApp[r.PID], r.ID)
+		frames[r.PID] = append(frames[r.PID], [4]float64{r.X, r.Y, r.W, r.H})
 	}
 	// Sorted so the order applications are read in is itself fixed; the count
 	// is per application either way, but an unstable order would make a
 	// failure here unreproducible.
 	sort.Ints(order)
+	var firstErr error
+	named := 0
 	for _, pid := range order {
-		titles, err := axAppTitles(pid, byApp[pid])
+		titles, err := axAppTitles(pid, byApp[pid], frames[pid])
 		if err != nil {
-			return err
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
+		named++
 		for i := range rows {
 			if rows[i].PID == pid {
 				if t, ok := titles[rows[i].ID]; ok {
@@ -113,6 +145,9 @@ func (q *darwinLister) fillTitles(rows []WindowRow) error {
 				}
 			}
 		}
+	}
+	if firstErr != nil && named == 0 {
+		return firstErr
 	}
 	return nil
 }
@@ -147,7 +182,8 @@ func (q *darwinLister) Focus(id uint32) error {
 				// the caller could not have named.
 				return q.driver.ReportError("focus", errWindowGone)
 			}
-			return q.driver.ReportError("focus", axFocusWindow(id, r.PID))
+			return q.driver.ReportError("focus",
+				axFocusWindow(r.PID, [4]float64{r.X, r.Y, r.W, r.H}))
 		}
 	}
 	return q.driver.ReportError("focus", errWindowGone)
