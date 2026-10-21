@@ -83,20 +83,29 @@ public enum Palette {
         }
     }
 
-    /// The rail's selected row, as the system actually draws it.
+    /// The fill the nav rail paints under the selected row.
     ///
-    /// **Not the accent.** AppKit's `.regular` selection highlight tints the
-    /// row with the user's accent at a wash, which on this host resolves to a
-    /// neutral grey — measured on the dark render as `(70, 70, 70)` with a
-    /// white label, 9.44:1.
+    /// **The rail paints this itself**, and the reason it does is that
+    /// AppKit's own selection highlight cannot be relied on: it is a
+    /// VIBRANT MATERIAL, and a vibrant material follows the window's key
+    /// state — the accent when the app is frontmost, a grey when it is in
+    /// the background. One run measured the selected row at (220, 220, 220)
+    /// and a later run measured the same row in the accent blue, with
+    /// nothing in the app having changed.
+    ///
+    /// `selectedContentBackgroundColor` does not have that property: measured
+    /// (0, 100, 225) in the light appearance and (0, 89, 209) in the dark one,
+    /// in BOTH key states. So the rail paints its own pill in it, and the
+    /// picture of the app is the same whether the app is frontmost or not —
+    /// and the ink on it, `Palette.onSelection`, is computed against exactly
+    /// this colour.
     ///
     /// It is a token because the audit needs the surface the app really puts
-    /// behind text, and using `controlAccentColor` for that measured a surface
-    /// nothing draws: `Palette.accent` appeared nowhere in the app outside the
-    /// audit's own list.
+    /// behind text, and `controlAccentColor` is not that surface: macOS
+    /// greys the accent for a background application, so an accent resolved
+    /// at the moment a row is selected measures a colour nothing draws.
     public static var selectionSurface: NSColor {
-        NSColor.selectedContentBackgroundColor.blended(withFraction: 0.65,
-                                                       of: .windowBackgroundColor) ?? .windowBackgroundColor
+        .selectedContentBackgroundColor
     }
 
     /// A row at rest, before hover. The hover colour is `alternatingContentBackgroundColors`
@@ -223,20 +232,29 @@ public enum Palette {
         } ?? colour
     }
 
-    /// The ink for a label drawn ON a selection — a selected sidebar row.
+    /// The ink for a label drawn ON a selection — a selected nav row.
     ///
-    /// The same question `onAccent` asks, asked of the thing the label
-    /// actually sits on: the selection fill, which is
-    /// `selectedContentBackgroundColor` — the colour AppKit paints the
-    /// selected row with.
+    /// **The ink and the fill are computed from the SAME colour**, which is
+    /// the whole fix: `Palette.selectionSurface` is the fill the rail
+    /// paints, and this is the contrast against that exact colour. They
+    /// cannot disagree, because there is only one value between them.
     ///
-    /// **`controlAccentColor` is NOT that colour.** Measured, the selected
-    /// row is painted (0, 100, 225) and `controlAccentColor` resolves to a
-    /// grey in the same draw, so an ink computed against the accent came out
-    /// black on a blue pill at 3.9:1. The selection fill is the question's
-    /// subject; the accent is only where the fill comes from.
+    /// They DID disagree. AppKit paints a source list's selected row with a
+    /// VIBRANT MATERIAL — the accent when the window is key and a grey when
+    /// it is not — while `selectedContentBackgroundColor` answers
+    /// (0, 100, 225), the accent's blue, in BOTH states. So an ink computed
+    /// against `selectedContentBackgroundColor` was white in both states,
+    /// and the white one landed on a grey pill: measured (255, 255, 255) on
+    /// (220, 220, 220), 1.15:1, which is a label nobody can read.
+    ///
+    /// **Both are dynamic, and that matters too.** A colour resolved
+    /// eagerly — at the moment a row is selected, which happens while the
+    /// app is still in the background — answers the question in the
+    /// background's terms. A dynamic colour is resolved when it is DRAWN,
+    /// which is the only time the question "what is the text sitting on"
+    /// has an answer.
     public static var onSelection: NSColor {
-        NSColor(name: nil) { appearance in
+        NSColor(name: nil) { _ in
             let fill = NSColor.selectedContentBackgroundColor.usingColorSpace(.sRGB)
                 ?? NSColor.controlAccentColor
             return contrastRatio(.white, fill) >= 4.5 ? .white : .black

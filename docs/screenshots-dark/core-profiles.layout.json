@@ -1,6 +1,4 @@
 {
-  "scale" : 2,
-  "page" : "core.profiles",
   "groups" : [
     {
       "y0" : 1172,
@@ -8,9 +6,11 @@
       "w" : 1200
     },
     {
-      "w" : 1200,
       "y0" : 1172,
+      "w" : 1200,
       "y1" : 1320
     }
-  ]
+  ],
+  "page" : "core.profiles",
+  "scale" : 2
 }

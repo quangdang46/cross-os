@@ -199,6 +199,16 @@ enum Audit {
             ("secondary", Palette.secondaryInk),
             ("tertiary", Palette.tertiaryInk),
             ("onAccent", Palette.onAccent),
+            // **The ink on the nav rail's selection pill.**
+            //
+            // It was missing because the pill was the system's, and the
+            // system's is a key-dependent material — the audit could not name
+            // one colour to check against, because there were two. Now the
+            // rail paints the pill itself (`SidebarRowView`), in
+            // `Palette.selectionSurface`, and the ink on it is computed
+            // against exactly that colour — so the pair is nameable, and
+            // this is the check that keeps it nameable.
+            ("onSelection", Palette.onSelection),
         ]
         let statusOnly: [(String, NSColor)] = [
             // **The status inks, which is what this list was missing.**
@@ -230,8 +240,10 @@ enum Audit {
             // third time this matrix has produced a finding about a
             // combination nothing renders.
             //
-            // What the app DOES put behind text is the selection grey, and
-            // `selectionInk` checks the ink against that, measured.
+            // What the app DOES put behind text is the SELECTION — and the
+            // rail paints that pill itself now, in the accent
+            // (`selectedContentBackgroundColor`), so the surface is a colour
+            // and not a material. `onSelection` is the ink on it, measured.
             ("selection", Palette.selectionSurface),
         ]
 
@@ -244,6 +256,16 @@ enum Audit {
             // is over green. In the dark appearance it reported four failures
             // at 1.26:1 for combinations the app never draws.
             if inkName == "onAccent" { return surfaceName == "accent" }
+            // `onSelection` is the ink of the label on the nav rail's
+            // selection pill, and the pill is the only place it is drawn.
+            if inkName == "onSelection" { return surfaceName == "selection" }
+            // The selection pill carries ONE ink, and it is `onSelection`. The
+            // greys are drawn on the rail, on the card and in the window — on
+            // an UNSELECTED row, whose background is the rail. Pairing them
+            // with the pill reported three failures at 3.91:1 for a
+            // combination the app does not draw, which is the same mistake
+            // this matrix was rebuilt to stop making.
+            if surfaceName == "selection" { return false }
             let isStatus = inkName.hasSuffix("Ink")
             guard isStatus else { return true }
             return surfaceName == "card" || surfaceName == "window"

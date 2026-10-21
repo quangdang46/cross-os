@@ -1,9 +1,10 @@
 {
+  "scale" : 2,
   "groups" : [
     {
-      "y1" : 1360,
       "y0" : 640,
-      "w" : 1200
+      "w" : 1200,
+      "y1" : 1360
     },
     {
       "y1" : 1320,
@@ -11,6 +12,5 @@
       "y0" : 640
     }
   ],
-  "page" : "core.activity",
-  "scale" : 2
+  "page" : "core.activity"
 }

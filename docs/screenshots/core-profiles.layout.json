@@ -1,10 +1,9 @@
 {
-  "scale" : 2,
   "groups" : [
     {
       "y1" : 1360,
-      "w" : 1200,
-      "y0" : 1172
+      "y0" : 1172,
+      "w" : 1200
     },
     {
       "w" : 1200,
@@ -12,5 +11,6 @@
       "y1" : 1320
     }
   ],
-  "page" : "core.profiles"
+  "page" : "core.profiles",
+  "scale" : 2
 }

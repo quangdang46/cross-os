@@ -397,6 +397,18 @@ enum ShotRenderer {
         // is about `(246, 246, 248)`. Every screenshot taken before this was
         // showing colours the app does not actually draw on screen, which
         // makes "the render looks right" a statement about nothing.
+        // The window is asked to be key, so the picture is of a FRONTMOST app
+        // wherever the machine allows it. Measured, this environment refuses:
+        // the window's `isKeyWindow` stayed false even after
+        // `makeKeyAndOrderFront`, because a CLI-invoked accessory process
+        // does not reliably hold key here.
+        //
+        // **Nothing in the rail depends on that any more.** The nav rail
+        // paints its own selection pill (see `SidebarRowBackgroundView`),
+        // because the system's is a vibrant material that changes with the
+        // key state — so the picture is the same wherever it is taken. This
+        // call is still worth making: it is the difference between a picture
+        // of the app in the background and a picture of the app in front.
         shell.window?.makeKeyAndOrderFront(nil)
         await settle(1.5)
 

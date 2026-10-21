@@ -507,20 +507,25 @@ public final class SidebarViewController: NSViewController {
         // deprecated spelling; `.regular` is the modern one and AppKit tints
         // it with the user's accent automatically, in both appearances.
         outline.style = .sourceList
-        // `.regular`, which is what System Settings uses.
+        // `.none`, and the rail paints its own selection pill — see
+        // `SidebarRowBackgroundView`.
         //
-        // `.sourceList` is the deprecated spelling and it draws a SOLID accent
-        // bar the height of the row, which is the 2010 System Preferences
-        // look. `.regular` tints the row with the user's accent at a wash and
-        // leaves the label at full strength, which is the modern one and the
-        // one that reads as "you are here" rather than as a highlight.
-        outline.selectionHighlightStyle = .regular
-        // `.regular` and not the deprecated `.sourceList` highlight: the
-        // deprecated one paints a SOLID accent bar the height of the row, which
-        // is the 2010 System Preferences look. `.regular` tints the row with
-        // the user's accent at a wash and leaves the text at full strength,
-        // which is what System Settings draws and what a 26pt sidebar row can
-        // carry without the highlight swallowing the label.
+        // The system's highlight is a VIBRANT MATERIAL, and a vibrant
+        // material follows the window's key state: it is the accent when the
+        // app is frontmost and a grey when it is not. One run measured the
+        // selected row at (220, 220, 220) and a later run measured the same
+        // row in the accent blue, with nothing in the app having changed.
+        //
+        // That is survivable for a fill. It is not survivable for the INK on
+        // it: the rail draws its own labels (see `SidebarRowView`), so the
+        // system does not recolour them for the selection, and a white label
+        // on a grey pill measured 1.15:1 — a label nobody can read.
+        //
+        // The rail's own pill is filled with `Palette.selectionSurface`, which
+        // does not change with the key state, so the ink — `Palette.onSelection`,
+        // computed against exactly that colour — is right in every state and
+        // the picture of the app is the same wherever it is taken.
+        outline.selectionHighlightStyle = .none
         outline.usesAlternatingRowBackgroundColors = false
         outline.floatsGroupRows = false
         // `.custom`, so `rowHeight` below is the row height rather than a
@@ -824,7 +829,7 @@ extension SidebarViewController: NSOutlineViewDelegate {
     /// The rail draws its own labels rather than handing them to the source
     /// list as cell text — that is what made them legible — and the price of
     /// drawing them is that the system no longer recolours them for the
-    /// selection. So the rail does it: `onAccent` over the accent pill, and
+    /// selection. So the rail does it: `onSelection` over the pill, and
     /// the ordinary ink everywhere else.
     private func updateSelectionInk() {
         let rows = flatRows
@@ -876,6 +881,27 @@ final class SidebarRowView: NSTableCellView {
     private let title: NSTextField
     private let icon: NSImageView
 
+    /// The pill the rail paints under the selected row.
+    ///
+    /// **The rail paints the pill because the system's is a KEY-DEPENDENT
+    /// MATERIAL.** AppKit draws a source list's selected row with a vibrant
+    /// material, and a vibrant material follows the window's key state: the
+    /// accent when the app is frontmost, a grey when it is not. One run
+    /// measured the selected row at (220, 220, 220) and a later run measured
+    /// the same row in the accent blue, with nothing in the app having
+    /// changed.
+    ///
+    /// The ink on that pill has to follow it, and the rail draws its own
+    /// labels (see below), so nothing was following it: a white label on a
+    /// grey pill measured 1.15:1 — a label nobody can read.
+    ///
+    /// So the system highlight is off (`selectionHighlightStyle = .none`) and
+    /// the pill is painted here, in `Palette.selectionSurface`: the accent,
+    /// in both key states and both appearances. The ink on it,
+    /// `Palette.onSelection`, is computed against exactly that colour, so the
+    /// two cannot disagree.
+    private let pill = FilledView(color: Palette.selectionSurface, cornerRadius: 5)
+
     /// Whether this row is the selected one, and so is drawn on the accent.
     ///
     /// **The rail draws its own selection ink, because it draws its own
@@ -897,6 +923,7 @@ final class SidebarRowView: NSTableCellView {
         let ink = isSelected ? Palette.onSelection : Palette.primaryInk
         title.textColor = ink
         icon.contentTintColor = isSelected ? Palette.onSelection : Palette.secondaryInk
+        pill.isHidden = !isSelected
     }
 
     init(_ page: Page) {
@@ -905,6 +932,30 @@ final class SidebarRowView: NSTableCellView {
         self.title = title
         self.icon = imageView
         super.init(frame: .zero)
+
+        // The pill goes in FIRST, so it is behind the icon and the label.
+        pill.translatesAutoresizingMaskIntoConstraints = false
+        // No row carries the pill until it is the selected one, and
+        // `applyInk` is only called when the selection CHANGES — so the pill
+        // starts hidden here, or every row would draw one.
+        pill.isHidden = true
+        addSubview(pill)
+        NSLayoutConstraint.activate([
+            // **The pill is the SYSTEM'S OWN rectangle.** AppKit's selection
+            // view measured 240pt wide in a 260pt row — 10pt of margin on
+            // each side, so the icon sat 6pt inside it. The cell view is
+            // 14pt inside the row on the left and 2pt on the right, so the
+            // same rectangle starts 4pt BEFORE this cell's leading edge and
+            // ends 8pt before its trailing edge.
+            //
+            // It is drawn OUTSIDE the cell's bounds on purpose, and the
+            // system does not clip it: `clipsToBounds` is off, and the row
+            // view above is wider than the cell anyway.
+            pill.leadingAnchor.constraint(equalTo: leadingAnchor, constant: -4),
+            pill.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            pill.topAnchor.constraint(equalTo: topAnchor),
+            pill.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
 
         title.font = Typeface.body
         title.lineBreakMode = .byTruncatingTail
@@ -971,9 +1022,12 @@ final class SidebarRowView: NSTableCellView {
 /// only fill lives on its layer has nothing to draw.
 final class FilledView: NSView {
     private let color: NSColor
+    /// The corner radius of the fill. Zero is a plain rectangle.
+    private let cornerRadius: CGFloat
 
-    init(color: NSColor) {
+    init(color: NSColor, cornerRadius: CGFloat = 0) {
         self.color = color
+        self.cornerRadius = cornerRadius
         super.init(frame: .zero)
     }
 
@@ -981,7 +1035,11 @@ final class FilledView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         color.setFill()
-        dirtyRect.fill()
+        if cornerRadius > 0 {
+            NSBezierPath(roundedRect: bounds, xRadius: cornerRadius, yRadius: cornerRadius).fill()
+        } else {
+            dirtyRect.fill()
+        }
     }
 
     @available(*, unavailable)

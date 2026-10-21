@@ -1,11 +1,11 @@
 {
   "groups" : [
     {
-      "w" : 1200,
       "y0" : 952,
-      "y1" : 1360
+      "y1" : 1360,
+      "w" : 1200
     }
   ],
-  "page" : "core.onboard",
-  "scale" : 2
+  "scale" : 2,
+  "page" : "core.onboard"
 }

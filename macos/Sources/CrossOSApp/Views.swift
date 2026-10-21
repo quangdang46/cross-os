@@ -594,6 +594,9 @@ final class ChecklistView: NSStackView {
 final class WizardView: NSStackView {
     private let currentStep = 0
     private let stack = NSStackView()
+    /// The verdict field of each step, in order. Held rather than found: see
+    /// `loadVerdicts`.
+    private var verdictFields: [NSTextField] = []
     init(control: Control, context: ControlContext) {
         super.init(frame: .zero)
         // A stack in name only is a stack that measures nothing: without an
@@ -734,12 +737,34 @@ final class WizardView: NSStackView {
             // the start and revealed when there is a reason to read it, which
             // is also what `loadVerdicts` expects to find.
             verdict.isHidden = true
+            // The verdict field is HELD, not found. `loadVerdicts` used to
+            // look for "the last text field in the step", and the moment the
+            // step's shape changed — the verdict moving under its title — that
+            // search found the NUMBER and wrote the sentence over it:
+            // "windows-keyboard is not switched on" in the place of "3".
+            // The tree's shape is a layout decision; a search over it is a
+            // decision about the layout hiding in a place nobody looks.
+            verdictFields.append(verdict)
 
-            let column = NSStackView(views: [header, verdict])
-            column.orientation = .vertical
-            column.alignment = .leading
-            column.spacing = Gap.tight
-            stack.addArrangedSubview(column)
+            // **THE VERDICT SITS UNDER THE TITLE, not under the number.**
+            //
+            // The title and the sentence that explains it are one column,
+            // and the number stands beside them. Measured on
+            // `core.onboard`: "windows-keyboard is not switched on" started
+            // 33pt LEFT of the "Open System Settings" it belongs to, at the
+            // number's edge, so the sentence read as a fourth step rather
+            // than as the third step's own.
+            let words = NSStackView(views: [title, verdict])
+            words.orientation = .vertical
+            words.alignment = .leading
+            words.spacing = Gap.tight
+
+            let step = NSStackView(views: [number, words])
+            step.orientation = .horizontal
+            step.alignment = .firstBaseline
+            step.spacing = Gap.row
+
+            stack.addArrangedSubview(step)
         }
 
         // The links go LAST, after the steps. They were built first and the
@@ -803,8 +828,7 @@ final class WizardView: NSStackView {
         // buttons that act on it — the same sentence twice on one screen. Here
         // each step carries its own verdict and nothing is printed twice.
         let ids = ["daemon", "keyboard", "windows", "finder"]
-        for (index, column) in stack.arrangedSubviews.compactMap({ $0 as? NSStackView }).enumerated() {
-            guard let verdict = column.views.compactMap({ $0 as? NSTextField }).last else { continue }
+        for (index, verdict) in verdictFields.enumerated() {
             guard index < ids.count else { continue }
             let row = byID[ids[index]]
             guard let row else { continue }
