@@ -1,12 +1,12 @@
 {
-  "page" : "core.finder",
   "scale" : 2,
+  "page" : "core.finder",
   "groups" : [
     {
       "x" : 576,
-      "y1" : 860,
       "w" : 1200,
-      "y0" : 352
+      "y0" : 352,
+      "y1" : 860
     }
   ]
 }

@@ -860,6 +860,31 @@ extension JSONValue {
 /// (SelectionResolverSpecs.md:44-50: which tile is highlighted is the daemon's
 /// answer, arrived at over a refresh the shell does not see, so the page draws
 /// `selected` where the row says so and resolves nothing itself).
+/// The button behind "Open Accessibility settings".
+@MainActor
+final class GrantAccessTarget: NSObject {
+    static let shared = GrantAccessTarget()
+    private var bindings: [ObjectIdentifier: (any CoreClient)] = [:]
+
+    @discardableResult
+    func register(_ button: NSButton, service: any CoreClient) -> GrantAccessTarget {
+        bindings[ObjectIdentifier(button)] = service
+        return self
+    }
+
+    @objc func fire(_ sender: NSButton) {
+        guard let service = bindings[ObjectIdentifier(sender)] else { return }
+        Task {
+            do {
+                _ = try await service.openAccessibilitySettings()
+            } catch {
+                // The daemon's own words: on a platform with no such pane it
+                // says so, and the reader needs the sentence, not a shrug.
+            }
+        }
+    }
+}
+
 @MainActor
 final class SwitcherPageView: CardControl {
     override init(control: Control, context: ControlContext) {
@@ -871,10 +896,27 @@ final class SwitcherPageView: CardControl {
         do {
             let windows = try await context.service.windows()
             guard !windows.isEmpty else {
+                // **The state that says "or Accessibility access is not
+                // granted" now has a way to grant it.**
+                //
+                // The daemon has a deep link for the one permission it can
+                // ask for — the focused-window watcher needs Accessibility
+                // consent before it can prime, and without it the window
+                // list is empty, which is the sentence the reader is looking
+                // at. A sentence with a button under it is a step; a
+                // sentence alone is a dead end.
+                let grant = NSButton(title: "Open Accessibility settings",
+                                     target: nil, action: nil)
+                grant.bezelStyle = .rounded
+                grant.translatesAutoresizingMaskIntoConstraints = false
+                let proxy = GrantAccessTarget.shared.register(grant, service: context.service)
+                grant.target = proxy
+                grant.action = #selector(GrantAccessTarget.fire(_:))
                 replaceBody(with: EmptyStateView(
                     headline: "No windows to switch between.",
                     detail: "The switcher lists every window the daemon can see. None are open, "
-                        + "or Accessibility access is not granted."
+                        + "or Accessibility access is not granted.",
+                    action: grant
                 ))
                 return
             }

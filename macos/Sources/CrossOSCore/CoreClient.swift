@@ -181,7 +181,14 @@ public protocol CoreClient: Sendable {
     /// The per-app overrides (`config.getOverrides`).
     func overrides() async throws -> [OverrideRow]
 
-    /// Switch one per-app override on or off (`config.setOverride`).
+    /// Open the Accessibility settings (`permissions.openSettings`).
+    ///
+    /// **The one permission the daemon can ask for.** The focused-window
+    /// watcher needs Accessibility consent before it can prime, and the deep
+    /// link that opens the right pane is the daemon's answer to it. The
+    /// Switcher page's empty state says "or Accessibility access is not
+    /// granted" — and had no way to grant it.
+    func openAccessibilitySettings() async throws -> JSONValue
     ///
     /// The Keyboard page's override table has carried an "On" column since
     /// the column was added, and the column did nothing: the table had no
@@ -745,6 +752,13 @@ public actor LiveCoreClient: CoreClient {
                    from: await call("core.setMenuItemEnabled",
                                     .object(["id": .string(id), "enabled": .bool(enabled)])),
                    method: "core.setMenuItemEnabled")
+    }
+
+    public func openAccessibilitySettings() async throws -> JSONValue {
+        // The pane is named, not guessed: the daemon opens only the
+        // accessibility one, and answers "unknown settings pane" for anything
+        // else.
+        try await call("permissions.openSettings", .object(["pane": .string("accessibility")]))
     }
 
     public func setOverride(app: String, ruleID: String, enabled: Bool) async throws -> Bool {

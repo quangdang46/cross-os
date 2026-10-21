@@ -279,6 +279,11 @@ public actor SpiedCoreClient: CoreClient {
         return menuAnswer
     }
 
+    public func openAccessibilitySettings() async throws -> JSONValue {
+        record("permissions.openSettings")
+        return .object(["pane": .string("accessibility"), "opened": .bool(true)])
+    }
+
     public func setMenuItemEnabled(id: String, enabled: Bool) async throws -> [JSONValue] {
         record("core.setMenuItemEnabled")
         return menuAnswer

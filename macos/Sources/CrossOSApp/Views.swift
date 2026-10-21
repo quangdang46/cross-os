@@ -853,9 +853,16 @@ final class WizardView: NSStackView {
             note("Could not record the setup as finished.")
             return
         }
-        let next = !isFinished
         do {
-            let state = try await service.completeOnboarding(completed: next)
+            // **Ask the daemon what it believes, rather than trusting the
+            // copy this view cached.**
+            //
+            // The flag can be changed from anywhere — the daemon's own
+            // store, another client — and a stale copy here makes the
+            // button do the wrong thing: the view remembered "not finished"
+            // and pressed "finish" again, so the flag never went back.
+            let current = try await service.onboardingState()
+            let state = try await service.completeOnboarding(completed: !current.completed)
             isFinished = state.completed
             updateFinishButton()
             if state.completed {

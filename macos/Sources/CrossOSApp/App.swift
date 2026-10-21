@@ -648,6 +648,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let windowRows = (try? await client.windows()) ?? []
         if windowRows.isEmpty {
             print("click-test: switcher focus   skipped — the daemon sees no windows")
+            // The empty state is where the PERMISSION is asked for, and the
+            // daemon's deep link is the answer to it: "the one permission
+            // the daemon can actually ask for" — Accessibility, which the
+            // focused-window watcher needs before it can prime.
+            //
+            // It is the same page and the same state the skip above is
+            // about, so the two are complementary: the focus is proven where
+            // there are windows, and the permission's fix where there are
+            // none.
+            if let switcher = pages.first(where: { $0.id == "core.switcher" }) {
+                shell.show(switcher)
+                await ShotRenderer.settle(1.5)
+                if let grant = NSView.allViews(shell.window?.contentView)
+                    .compactMap({ $0 as? NSButton })
+                    .first(where: { $0.title.contains("Accessibility") }) {
+                    grant.performClick(nil)
+                    await ShotRenderer.settle(1.5)
+                    let opened = (try? await client.openAccessibilitySettings()) != nil
+                    print("click-test: grant access    opened \(opened)")
+                    if !opened {
+                        failures.append("the Accessibility deep link did not reach the daemon")
+                    }
+                } else {
+                    failures.append("no Accessibility button on the Switcher page's empty state")
+                }
+            }
         } else if let switcher = pages.first(where: { $0.id == "core.switcher" }) {
             shell.show(switcher)
             await ShotRenderer.settle(1.5)
@@ -689,12 +715,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     failures.append("the wizard's Finish button did not change the daemon's flag")
                 }
                 // And back, so this test is not a behaviour change.
-                finish.performClick(nil)
+                //
+                // The wizard has to be shown AGAIN to press it again:
+                // finishing the setup navigates to the app's front door, so
+                // the button that was just pressed is no longer on screen —
+                // and pressing a button whose view has been torn down does
+                // nothing at all, which is how this test first reported a
+                // button that would not put the flag back.
+                shell.show(onboard)
                 await ShotRenderer.settle(1.5)
-                let restored = (try? await client.onboardingState())?.completed ?? after
-                print("click-test: wizard reopen   completed \(after) -> \(restored)")
-                if restored != before {
-                    failures.append("the wizard's button did not put the daemon's flag back")
+                if let again = NSView.allViews(shell.window?.contentView)
+                    .compactMap({ $0 as? NSButton })
+                    .first(where: { $0.identifier?.rawValue == "onboarding.finish" }) {
+                    again.performClick(nil)
+                    await ShotRenderer.settle(1.5)
+                    let restored = (try? await client.onboardingState())?.completed ?? after
+                    print("click-test: wizard reopen   completed \(after) -> \(restored)")
+                    if restored != before {
+                        failures.append("the wizard's button did not put the daemon's flag back")
+                    }
+                } else {
+                    failures.append("the wizard's button was gone when the test pressed it again")
                 }
             } else {
                 failures.append("no Finish button on core.onboard")

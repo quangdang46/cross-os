@@ -468,7 +468,17 @@ final class TopDownDocument: NSView {
 /// naming it is the difference between a report they can file and one they
 /// cannot.
 final class EmptyStateView: NSStackView {
-    init(headline: String, detail: String) {
+    /// An optional ACTION, drawn under the sentence.
+    ///
+    /// An empty state that says what to do and offers no way to do it sends
+    /// the reader hunting: the Switcher page's state says "or Accessibility
+    /// access is not granted", and the daemon has a deep link that fixes
+    /// exactly that — the one permission it can ask for. A sentence with a
+    /// button under it is the difference between a dead end and a step.
+    private let action: NSButton?
+
+    init(headline: String, detail: String, action: NSButton? = nil) {
+        self.action = action
         super.init(frame: .zero)
         orientation = .vertical
         // `.leading`, NOT `.width`. A `.width`-aligned stack distributes its
@@ -549,6 +559,13 @@ final class EmptyStateView: NSStackView {
         addView(icon, in: .center)
         addView(headlineField, in: .center)
         addView(detailField, in: .center)
+        // The action goes LAST, in the same area, so it sits under the
+        // sentence rather than in a third of the state of its own.
+        if let action {
+            action.translatesAutoresizingMaskIntoConstraints = false
+            addView(action, in: .center)
+            setCustomSpacing(Gap.row, after: detailField)
+        }
         // **The icon sits CLOSE to the sentence it introduces.**
         //
         // It was `Gap.group` (20pt), and an icon 20pt above its own headline
@@ -580,6 +597,9 @@ final class EmptyStateView: NSStackView {
             headlineField.leadingAnchor.constraint(equalTo: leadingAnchor),
             detailField.leadingAnchor.constraint(equalTo: leadingAnchor),
         ])
+        if let action {
+            action.leadingAnchor.constraint(equalTo: leadingAnchor).isActive = true
+        }
     }
 
     override var isFlipped: Bool { true }
