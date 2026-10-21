@@ -100,6 +100,69 @@ public struct ReadinessRow: Codable, Sendable, Equatable {
     public var detail: String
 }
 
+/// The wizard's state (`core.onboardingState`).
+///
+/// **Every step is a DERIVATION of live state, and `completed` is not.**
+/// That is why the daemon has a write for it: a machine that happens to
+/// satisfy a step would send the user back through the wizard on every
+/// launch, because the step is derived from whether a plugin is on and the
+/// plugin is not. "I am finished" is the only evidence, and it has to be
+/// remembered somewhere the derivation cannot contradict.
+public struct OnboardingState: Codable, Sendable, Equatable {
+    /// Whether the user has said they are finished.
+    public var completed: Bool
+    /// The step the wizard is on.
+    public var currentStep: String
+    /// The steps, in order.
+    public var steps: [OnboardingStep]
+    /// The checks behind the steps.
+    public var readiness: [ReadinessRow]
+    /// How many of the checks are ready.
+    public var ready: Int
+    /// How many there are.
+    public var total: Int
+
+    enum CodingKeys: String, CodingKey {
+        case completed
+        case currentStep = "current_step"
+        case steps, readiness, ready, total
+    }
+
+    public init(completed: Bool,
+                currentStep: String,
+                steps: [OnboardingStep],
+                readiness: [ReadinessRow],
+                ready: Int,
+                total: Int) {
+        self.completed = completed
+        self.currentStep = currentStep
+        self.steps = steps
+        self.readiness = readiness
+        self.ready = ready
+        self.total = total
+    }
+}
+
+/// One step of the wizard.
+public struct OnboardingStep: Codable, Sendable, Equatable {
+    public var id: String
+    public var label: String
+    public var done: Bool
+    /// Why the step is not done — absent when it is.
+    public var detail: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, done, detail
+    }
+
+    public init(id: String, label: String, done: Bool, detail: String? = nil) {
+        self.id = id
+        self.label = label
+        self.done = done
+        self.detail = detail
+    }
+}
+
 /// One window in the switcher (`core.windows`).
 ///
 /// `index`, `selected` and `skippable` are CrossOS's own — the daemon owns the

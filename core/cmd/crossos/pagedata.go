@@ -1677,8 +1677,30 @@ func (c *Core) handleOnboardingState(_ json.RawMessage) (any, *ipc.RPCError) {
 // page that dismisses the wizard redraws from what the daemon now believes, so
 // a write that landed and a page still sitting on step one cannot disagree —
 // and a second derivation here is the one that would eventually drift.
-func (c *Core) handleOnboardingComplete(_ json.RawMessage) (any, *ipc.RPCError) {
-	if err := c.set.SetOnboardingComplete(true); err != nil {
+func (c *Core) handleOnboardingComplete(raw json.RawMessage) (any, *ipc.RPCError) {
+	// **The flag can be cleared as well as set.**
+	//
+	// The write said "I am finished", and the only way to say it was a
+	// one-way door: the shell could dismiss the wizard and never bring it
+	// back. "Show the setup again" is the other half of that sentence, and
+	// it is what a person who has just changed their mind needs.
+	//
+	// An absent `completed` means true — the write still says "I am
+	// finished" by default, and a caller that means anything else has to say
+	// so.
+	done := true
+	if len(raw) > 0 {
+		var p struct {
+			Completed *bool `json:"completed"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, &ipc.RPCError{Code: ipc.ErrBadParams, Message: "need {completed}"}
+		}
+		if p.Completed != nil {
+			done = *p.Completed
+		}
+	}
+	if err := c.set.SetOnboardingComplete(done); err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.ErrInternal,
 			Message: "set onboarding complete: " + err.Error(),

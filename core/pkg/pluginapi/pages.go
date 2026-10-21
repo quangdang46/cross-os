@@ -117,8 +117,13 @@ func onboardingFlow() UIContribution {
 		FirstRun:    true,
 		Controls: []map[string]any{
 			control("wizard", "onboard", map[string]any{
-				"label":     "Welcome to CrossOS",
-				"steps":     []string{"Welcome", "Enable per plugin", "Open System Settings", "Verify ready"},
+				"label": "Welcome to CrossOS",
+				"steps": []string{"Welcome", "Enable per plugin", "Open System Settings", "Verify ready"},
+				// Where the wizard goes when the user says they are finished.
+				// The shell cannot guess it: the page that is the app's front
+				// door is the daemon's to name, the same way the other two
+				// links are.
+				"homeLink":  "core.home",
 				"aboutLink": "core.about",
 				"trialLink": "core.safety",
 			}),

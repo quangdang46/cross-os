@@ -669,10 +669,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             failures.append("core.switcher is not being served")
         }
 
+        // 9. The WIZARD'S FINISH, which is the one write that cannot be
+        //    taken back — until now. The daemon's flag said "I am finished"
+        //    and there was no way to say it again, so the app opened on the
+        //    wizard on every launch, forever, and a person who wanted the
+        //    setup back could not have it.
+        if let onboard = pages.first(where: { $0.id == "core.onboard" }) {
+            shell.show(onboard)
+            await ShotRenderer.settle(1.5)
+            let before = (try? await client.onboardingState())?.completed ?? false
+            if let finish = NSView.allViews(shell.window?.contentView)
+                .compactMap({ $0 as? NSButton })
+                .first(where: { $0.identifier?.rawValue == "onboarding.finish" }) {
+                finish.performClick(nil)
+                await ShotRenderer.settle(1.5)
+                let after = (try? await client.onboardingState())?.completed ?? before
+                print("click-test: wizard finish   completed \(before) -> \(after)")
+                if after == before {
+                    failures.append("the wizard's Finish button did not change the daemon's flag")
+                }
+                // And back, so this test is not a behaviour change.
+                finish.performClick(nil)
+                await ShotRenderer.settle(1.5)
+                let restored = (try? await client.onboardingState())?.completed ?? after
+                print("click-test: wizard reopen   completed \(after) -> \(restored)")
+                if restored != before {
+                    failures.append("the wizard's button did not put the daemon's flag back")
+                }
+            } else {
+                failures.append("no Finish button on core.onboard")
+            }
+        } else {
+            failures.append("core.onboard is not being served")
+        }
+
         if failures.isEmpty {
-            print("CLICK TEST PASS — 9 write paths reach the daemon: "
+            print("CLICK TEST PASS — 10 write paths reach the daemon: "
                   + "panic stop, re-enable, matrix rule, plugin, observe, profile apply, "
-                  + "the rule builder and its delete, the Finder-menu switch, and the switcher's focus")
+                  + "the rule builder and its delete, the Finder-menu switch, the switcher's focus, "
+                  + "and the wizard's finish")
             exit(0)
         }
         for f in failures { print("click-test FAIL: \(f)") }

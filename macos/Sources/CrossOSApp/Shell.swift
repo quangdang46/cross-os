@@ -652,10 +652,25 @@ public final class SidebarViewController: NSViewController {
                 outline.expandItem(group, expandChildren: true)
             }
             if outline.selectedRow < 0, !served.isEmpty {
-                // A fresh profile lands on the page that declares firstRun —
-                // the wizard — and the daemon decides which, not the id
-                // (`app/backend/host.go:29-30`).
-                let landing = served.firstIndex(where: \.firstRun) ?? 0
+                // **The wizard is the landing page until the user says they
+                // are finished.**
+                //
+                // The wizard's steps are all derived from live state, so
+                // the page that declares `firstRun` is the FIRST-run page
+                // and not the every-run page. The daemon keeps the evidence
+                // — "the sentence 'I am finished' is the only evidence, and
+                // it has to be remembered somewhere the derivation cannot
+                // contradict" — and the shell was not reading it, so the
+                // app opened on the wizard on every launch, forever, and
+                // there was no way to say otherwise.
+                //
+                // A daemon that cannot be asked falls back to the wizard:
+                // showing setup to someone who cannot reach it is better than
+                // hiding setup from someone who has not seen it.
+                let finished = (try? await client.onboardingState())?.completed ?? false
+                let landing = finished
+                    ? (served.firstIndex { !$0.firstRun } ?? 0)
+                    : (served.firstIndex(where: \.firstRun) ?? 0)
                 selectRow(for: served[landing])
             }
         } catch {

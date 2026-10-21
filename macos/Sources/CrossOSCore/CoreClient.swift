@@ -33,6 +33,18 @@ public protocol CoreClient: Sendable {
     /// The Home pane's checklist (`core.readiness`).
     func readiness() async throws -> [ReadinessRow]
 
+    /// The wizard's derived state (`core.onboardingState`) and the write that
+    /// records that the user is finished (`core.onboardingComplete`).
+    ///
+    /// **The flag is the only evidence the daemon cannot contradict.** Every
+    /// step of the wizard is derived from live state, so a machine that
+    /// happens to satisfy a step would send the user back through the wizard
+    /// on every launch. The daemon has answered the write since the wizard
+    /// was written and the shell had no call site for it — so the flag was
+    /// write-only and the wizard could never be dismissed.
+    func onboardingState() async throws -> OnboardingState
+    func completeOnboarding(completed: Bool) async throws -> OnboardingState
+
     /// The daemon's recent log lines (`core.eventLogs`).
     func eventLogs() async throws -> [String]
 
@@ -581,6 +593,25 @@ public actor LiveCoreClient: CoreClient {
 
     public func windows() async throws -> [WindowRow] {
         try decode([WindowRow].self, from: await call("core.windows"), method: "core.windows")
+    }
+
+    public func onboardingState() async throws -> OnboardingState {
+        try decode(OnboardingState.self,
+                   from: await call("core.onboardingState"),
+                   method: "core.onboardingState")
+    }
+
+    public func completeOnboarding(completed: Bool = true) async throws -> OnboardingState {
+        // The answer is the state the daemon now believes, not a bare ack: a
+        // write that landed and a page still sitting on step one must not be
+        // able to disagree.
+        //
+        // `completed: false` is the other half of the sentence — "show the
+        // setup again" — and the daemon's write takes it, so the flag is a
+        // door in both directions.
+        try decode(OnboardingState.self,
+                   from: await call("core.onboardingComplete", .object(["completed": .bool(completed)])),
+                   method: "core.onboardingComplete")
     }
 
     public func readiness() async throws -> [ReadinessRow] {

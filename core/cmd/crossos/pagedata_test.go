@@ -1082,6 +1082,28 @@ func TestOnboardingCompleteRoundTrip(t *testing.T) {
 	if !after.Completed {
 		t.Error("the write answered completed=false — the flag it set is not in the row it sent")
 	}
+
+	// **The flag can be cleared**, which is what "Show the setup again" does.
+	//
+	// A one-way flag is a one-way door: the shell could dismiss the wizard
+	// and never bring it back, and a test that pressed the button could not
+	// leave the machine as it found it.
+	res, rerr = onboardingCall(t, c, "core.onboardingComplete", json.RawMessage(`{"completed": false}`))
+	cleared := decode[wireOnboardingRow](t, res, rerr)
+	if cleared.Completed {
+		t.Error("the write answered completed=true after being asked to clear the flag")
+	}
+	res, rerr = onboardingCall(t, c, "core.onboardingState", nil)
+	readBack := decode[wireOnboardingRow](t, res, rerr)
+	if readBack.Completed {
+		t.Error("the flag reads back as set after it was cleared")
+	}
+	// And back again, so the rest of this test sees a finished wizard.
+	res, rerr = onboardingCall(t, c, "core.onboardingComplete", json.RawMessage(`{"completed": true}`))
+	after = decode[wireOnboardingRow](t, res, rerr)
+	if !after.Completed {
+		t.Error("the write answered completed=false after being asked to set the flag")
+	}
 	if after.CurrentStep != "done" {
 		t.Errorf("current step=%q after completing, want done", after.CurrentStep)
 	}

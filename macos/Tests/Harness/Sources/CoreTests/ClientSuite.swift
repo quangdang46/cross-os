@@ -35,6 +35,8 @@ public actor SpiedCoreClient: CoreClient {
     private var shortcutsAnswer: [JSONValue] = []
     private var zonesAnswer: [ZoneRow] = []
     private var userRulesAnswer: [UserRuleRow] = []
+    private var onboardingAnswer = OnboardingState(completed: false, currentStep: "enable",
+                                                  steps: [], readiness: [], ready: 0, total: 0)
     private var vocabularyAnswer = UserRuleVocabulary(modifiers: [], keys: [], actions: [],
                                                       capabilities: [], appModes: [], appCategories: [])
     private var commandsAnswer: [CommandRow] = []
@@ -97,6 +99,17 @@ public actor SpiedCoreClient: CoreClient {
     public func windows() async throws -> [WindowRow] {
         record("core.windows")
         return windowsAnswer
+    }
+
+    public func onboardingState() async throws -> OnboardingState {
+        record("core.onboardingState")
+        return onboardingAnswer
+    }
+
+    public func completeOnboarding(completed: Bool = true) async throws -> OnboardingState {
+        record("core.onboardingComplete")
+        onboardingAnswer.completed = completed
+        return onboardingAnswer
     }
 
     public func readiness() async throws -> [ReadinessRow] {

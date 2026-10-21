@@ -681,6 +681,7 @@ final class WizardView: NSStackView {
 
         build(control: control, context: context)
         Task { await loadVerdicts(context: context) }
+        Task { await loadOnboarding(context: context) }
     }
 
     @available(*, unavailable)
@@ -690,9 +691,26 @@ final class WizardView: NSStackView {
     /// lives on the context the view was built with. A closure rather than the
     /// whole context, so this type holds no service it would never call.
     private var navigate: (String) -> Void = { _ in }
+    /// The daemon, for the one write the wizard makes.
+    private var service: (any CoreClient)?
+    /// Where a sentence about what just happened goes.
+    private var note: (String) -> Void = { _ in }
+    /// The button that finishes the setup, and the state it reports.
+    private var finishButton: NSButton?
+    /// Whether the setup has been finished. The daemon's flag, read once when
+    /// the wizard is drawn.
+    private var isFinished = false
+    /// Where the wizard goes when the user says they are finished. The
+    /// daemon names it, the same way it names the other two links.
+    private var homePage = "core.home"
 
     private func build(control: Control, context: ControlContext) {
         navigate = { id in context.navigate(id) }
+        service = context.service
+        note = context.note
+        if let home = control.link("homeLink"), !home.isEmpty {
+            homePage = home
+        }
         let steps = control.steps
 
         for (index, step) in steps.enumerated() {
@@ -771,7 +789,96 @@ final class WizardView: NSStackView {
         // wizard read as two buttons floating above four numbered steps, with
         // no way to tell they were the end of the list rather than the
         // beginning of it.
-        buildLinks(on: stack, from: control)
+        let links = buildLinks(on: stack, from: control)
+
+        // **A way to be FINISHED.**
+        //
+        // The wizard's steps are all derived from live state, so a machine
+        // that happens to satisfy one would send the user back through it on
+        // every launch — the daemon says so in the handler for
+        // `core.onboardingComplete`: "the sentence 'I am finished' is the
+        // only evidence, and it has to be remembered somewhere the
+        // derivation cannot contradict."
+        //
+        // The daemon has answered that write since the wizard was written
+        // and the shell had no call site for it, so the flag was write-only
+        // and the wizard could never be dismissed: the app opened on it every
+        // single launch, forever.
+        buildFinish(on: stack, with: links)
+    }
+
+    /// The button that says "I am finished with the setup" — and, once it has
+    /// been said, "show the setup again".
+    ///
+    /// It is LAST, after the links: it is the end of the list, not another
+    /// thing to do in the middle of it. And it is a button that does not
+    /// hide the unfinished steps — the wizard's steps say what is not ready,
+    /// and the Home page's checklist carries that on afterwards.
+    private func buildFinish(on column: NSStackView, with links: [NSButton]) {
+        let button = NSButton(title: "Finish setup", target: self, action: #selector(finishSetup(_:)))
+        button.bezelStyle = .rounded
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setAccessibilityLabel("Finish setup — remember that the setup is done")
+        button.identifier = NSUserInterfaceItemIdentifier("onboarding.finish")
+        // The button joins the column FIRST, and the constraint comes after.
+        //
+        // A constraint between two views activates as soon as it is created,
+        // and it can only be created between views that share a hierarchy —
+        // so activating it before the button was in the column raised
+        // "Unable to activate constraint ... because they have no common
+        // ancestor", and took the whole app down. The order here is the fix.
+        column.addArrangedSubview(button)
+        // **The same width as the buttons above it.** Three buttons in a
+        // column of three different widths read as three unrelated things;
+        // a column of equal-width buttons reads as one list.
+        if let first = links.first {
+            button.widthAnchor.constraint(equalTo: first.widthAnchor).isActive = true
+        }
+        finishButton = button
+        // A step above it: the links are part of the list and this is the
+        // end of it, so it gets the same air they get from the steps.
+        if let last = column.arrangedSubviews.dropLast().last {
+            column.setCustomSpacing(Gap.group, after: last)
+        }
+    }
+
+    /// Record that the setup is finished — or open it again, if it already is.
+    @objc private func finishSetup(_ sender: NSButton) {
+        Task { await toggleSetup() }
+    }
+
+    /// The write, and what happens after it.
+    private func toggleSetup() async {
+        guard let service else {
+            note("Could not record the setup as finished.")
+            return
+        }
+        let next = !isFinished
+        do {
+            let state = try await service.completeOnboarding(completed: next)
+            isFinished = state.completed
+            updateFinishButton()
+            if state.completed {
+                note("Setup finished. This is the last page you will see.")
+                navigate(homePage)
+            } else {
+                note("The setup is open again.")
+            }
+        } catch {
+            note("Could not record the setup as finished: \(error)")
+        }
+    }
+
+    /// The button says what pressing it will do.
+    private func updateFinishButton() {
+        guard let finishButton else { return }
+        if isFinished {
+            finishButton.title = "Show the setup again"
+            finishButton.setAccessibilityLabel("Show the setup again")
+        } else {
+            finishButton.title = "Finish setup"
+            finishButton.setAccessibilityLabel("Finish setup — remember that the setup is done")
+        }
     }
 
     /// The pages the wizard says it links to, as buttons.
@@ -786,7 +893,8 @@ final class WizardView: NSStackView {
     ///
     /// Same class as `core.finder`, which promised a list and showed a
     /// sentence: something is declared and nothing draws it.
-    private func buildLinks(on column: NSStackView, from control: Control) {
+    @discardableResult
+    private func buildLinks(on column: NSStackView, from control: Control) -> [NSButton] {
         let links: [(String, String, String)] = [
             ("trialLink", "Open Safety", "Where panic stop and Reset Everything live."),
             ("aboutLink", "About CrossOS", "What it does, and what it asks for."),
@@ -807,15 +915,23 @@ final class WizardView: NSStackView {
         if made.count == column.arrangedSubviews.count - 1, let lastStep = column.arrangedSubviews.dropLast(made.count).last {
             column.setCustomSpacing(Gap.group, after: lastStep)
         }
-        guard made.count > 1 else { return }
+        guard made.count > 1 else { return made }
         for button in made {
             button.widthAnchor.constraint(equalTo: made[0].widthAnchor).isActive = true
         }
+        return made
     }
 
     @objc private func followLink(_ sender: NSButton) {
         guard let id = sender.identifier?.rawValue else { return }
         navigate(id)
+    }
+
+    /// Read the daemon's flag, so the button says what pressing it will do.
+    private func loadOnboarding(context: ControlContext) async {
+        guard let state = try? await context.service.onboardingState() else { return }
+        isFinished = state.completed
+        updateFinishButton()
     }
 
     private func loadVerdicts(context: ControlContext) async {

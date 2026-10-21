@@ -1,9 +1,9 @@
 {
-  "scale" : 2,
   "page" : "core.onboard",
+  "scale" : 2,
   "groups" : [
     {
-      "y1" : 760,
+      "y1" : 848,
       "w" : 1200,
       "x" : 576,
       "y0" : 352
