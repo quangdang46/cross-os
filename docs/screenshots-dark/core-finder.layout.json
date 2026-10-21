@@ -2,11 +2,11 @@
   "groups" : [
     {
       "w" : 1200,
-      "y0" : 352,
       "y1" : 860,
+      "y0" : 352,
       "x" : 576
     }
   ],
-  "scale" : 2,
-  "page" : "core.finder"
+  "page" : "core.finder",
+  "scale" : 2
 }
