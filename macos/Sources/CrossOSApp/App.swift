@@ -679,15 +679,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await ShotRenderer.settle(1.5)
             sizeTables(in: shell.window?.contentView)
             await ShotRenderer.settle(0.5)
+            // **The table that can be activated, and has the windows in
+            // it.** The first table in the window is not necessarily the
+            // switcher's: a page that was shown earlier leaves its table
+            // behind, and the first one found was the activity page's —
+            // nineteen rows of traces and no action behind it.
             let tables = NSView.allViews(shell.window?.contentView)
                 .compactMap { $0 as? NSTableView }
-            if let table = tables.first(where: { $0.numberOfRows > 0 }),
+            if let table = tables.first(where: {
+                $0.numberOfRows == windowRows.count && $0.doubleAction != nil
+            }),
                let target = table.target, let action = table.doubleAction {
                 table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-                let before = windowRows.first?.windowID ?? ""
+                let wanted = windowRows.first?.windowID ?? ""
                 _ = target.perform(action, with: table)
                 await ShotRenderer.settle(1.5)
-                print("click-test: switcher focus   activated row 0 (window \(before))")
+                // **And the window IS the front one afterwards.** The
+                // daemon's own list says which window is selected, so the
+                // proof is the daemon's answer and not the click.
+                let after = (try? await client.windows()) ?? []
+                let front = after.first { $0.selected }?.windowID ?? ""
+                print("click-test: switcher focus   activated \(wanted) — front window is \(front)")
+                if wanted.isEmpty || front != wanted {
+                    failures.append("the switcher did not bring the window it was asked for to the front")
+                }
             } else {
                 failures.append("no switchable table found on core.switcher")
             }
