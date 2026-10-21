@@ -1,5 +1,4 @@
 {
-  "scale" : 2,
   "groups" : [
     {
       "y1" : 1360,
@@ -12,5 +11,6 @@
       "w" : 1200
     }
   ],
-  "page" : "core.observe"
+  "page" : "core.observe",
+  "scale" : 2
 }

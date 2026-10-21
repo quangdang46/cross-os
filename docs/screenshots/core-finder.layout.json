@@ -1,11 +1,11 @@
 {
+  "page" : "core.finder",
   "groups" : [
     {
-      "y0" : 836,
+      "w" : 1200,
       "y1" : 1292,
-      "w" : 1200
+      "y0" : 836
     }
   ],
-  "page" : "core.finder",
   "scale" : 2
 }

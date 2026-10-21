@@ -448,17 +448,41 @@ final class PluginListView: CardControl {
             field.lineBreakMode = .byWordWrapping
             field.usesSingleLineMode = false
             field.maximumNumberOfLines = 0
+            // It takes the width of the group and WRAPS in it. Without it the
+            // sentence keeps its own width — measured at 397pt in a 600pt card
+            // — and is placed at the trailing edge of the space it did not
+            // take, so the reason starts 200pt into the card and runs off
+            // its right edge.
+            field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             stack.addArrangedSubview(field)
+            field.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             stack.setCustomSpacing(Gap.row, after: field)
         }
 
         for meta in metaRows {
-            stack.addArrangedSubview(PluginRow(
+            let row = PluginRow(
                 meta: meta,
                 isOn: enabled[meta.id] ?? false,
                 service: context.service,
                 note: context.note
-            ))
+            )
+            stack.addArrangedSubview(row)
+            // **The row is the width of the group.**
+            //
+            // A `.leading`-aligned stack gives each row the width of its own
+            // content, and a row's content is the plugin's name — so each
+            // plugin's checkbox lands where that NAME ends. Measured on
+            // `core.extensions`: three checkboxes at x=1008, x=1112 and
+            // x=1008, in three rows that are supposed to be three rows of one
+            // list.
+            //
+            // The card's own alignment is `.leading` — that is the card's
+            // rule, and the comment on `Card.setContent` says why: with
+            // `.width` down there the rows stretched to the card's width and
+            // the text sat at the trailing edge, which is a card that fills
+            // and is unreadable. So the width is stated here, per row, and
+            // the alignment stays the card's.
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         replaceBody(with: stack)
     }
@@ -472,6 +496,15 @@ private final class PluginRow: NSStackView {
         alignment = .width
         distribution = .fill
         translatesAutoresizingMaskIntoConstraints = false
+        // **The row takes the width it is offered**, so the checkbox in it
+        // lands on the TRAILING edge of the card — and the three of them
+        // land on the same edge, in a column.
+        //
+        // Without it the row keeps the width of its own content and is
+        // placed at the trailing edge of the space it did not take:
+        // measured on `core.extensions`, three rows of 237pt, 288pt and
+        // 237pt at x=383, x=332 and x=383 in a 600pt card.
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         // A checkbox, for the reason in ObserveBody: `NSSwitch` does not draw
         // into a PDF context and a checkbox does, and a settings row with a
@@ -542,6 +575,15 @@ private final class PluginRow: NSStackView {
         }
 
         column.translatesAutoresizingMaskIntoConstraints = false
+        // **The header is the width of the row**, so the checkbox in it goes
+        // to the trailing edge of the row rather than to the end of the
+        // plugin's name. The row is pinned to the group's width by
+        // `PluginListView`, and this is the other half of that: the row
+        // fills, and what is IN the row fills the row.
+        header.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+        for case let field as NSTextField in column.arrangedSubviews {
+            field.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+        }
         addSubview(column)
         NSLayoutConstraint.activate([
             column.leadingAnchor.constraint(equalTo: leadingAnchor),

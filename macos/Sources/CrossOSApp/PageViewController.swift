@@ -522,6 +522,27 @@ final class EmptyStateView: NSStackView {
         addView(headlineField, in: .center)
         addView(detailField, in: .center)
         setCustomSpacing(Gap.group, after: icon)
+        // **THE STATE SITS AT THE GROUP'S LEADING EDGE.**
+        //
+        // `.gravityAreas` splits the stack into thirds — leading, centre,
+        // trailing — and a view added to the CENTRE area lands in the middle
+        // third of the stack, horizontally as well as vertically. Measured on
+        // `core.safety`: "No trial in flight." at x=206 in a 600pt card,
+        // and the icon a further 13pt right of that, at x=597 on
+        // `core.activity` where the state happened to be narrow.
+        //
+        // So the same empty state sat at the leading edge on one page and a
+        // third of the way in on another, and which one it was depended on
+        // how wide its container happened to be. The constraints say what the
+        // layout was always supposed to say: the icon, the headline and the
+        // sentence all start where the group starts. The VERTICAL centring
+        // the gravity areas were for is untouched — that is the cross axis,
+        // and these constraints are on the main one.
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor),
+            headlineField.leadingAnchor.constraint(equalTo: leadingAnchor),
+            detailField.leadingAnchor.constraint(equalTo: leadingAnchor),
+        ])
     }
 
     override var isFlipped: Bool { true }

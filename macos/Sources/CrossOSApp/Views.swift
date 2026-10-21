@@ -925,36 +925,35 @@ final class ButtonRowView: NSStackView {
         button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         ActionTarget.shared.register(button, control: control, context: context)
 
-        // The row is the button and the sentence beside it, side by side, and
-        // it is CONSTRAINED rather than stacked.
+        // The row is the button and the sentence UNDER it, and they are
+        // ARRANGED subviews of a vertical stack.
         //
-        // A horizontal `NSStackView` with a `.fill` distribution stretches its
-        // only subview to the row's width: measured, the Reset button — the
-        // one row with no note — came out 520pt, the full pane, with its
-        // label centred in it, which is a banner rather than a button. A stack
-        // also cannot say "the button is its own width and the note takes what
-        // is left of the row".
+        // **The sentence is BELOW the button, not beside it.** It used to be
+        // beside it, and a sentence beside a button starts where the button
+        // ENDS — so three buttons of three widths put three sentences at
+        // three different x positions, and the reader has to work out which
+        // sentence belongs to which button. Measured on `core.safety`:
+        // "Login item stays…" started at x=1283 and "Clears a latched PANIC
+        // STOP…" at x=935, in two rows of one list.
         //
-        // So the two are pinned directly: the button at the leading edge at
-        // its own width, the note filling the rest on the button's first
-        // baseline. Three of these share one leading edge and one trailing
-        // edge, which is what makes them read as rows rather than as three
-        // loose widgets.
-        addSubview(button)
-        NSLayoutConstraint.activate([
-            button.leadingAnchor.constraint(equalTo: leadingAnchor),
-            button.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
+        // Under the button, the pairing is the shape of the page: the
+        // sentence is under the thing it describes, every sentence starts at
+        // the same x, and a long button no longer squeezes its sentence into
+        // a two-line stub at the far edge of the pane.
+        //
+        // **Arranged, not `addSubview`.** A view added to a stack without
+        // being arranged is not in the stack's height: the row measured 32pt
+        // — the height floor — and the sentence, hanging below the button,
+        // was squeezed to nothing. Measured: `NSTextField 604x0`, a sentence
+        // with no height at all. An arranged subview is in the stack's
+        // height, so the row is as tall as the button AND the sentence.
+        addArrangedSubview(button)
 
         // The button's label is `control.label`, and one of them is a sentence
-        // ("PANIC STOP — disable interception + plugin actions"). Hugged at its
-        // full width that button took 339pt of a 600pt row and left the note
-        // 245pt — enough to wrap and not enough to show the result, so the
-        // second line was clipped ("Reversible via Re-…").
-        //
-        // A button on macOS truncates; the sentence beside it does not. The cap
-        // is what makes that the outcome instead of the reverse.
-        button.widthAnchor.constraint(lessThanOrEqualToConstant: 260).isActive = true
+        // ("PANIC STOP — disable interception + plugin actions"). A button on
+        // macOS truncates; the sentence under it does not, so the button is
+        // capped and the sentence gets the width.
+        button.widthAnchor.constraint(lessThanOrEqualToConstant: 340).isActive = true
 
         if !control.note.isEmpty {
             let note = NSTextField(labelWithString: control.note)
@@ -970,57 +969,30 @@ final class ButtonRowView: NSStackView {
             note.usesSingleLineMode = false
             note.maximumNumberOfLines = 0
             note.translatesAutoresizingMaskIntoConstraints = false
-            // The note FILLS the gap between the button and the row's end.
+            // The note is the width of the ROW, and it starts at the row's
+            // leading edge — under the button it describes.
             //
             // Leading and trailing alone do not say how WIDE it is, so a label
-            // keeps its intrinsic width and Auto Layout puts it as far from the
-            // button as it can — measured on `core.safety`, "Login item stays.
-            // Reversible via Re-enable" starting at x=1170 against a button
-            // ending at x=815, running off the right edge of the pane.
+            // keeps its intrinsic width and Auto Layout puts it as far from
+            // the button as it can — measured on `core.safety`, "Login item
+            // stays. Reversible via Re-enable" starting at x=1170 against a
+            // button ending at x=815, running off the right edge of the pane.
             note.setContentHuggingPriority(.defaultLow, for: .horizontal)
             note.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            addSubview(note)
-            NSLayoutConstraint.activate([
-                note.leadingAnchor.constraint(equalTo: button.trailingAnchor, constant: Gap.group),
-                // The note FILLS the gap: its trailing edge IS the row's
-                // trailing edge.
-                //
-                // It was `lessThanOrEqualTo`, which says the note may end
-                // anywhere before the row's end — and a label with a low
-                // hugging priority keeps its INTRINSIC width, so it ended
-                // 22pt past the row and the window's edge. Measured on
-                // `core.safety`: "Login item stays. Reversible via Re-…"
-                // ran off the right of the screen with its second line cut
-                // in half.
-                //
-                // With the edge EQUAL, the note's width is what is left of
-                // the row after the button, and a sentence that does not fit
-                // wraps onto a second line — which is what a sentence is for.
-                note.trailingAnchor.constraint(equalTo: trailingAnchor),
-                note.firstBaselineAnchor.constraint(equalTo: button.firstBaselineAnchor),
-                // The note SPANS the row's height, and the row takes the
-                // note's height. It was `top >= ` and `bottom <= `, which
-                // says the note fits INSIDE the row — and the row is 32pt
-                // while a two-line note with its first line on the button's
-                // baseline needs more than that, so the second line was
-                // clipped away. Measured: "Login item stays. Reversible via
-                // Re-enable." showed its first line and lost "enable."
-                //
-                // With the note's edges EQUAL to the row's, the row is as
-                // tall as the note needs and the sentence is whole.
-                note.topAnchor.constraint(equalTo: topAnchor),
-                note.bottomAnchor.constraint(equalTo: bottomAnchor),
-            ])
+            addArrangedSubview(note)
+            // The sentence is the width of the ROW, so it wraps at the
+            // group's edge and not at the width of its own words.
+            note.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
+            setCustomSpacing(Gap.tight, after: button)
         }
 
         // Hug vertically, with a floor at the standard row height so a short
         // button is still a comfortable target.
         //
-        // Hugging alone is not enough and the height floor is not either: the
-        // children are pinned by `centerY` and `firstBaseline`, neither of
-        // which says how tall the row is, so a two-line note measured 32pt
-        // inside a 24pt row and ran from y=-12 to y=20 — half of it ABOVE the
-        // row's own origin. The note's own top and bottom are what close that.
+        // The row's height is the button's plus the sentence's, so a row with
+        // no sentence is the height of its button and a row with one is
+        // taller. The floor is the standard row height, which is what a row
+        // of one control is.
         setContentHuggingPriority(.required, for: .vertical)
         heightAnchor.constraint(greaterThanOrEqualToConstant: Measure.rowHeight).isActive = true
     }

@@ -519,6 +519,21 @@ class RowView: NSStackView {
         texts.translatesAutoresizingMaskIntoConstraints = false
         texts.setContentHuggingPriority(.defaultLow, for: .horizontal)
         texts.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // **THE ROW TAKES THE WIDTH IT IS OFFERED.**
+        //
+        // Low compression resistance is what "take the width you are
+        // offered" means to Auto Layout, and the stack's alignment is what
+        // offers it. A row that resists compression keeps its own width —
+        // and in a `.width`-aligned stack it is then placed at the TRAILING
+        // edge of the space it did not take, which is worse than being
+        // narrow: measured on `core.extensions`, three plugin rows of 237pt,
+        // 288pt and 237pt at x=383, x=332 and x=383 in a 600pt card, with
+        // the plugin names hanging in the middle of it.
+        //
+        // `FactRow` has said this for longer — "low compression resistance is
+        // what take the width you are offered means to Auto Layout" — and
+        // this row is the same shape with a control at its trailing edge.
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         addArrangedSubview(texts)
         NSLayoutConstraint.activate([
             texts.leadingAnchor.constraint(equalTo: leadingAnchor),

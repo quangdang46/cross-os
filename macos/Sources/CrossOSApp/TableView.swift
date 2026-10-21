@@ -58,6 +58,9 @@ final class TableView: NSStackView {
     /// The columns' requested widths, in order, so the slack between them and
     /// the table's real width can be shared out once both are known.
     private let requestedWidths: [CGFloat]
+    /// Whether the settled column geometry has been printed. The print is a
+    /// diagnostic and the layout runs many times.
+    private var didLogColumns = false
     init(content: TableContent) {
         self.content = content
         self.requestedWidths = content.columns.map { $0.1 }
@@ -81,7 +84,15 @@ final class TableView: NSStackView {
             // The last column is the one that must not grow: it is a
             // checkbox, and a checkbox in a 410pt column is a checkbox in
             // the wrong place. The others take the slack.
-            if title == content.columns.last?.0 {
+            //
+            // **A table with ONE column has nowhere to put the slack.** The
+            // Explorer's menu list is one column of 420pt in a 1200pt table,
+            // and the clamp left 780pt of the row empty with the column's
+            // separator drawn down the middle of it — a vertical line in an
+            // empty column, and rows that stopped two-thirds of the way
+            // across the card. The clamp is about a checkbox among other
+            // columns; with no other column, the one column IS the width.
+            if content.columns.count > 1, title == content.columns.last?.0 {
                 column.maxWidth = width
             } else {
                 column.maxWidth = .greatestFiniteMagnitude
@@ -94,13 +105,6 @@ final class TableView: NSStackView {
         // for 514pt and the group's content rect is 560pt, so the extra 46pt
         // belongs to the columns that need it rather than to the checkbox.
         // `shareSlack(over:)` applies it once the real width is known.
-        if CommandLine.arguments.contains("--log-cols") {
-            let d = table.tableColumns.enumerated()
-                .map { i, c in "\(c.title)@\(Int(table.rect(ofColumn: i).minX))w\(Int(c.width))" }
-                .joined(separator: " ")
-            print("cols=\(d) table=\(Int(table.bounds.width))")
-            fflush(stdout)
-        }
         table.dataSource = self
         table.delegate = self
         // **No stripes, and taller rows.**
@@ -352,7 +356,17 @@ final class TableView: NSStackView {
     private func fitColumns(to width: CGFloat) {
         let columns = table.tableColumns
         let wanted = content.columns.map { $0.1 }
-        guard columns.count == wanted.count, columns.count > 1 else { return }
+        guard columns.count == wanted.count, !columns.isEmpty else { return }
+        // **A table with ONE column takes the whole width.**
+        //
+        // It used to be skipped, and the column kept the width it asked for
+        // — 420pt in a 1200pt group — so the Explorer's menu list drew a
+        // column separator down the middle of an empty column and stopped
+        // two-thirds of the way across the card.
+        guard columns.count > 1 else {
+            columns[0].width = width
+            return
+        }
         let total = wanted.reduce(CGFloat(0)) { $0 + $1 }
         let last = columns.count - 1
 
@@ -369,6 +383,98 @@ final class TableView: NSStackView {
             for index in 0..<last { columns[index].width = wanted[index] * scale }
             columns[last].width = fixed
         }
+    }
+
+    /// The columns are fitted on EVERY layout, and not only when the scroll
+    /// view's bounds change.
+    ///
+    /// **The notification that used to drive this fires only when the bounds
+    /// CHANGE.** A table whose width is settled before its columns exist is
+    /// never fitted at all: the columns keep the widths they asked for, the
+    /// table draws at the sum of them, and the last column runs off the right
+    /// edge of the window with its text cut in half.
+    ///
+    /// Measured on `core.activity`: four columns asked for 630pt in a 600pt
+    /// group, so the "App" column ended 89pt past the group's edge — and
+    /// "com.github.wez.wezterm" was cut to "com.github.w" at the window's
+    /// own edge.
+    public override func layout() {
+        super.layout()
+        fitToBox()
+        // The column geometry is printed AFTER the fit, not in the
+        // initializer. Printed in the initializer it reports the widths the
+        // columns ASKED for — the numbers before the table has a width — and
+        // two of them looked like an overflow that was not there.
+        if CommandLine.arguments.contains("--log-cols"), !didLogColumns {
+            didLogColumns = true
+            let d = table.tableColumns.enumerated()
+                .map { i, c in "\(c.title)@\(Int(table.rect(ofColumn: i).minX))w\(Int(c.width))" }
+                .joined(separator: " ")
+            print("cols=\(d) table=\(Int(table.bounds.width)) clip=\(Int(scroll.bounds.width))")
+            fflush(stdout)
+        }
+    }
+
+    /// The columns are fitted to the BOX the table lives in.
+    ///
+    /// **Not to the table's own width.** The table's width is the sum of its
+    /// columns, and the columns are fitted to the width they are fitted to —
+    /// so fitting them to the table's width is a loop that settles on
+    /// whatever the columns asked for and never on the width of the box they
+    /// have to fit in. Measured on `core.activity`: four columns asked for
+    /// 630pt, the table grew to 797pt in a 600pt group, and "App" ended 197pt
+    /// past the group's edge with "com.google.Chrome" cut in half by the
+    /// window.
+    ///
+    /// The box is the scroll view's width, and the columns start at the
+    /// table's own leading inset, so the width they have to fill is the box
+    /// less that.
+    private func fitToBox() {
+        let box = scroll.bounds.width
+        guard box > 0 else { return }
+        let columns = table.tableColumns
+        let wanted = content.columns.map { $0.1 }
+        guard columns.count == wanted.count, !columns.isEmpty else { return }
+        // A table with ONE column takes the whole box. It used to be
+        // skipped, and the column kept the width it asked for — 420pt in a
+        // 1200pt group — so the Explorer's menu list drew a column
+        // separator down the middle of an empty column and stopped
+        // two-thirds of the way across the card.
+        guard columns.count > 1 else {
+            // One column takes the whole box, less the table's own insets —
+            // and the insets are MEASURED, because they are AppKit's and
+            // not ours: measured at 32pt on a table with a vertical
+            // scroller, so a column given the whole box made the table 22pt
+            // wider than the box it has to fit in.
+            columns[0].width = box
+            let over = table.bounds.width - box
+            if over > 0.5 {
+                columns[0].width = max(0, columns[0].width - over)
+            }
+            return
+        }
+        let last = columns.count - 1
+        // The columns are set to what they ask for, and then the table is
+        // MEASURED and the flexible ones scaled to what is left.
+        //
+        // **The gap AppKit leaves between two columns is not in the
+        // columns' widths**, so a fit that adds the widths up and compares
+        // the sum with the box compares the wrong numbers: measured on
+        // `core.activity`, four columns asked for 630pt in a 600pt group
+        // and the gaps took it to 649 — and "com.google.Chrome" was cut in
+        // half by the window's edge.
+        //
+        // The LAST column keeps the width it asked for: it is a checkbox,
+        // and a checkbox in a 410pt column is a checkbox in the wrong
+        // place. The others are the ones that give.
+        for (index, column) in columns.enumerated() { column.width = wanted[index] }
+        let leading = table.rect(ofColumn: 0).minX
+        let over = table.rect(ofColumn: last).maxX - (box - leading)
+        guard over > 0.5 else { return }
+        let flexible = wanted.prefix(last).reduce(CGFloat(0)) { $0 + $1 }
+        guard flexible > 0 else { return }
+        let scale = max(0, flexible - over) / flexible
+        for index in 0..<last { columns[index].width = wanted[index] * scale }
     }
 
     required init?(coder: NSCoder) { fatalError("TableView is created in code") }
@@ -465,6 +571,19 @@ extension TableView: NSTableViewDelegate {
             NSLayoutConstraint.activate([
                 checkbox.centerXAnchor.constraint(equalTo: cell.centerXAnchor),
                 checkbox.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            ])
+            // **The checkbox gets the HIT TARGET, not just the glyph.**
+            //
+            // A checkbox reports an intrinsic 16x16, and 16pt is a target a
+            // person has to aim at — the audit calls it "under 24pt",
+            // sixteen times over, once per row of the matrix and once per row
+            // of the file-type table. The GLYPH stays what AppKit draws; the
+            // FRAME goes to the floor, so the thing under the pointer is 24pt
+            // square. The same floor the `RowView` gives the checkboxes
+            // outside a table.
+            NSLayoutConstraint.activate([
+                checkbox.widthAnchor.constraint(greaterThanOrEqualToConstant: Measure.hitTarget),
+                checkbox.heightAnchor.constraint(greaterThanOrEqualToConstant: Measure.hitTarget),
             ])
             return cell
         }

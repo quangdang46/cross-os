@@ -34,6 +34,20 @@ final class TrialView: CardControl {
 
     override init(control: Control, context: ControlContext) {
         super.init(control: control, context: context)
+        // **The buttons are at the LEADING edge.**
+        //
+        // The stack was a bare `NSStackView`, and the stack's own defaults
+        // put its only button at the TRAILING edge of the group: measured on
+        // `core.safety`, "Start a trial" sat at x=1580 in a group that runs
+        // from x=570 to x=1760 — a button alone at the far right of an
+        // empty state, four hundred points from the thing it acts on.
+        //
+        // A button belongs where the eye already is: under the sentence it
+        // belongs to, at the same left edge as the sentence.
+        buttons.orientation = .horizontal
+        buttons.alignment = .leading
+        buttons.distribution = .fill
+        buttons.spacing = Gap.group
         Task { await load(context: context) }
     }
 
@@ -82,7 +96,18 @@ final class TrialView: CardControl {
                 buttons,
             ])
             column.orientation = .vertical
-            column.alignment = .width
+            // **`.leading`, NOT `.width`.**
+            //
+            // A `.width`-aligned stack gives each child its OWN width and
+            // places it at the TRAILING edge — measured on `core.safety`, the
+            // empty state at x=208 and the "Start a trial" button at x=529 in
+            // a 600pt card: the state a third of the way in and the button
+            // alone at the far right, four hundred points from the sentence
+            // it acts on.
+            //
+            // `.leading` puts both at the group's own left edge, which is
+            // where the eye already is.
+            column.alignment = .leading
             column.spacing = Gap.row
             column.translatesAutoresizingMaskIntoConstraints = false
             replaceBody(with: column)
@@ -148,6 +173,11 @@ final class TrialView: CardControl {
     private func addButton(_ title: String, in stack: NSStackView, action: @escaping () -> Void) {
         let button = NSButton(title: title, target: ClosureTarget.shared, action: nil)
         button.bezelStyle = .rounded
+        // Its OWN width. A `.fill` distribution stretches a button to the
+        // stack's width, and a button with its label centred in 1200pt is a
+        // banner, not a button.
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
         let proxy = ClosureTarget.shared.register(button, action: action)
         button.target = proxy
         button.action = #selector(ClosureTarget.fire(_:))

@@ -227,7 +227,14 @@ public enum CoreError: Error, CustomStringConvertible {
         case .decode(let method, _):
             return "The daemon's answer to \(method) did not look right. This is a bug in CrossOS."
         case .timeout(let method):
-            return "The daemon did not answer \(method) in time."
+            // **A CAUSE AND A NEXT STEP.**
+            //
+            // This one named the cause and stopped, and it was the last
+            // message in the app that did: the transport case says how to
+            // start the daemon again and the decode case says it is a bug.
+            // A timeout is the one the reader can most often do something
+            // about — the daemon is busy, and the page asks again.
+            return "The daemon did not answer \(method) in time. It may be busy; try again, or start it again with ./scripts/run.sh."
         }
     }
 }
