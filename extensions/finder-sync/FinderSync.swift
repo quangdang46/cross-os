@@ -286,7 +286,7 @@ final class FinderSync: FIFinderSync {
     @objc private func dispatchFromMenuItem(_ sender: AnyObject?) {
         guard let item = sender as? NSMenuItem,
               menuEntrySnapshot.indices.contains(item.tag) else {
-            log.error("dispatch: tag out of range (snapshot=\(menuEntrySnapshot.count))")
+            log.error("dispatch: tag out of range (snapshot=\(self.menuEntrySnapshot.count))")
             NSSound.beep()
             return
         }
@@ -321,7 +321,7 @@ final class FinderSync: FIFinderSync {
         case "finder.copyPath", "finder.duplicateWithName":
             return RPCParams(paths: selectionPaths())
         case "finder.copyRelativePath":
-            return RPCParams(paths: selectionPaths(), baseDir: creationDirectory())
+            return RPCParams(baseDir: creationDirectory(), paths: selectionPaths())
         default:
             return RPCParams()
         }

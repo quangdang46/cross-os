@@ -97,6 +97,15 @@ jobs:
         working-directory: macos
     steps:
       - uses: actions/checkout@v4
+      # **GO IS ON THE PATH FOR THIS JOB TOO.**
+      #
+      # The audit and the click test read a LIVE daemon, so the job starts
+      # one — and the daemon is built from Go. Without this step the build
+      # step failed with "./scripts/build-core.sh: line 65: go: command not
+      # found", which is how this job died before it reached a single check.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
       - name: Build (SwiftPM)
         run: swift build -c release
       # The suite is an EXECUTABLE, not a `.testTarget`, and that is not a
@@ -247,8 +256,29 @@ jobs:
       - name: Assert 5 frozen exports resolve (dumpbin, fail-closed)
         shell: pwsh
         run: |
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools -property installationPath
-          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe | Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
+          # **THE TOOLCHAIN IS FOUND ON DISK, NOT THROUGH vswhere.**
+          #
+          # vswhere answers with the INSTALLATION PATH, and the query this
+          # step used asked for a component id that the current Visual Studio
+          # does not report under that name — so vswhere returned nothing and
+          # the path became "\VC\Tools\MSVC", which resolved to "D:\VC\Tools\"
+          # and failed with "Cannot find path". The DLL itself built fine
+          # (the CMake step above it uses the same toolchain); only the
+          # LOOKUP was broken.
+          #
+          # So dumpbin is found where it lives: the MSVC toolchain
+          # directories under the Visual Studio install roots. Both roots
+          # are searched because the 64-bit install path is not the
+          # (x86) one.
+          $roots = @("${env:ProgramFiles(x86)}\Microsoft Visual Studio", "${env:ProgramFiles}\Microsoft Visual Studio") |
+                   Where-Object { Test-Path $_ } |
+                   ForEach-Object { Get-ChildItem $_ -Directory -ErrorAction SilentlyContinue } |
+                   ForEach-Object { Join-Path $_.FullName 'VC\Tools\MSVC' } |
+                   Where-Object { Test-Path $_ }
+          if (-not $roots) { Write-Error "no Visual Studio MSVC toolchain found"; exit 1 }
+          $dumpbin = $roots | ForEach-Object { Get-ChildItem $_ -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue } |
+                     Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
+          if (-not $dumpbin) { Write-Error "dumpbin.exe not found under: $roots"; exit 1 }
           $out = & $dumpbin.FullName /exports $env:DLL_PATH | Out-String
           foreach ($sym in @('CrossOS_HookInstall','CrossOS_HookUninstall','CrossOS_SendInput','CrossOS_UIPIStatus','CrossOS_DeviceId')) {
             if ($out -notmatch $sym) { Write-Error "export missing: $sym"; exit 1 }
