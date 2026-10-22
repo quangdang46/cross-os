@@ -266,15 +266,22 @@ jobs:
           # (the CMake step above it uses the same toolchain); only the
           # LOOKUP was broken.
           #
-          # So dumpbin is found where it lives: the MSVC toolchain
-          # directories under the Visual Studio install roots. Both roots
-          # are searched because the 64-bit install path is not the
-          # (x86) one.
-          $roots = @("${env:ProgramFiles(x86)}\Microsoft Visual Studio", "${env:ProgramFiles}\Microsoft Visual Studio") |
-                   Where-Object { Test-Path $_ } |
-                   ForEach-Object { Get-ChildItem $_ -Directory -ErrorAction SilentlyContinue } |
-                   ForEach-Object { Join-Path $_.FullName 'VC\Tools\MSVC' } |
-                   Where-Object { Test-Path $_ }
+          # So dumpbin is found where it lives. vswhere is asked WITHOUT the
+          # component filter — that filter was the reason it answered with
+          # nothing — and the directory scan is the fallback for the case
+          # where vswhere does not know about the installation either.
+          $roots = @()
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          if ($vs) { $roots += (Join-Path $vs 'VC\Tools\MSVC') }
+          # The layout is <root>\<year>\<edition>\VC\Tools\MSVC, so the
+          # search goes two levels in: a search that stops one level short
+          # finds nothing.
+          $roots += @("${env:ProgramFiles(x86)}\Microsoft Visual Studio", "${env:ProgramFiles}\Microsoft Visual Studio") |
+                    Where-Object { Test-Path $_ } |
+                    ForEach-Object { Get-ChildItem $_ -Directory -ErrorAction SilentlyContinue } |
+                    ForEach-Object { Get-ChildItem $_.FullName -Directory -ErrorAction SilentlyContinue } |
+                    ForEach-Object { Join-Path $_.FullName 'VC\Tools\MSVC' }
+          $roots = $roots | Where-Object { Test-Path $_ } | Select-Object -Unique
           if (-not $roots) { Write-Error "no Visual Studio MSVC toolchain found"; exit 1 }
           $dumpbin = $roots | ForEach-Object { Get-ChildItem $_ -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue } |
                      Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1

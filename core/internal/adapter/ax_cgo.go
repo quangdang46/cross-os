@@ -45,6 +45,12 @@ const axPermissionCode = -25211
 // axNotTrustedCode is kAXErrorNotTrusted.
 const axNotTrustedCode = -25243
 
+// axNoValueCode is kAXErrorNoValue — the Accessibility plane's answer when
+// the thing asked for does not exist. For the focused-window read that
+// thing is the focused window, so it means "there is no focused window",
+// which the seam has its own typed answer for.
+const axNoValueCode = -25212
+
 // axError maps an AXError to the adapter's typed errors.
 func axError(op string, code int) error {
 	if code == axPermissionCode || code == axNotTrustedCode {
@@ -57,6 +63,22 @@ func axError(op string, code int) error {
 func axFocusedWindow() (FocusedWindow, error) {
 	var w C.cxax_window
 	if C.cxax_focused(&w) == 0 {
+		// **"NO VALUE" IS "NO FOCUSED WINDOW", NOT A FAILURE.**
+		//
+		// kAXErrorNoValue is what the Accessibility plane answers when the
+		// thing asked for does not exist, and what was asked for here is the
+		// focused window: there is none. The seam has a typed answer for
+		// exactly that — errNoFocusedWindow, whose own comment says the
+		// grant can be present and correct while the plane has no window to
+		// name.
+		//
+		// Reported raw, it read as "adapter: ax focused failed (AXError
+		// -25212)", which is a code the user can do nothing with and a
+		// failure where there was an answer. Measured on a CI runner with no
+		// window in front, which is where the two live tests saw it.
+		if int(w.err) == axNoValueCode {
+			return FocusedWindow{}, errNoFocusedWindow
+		}
 		return FocusedWindow{}, axError("focused", int(w.err))
 	}
 	return FocusedWindow{

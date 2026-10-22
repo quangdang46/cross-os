@@ -403,9 +403,24 @@ final class FinderSync: FIFinderSync {
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         let path = daemonSocketPath
-        _ = path.withCString { ptr in
-            withUnsafeMutablePointer(to: &addr.sun_path.0) { dest in
-                strncpy(dest, ptr, MemoryLayout.size(ofValue: addr.sun_path) - 1)
+        // **THE PATH IS COPIED THROUGH A LOCAL BUFFER.**
+        //
+        // The size of the path field is read from `addr` inside the very
+        // closure that holds `&addr.sun_path.0`: two accesses to the same
+        // memory, one shared and one exclusive. Swift refuses that — "overlapping
+        // accesses to 'addr.sun_path.0', but modification requires exclusive
+        // access; consider copying to a local variable" — and the Finder
+        // appex did not compile until the copy was made explicit.
+        let pathCapacity = Int(MemoryLayout.size(ofValue: addr.sun_path))
+        var pathBytes = [CChar](repeating: 0, count: pathCapacity)
+        path.withCString { src in
+            _ = pathBytes.withUnsafeMutableBufferPointer { dest in
+                strncpy(dest.baseAddress!, src, pathCapacity - 1)
+            }
+        }
+        withUnsafeMutableBytes(of: &addr.sun_path) { destination in
+            pathBytes.withUnsafeBytes { source in
+                destination.copyBytes(from: source)
             }
         }
         // Bound the whole exchange, dial included: a connect() that blocks is
