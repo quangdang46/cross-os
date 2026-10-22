@@ -49,6 +49,7 @@ func axAXTrusted() bool                { return false }
 func axWindowsReadsTotal() int         { return 0 }
 func axWindowsReadsForPID(pid int) int { return 0 }
 func axWindowsReadsReset()             {}
+func axWindowsUnanswered() int         { return 0 }
 
 // axOnScreenWindowIDs has no counterpart off darwin: there is no WindowServer
 // to ask for a front-to-back order. An empty answer is the honest one — the

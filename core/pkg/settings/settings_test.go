@@ -96,13 +96,13 @@ func TestClearedListsStillPersist(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	known := func(string) bool { return true }
-	if err := s.SetOverride("com.apple.Finder", "some.rule", false, known); err != nil {
+	if err := s.SetOverride("com.apple.finder", "some.rule", false, known); err != nil {
 		t.Fatalf("override: %v", err)
 	}
 	if err := s.SetZones([]winlayout.Zone{{ID: "a", Name: "A", W: 10, H: 10}}); err != nil {
 		t.Fatalf("zones: %v", err)
 	}
-	if err := s.SetOverride("com.apple.Finder", "some.rule", true, known); err != nil {
+	if err := s.SetOverride("com.apple.finder", "some.rule", true, known); err != nil {
 		t.Fatalf("the first override write must persist: %v", err)
 	}
 	if err := s.SetZones([]winlayout.Zone{}); err != nil {
@@ -184,16 +184,16 @@ func TestOverrideReader(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	known := func(string) bool { return true }
-	if _, ok := s.Override("com.apple.Finder", "some.rule"); ok {
+	if _, ok := s.Override("com.apple.finder", "some.rule"); ok {
 		t.Fatal("an app with no stored verdict must report ok=false")
 	}
 	if _, ok := s.Override("", "some.rule"); ok {
 		t.Fatal("the empty app id can never be scoped")
 	}
-	if err := s.SetOverride("com.apple.Finder", "some.rule", false, known); err != nil {
+	if err := s.SetOverride("com.apple.finder", "some.rule", false, known); err != nil {
 		t.Fatalf("SetOverride: %v", err)
 	}
-	if on, ok := s.Override("com.apple.Finder", "some.rule"); !ok || on {
+	if on, ok := s.Override("com.apple.finder", "some.rule"); !ok || on {
 		t.Fatalf("Override=%v,%v, want false,true for the stored off verdict", on, ok)
 	}
 	if _, ok := s.Override("com.apple.Safari", "some.rule"); ok {
@@ -202,10 +202,10 @@ func TestOverrideReader(t *testing.T) {
 	// Both verdicts are kept: an explicit "this app still wants it" has to
 	// outlive a global switch-off, or the per-app intent silently follows the
 	// global switch.
-	if err := s.SetOverride("com.apple.Finder", "some.rule", true, known); err != nil {
+	if err := s.SetOverride("com.apple.finder", "some.rule", true, known); err != nil {
 		t.Fatalf("SetOverride on: %v", err)
 	}
-	if on, ok := s.Override("com.apple.Finder", "some.rule"); !ok || !on {
+	if on, ok := s.Override("com.apple.finder", "some.rule"); !ok || !on {
 		t.Fatalf("Override=%v,%v, want true,true after the flip", on, ok)
 	}
 }
@@ -218,13 +218,13 @@ func TestOverrideRejectsUnknownRule(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	known := func(id string) bool { return id == "real.rule" }
-	if err := s.SetOverride("com.apple.Finder", "nope", false, known); err == nil {
+	if err := s.SetOverride("com.apple.finder", "nope", false, known); err == nil {
 		t.Fatal("unknown rule must fail closed")
 	}
 	if got := s.Overrides(); len(got) != 0 {
 		t.Fatalf("a rejected override was stored: %+v", got)
 	}
-	if err := s.SetOverride("com.apple.Finder", "real.rule", false, known); err != nil {
+	if err := s.SetOverride("com.apple.finder", "real.rule", false, known); err != nil {
 		t.Fatalf("known rule: %v", err)
 	}
 	// Sorted by app then rule ID, because the editor polls this list.
@@ -232,11 +232,11 @@ func TestOverrideRejectsUnknownRule(t *testing.T) {
 	if err := s2.SetOverride("com.microsoft.VSCode", "z.rule", true, func(string) bool { return true }); err != nil {
 		t.Fatalf("z: %v", err)
 	}
-	if err := s2.SetOverride("com.apple.Finder", "b.rule", true, func(string) bool { return true }); err != nil {
+	if err := s2.SetOverride("com.apple.finder", "b.rule", true, func(string) bool { return true }); err != nil {
 		t.Fatalf("b: %v", err)
 	}
 	got := s2.Overrides()
-	if len(got) != 2 || got[0].App != "com.apple.Finder" || got[1].App != "com.microsoft.VSCode" {
+	if len(got) != 2 || got[0].App != "com.apple.finder" || got[1].App != "com.microsoft.VSCode" {
 		t.Fatalf("Overrides()=%+v, want sorted by app", got)
 	}
 }
@@ -314,7 +314,7 @@ func TestFullRoundTrip(t *testing.T) {
 		do   func() error
 	}{
 		{"rule toggle", func() error { return s.SetRuleEnabled("some.rule", false, known) }},
-		{"override", func() error { return s.SetOverride("com.apple.Finder", "some.rule", true, known) }},
+		{"override", func() error { return s.SetOverride("com.apple.finder", "some.rule", true, known) }},
 		{"shortcuts", func() error { return s.SetShortcuts(shortcuts) }},
 		{"zones", func() error { return s.SetZones(zones) }},
 		{"panic stop", func() error { return s.SetPanicStopped(true) }},
@@ -336,7 +336,7 @@ func TestFullRoundTrip(t *testing.T) {
 	if s2.IsRuleEnabled("some.rule") {
 		t.Error("a disabled rule came back enabled")
 	}
-	if on, ok := s2.Override("com.apple.Finder", "some.rule"); !ok || !on {
+	if on, ok := s2.Override("com.apple.finder", "some.rule"); !ok || !on {
 		t.Errorf("override after reload=(%v,%v), want (true,true)", on, ok)
 	}
 	if got := s2.Shortcuts(); !reflect.DeepEqual(got, shortcuts) {
@@ -814,7 +814,7 @@ func TestConcurrentWritersDoNotLoseEachOther(t *testing.T) {
 					t.Errorf("disable %s: %v", rule, err)
 					return
 				}
-				if err := s.SetOverride("com.apple.Finder", rule, true, known); err != nil {
+				if err := s.SetOverride("com.apple.finder", rule, true, known); err != nil {
 					t.Errorf("override %s: %v", rule, err)
 					return
 				}

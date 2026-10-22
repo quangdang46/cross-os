@@ -332,7 +332,7 @@ func TestOverrideRoundTripAndFailClosed(t *testing.T) {
 		t.Fatalf("a fresh daemon has %d overrides, want 0", len(rows))
 	}
 	if _, oerr := c.handleSetOverride(
-		json.RawMessage(`{"app":"com.apple.Finder","rule_id":"nope","enabled":true}`)); oerr == nil {
+		json.RawMessage(`{"app":"com.apple.finder","rule_id":"nope","enabled":true}`)); oerr == nil {
 		t.Fatal("an unknown rule id must fail closed")
 	}
 	if _, oerr := c.handleSetOverride(
@@ -346,7 +346,7 @@ func TestOverrideRoundTripAndFailClosed(t *testing.T) {
 
 	// Inserted out of order on purpose: the list comes back sorted by app so
 	// the editor does not reshuffle between polls.
-	for _, app := range []string{"com.microsoft.VSCode", "com.apple.Finder"} {
+	for _, app := range []string{"com.microsoft.VSCode", "com.apple.finder"} {
 		if _, oerr := c.handleSetOverride(json.RawMessage(
 			`{"app":"` + app + `","rule_id":"windows-keyboard.ctrl-c-copy","enabled":false}`)); oerr != nil {
 			t.Fatalf("setOverride %s: %v", app, oerr)
@@ -357,7 +357,7 @@ func TestOverrideRoundTripAndFailClosed(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("overrides=%+v, want 2 rows", rows)
 	}
-	if rows[0].App != "com.apple.Finder" || rows[1].App != "com.microsoft.VSCode" {
+	if rows[0].App != "com.apple.finder" || rows[1].App != "com.microsoft.VSCode" {
 		t.Fatalf("overrides are not sorted by app: %+v", rows)
 	}
 	// action/keys come from the rule table, so the editor renders a row from
@@ -368,9 +368,9 @@ func TestOverrideRoundTripAndFailClosed(t *testing.T) {
 	// The reply echoes the stored verdict so the editor never assumes its own
 	// write landed.
 	echoRes, echoErr := c.handleSetOverride(json.RawMessage(
-		`{"app":"com.apple.Finder","rule_id":"windows-keyboard.ctrl-c-copy","enabled":true}`))
+		`{"app":"com.apple.finder","rule_id":"windows-keyboard.ctrl-c-copy","enabled":true}`))
 	echo := decode[map[string]any](t, echoRes, echoErr)
-	if echo["app"] != "com.apple.Finder" || echo["rule_id"] != "windows-keyboard.ctrl-c-copy" || echo["enabled"] != true {
+	if echo["app"] != "com.apple.finder" || echo["rule_id"] != "windows-keyboard.ctrl-c-copy" || echo["enabled"] != true {
 		t.Fatalf("setOverride reply=%v", echo)
 	}
 }
@@ -391,14 +391,14 @@ func TestStoredOverrideGatesTheRule(t *testing.T) {
 	}
 	const rule = "windows-keyboard.win-left-snap"
 	chord := event.Event{Type: event.EventKeyDown, KeyCode: 0x25, Modifiers: 1 << 3}
-	finder := event.FastContext{AppID: "com.apple.Finder", AppMode: event.AppModeNative}
+	finder := event.FastContext{AppID: "com.apple.finder", AppMode: event.AppModeNative}
 	safari := event.FastContext{AppID: "com.apple.Safari", AppMode: event.AppModeNative}
 
 	if out := c.decideLocked(chord, finder); out.WinnerRule != rule {
 		t.Fatalf("baseline winner=%q, want %q", out.WinnerRule, rule)
 	}
 	if _, oerr := c.handleSetOverride(
-		json.RawMessage(`{"app":"com.apple.Finder","rule_id":"` + rule + `","enabled":false}`)); oerr != nil {
+		json.RawMessage(`{"app":"com.apple.finder","rule_id":"` + rule + `","enabled":false}`)); oerr != nil {
 		t.Fatalf("setOverride: %v", oerr)
 	}
 	if out := c.decideLocked(chord, finder); out.WinnerRule != "" {
@@ -795,8 +795,8 @@ func TestMatrixRowsNameTheirAppConditions(t *testing.T) {
 	// The spec's own example row, readable as itself: Ctrl+Shift+C names Finder
 	// among the apps it is scoped to.
 	if got := byID["developer.ctrl-shift-c-copypath"].Contexts; len(got) == 0 ||
-		!strings.Contains(strings.Join(got, "|"), "com.apple.Finder") {
-		t.Errorf("ctrl-shift-c contexts=%v, want com.apple.Finder among them", got)
+		!strings.Contains(strings.Join(got, "|"), "com.apple.finder") {
+		t.Errorf("ctrl-shift-c contexts=%v, want com.apple.finder among them", got)
 	}
 }
 
@@ -1150,7 +1150,7 @@ func TestTracesExposeTheRecordedDetail(t *testing.T) {
 		t.Fatalf("a daemon that has decided nothing reports %d traces: %+v", len(rows), rows)
 	}
 	if _, kerr := c.handleKeyEvent(json.RawMessage(
-		`{"keyCode":67,"modifiers":1,"appId":"com.apple.Finder","appMode":"native"}`)); kerr != nil {
+		`{"keyCode":67,"modifiers":1,"appId":"com.apple.finder","appMode":"native"}`)); kerr != nil {
 		t.Fatalf("keyEvent: %v", kerr)
 	}
 	res, rerr = c.handleTraces(nil)
@@ -1168,11 +1168,18 @@ func TestTracesExposeTheRecordedDetail(t *testing.T) {
 	if row.Event.Keys != "Ctrl+C" || row.Event.Source != "keyboard" || row.Event.KeyCode != 0x43 {
 		t.Errorf("event=%+v, want Ctrl+C from the keyboard", row.Event)
 	}
-	if row.Context.AppID != "com.apple.Finder" || row.Context.AppMode != "native" {
+	if row.Context.AppID != "com.apple.finder" || row.Context.AppMode != "native" {
 		t.Errorf("context=%+v, want the focused app the decision was made in", row.Context)
 	}
-	if row.Decision != "REPLACE" {
-		t.Errorf("decision=%q, want the PASS/CONSUME/REPLACE vocabulary core.keyEvent serves", row.Decision)
+	// **THE DECISION IS PASS, AND THAT IS THE TRUTH.**
+	//
+	// Ctrl+C names clipboard.copy, which this daemon has no adapter for, so
+	// the key is not claimed — the rule matched, and the daemon leaves the
+	// key alone. The trace still carries the winner and the intent, so the
+	// Activity page shows what would have happened, and a stage says why it
+	// did not happen.
+	if row.Decision != "PASS" {
+		t.Errorf("decision=%q, want PASS (a key the daemon cannot act on is not claimed)", row.Decision)
 	}
 	// Losers is a list even when the decision was uncontested: null would be a
 	// missing value the page has to special-case.
@@ -1190,6 +1197,14 @@ func TestTracesExposeTheRecordedDetail(t *testing.T) {
 		if stages[want] == "" {
 			t.Errorf("trace has no %q stage: %+v", want, row.Stages)
 		}
+	}
+	// **AND IT SAYS WHY THE KEY WAS LEFT ALONE.** The Activity page is where
+	// the user finds out what the remapper did with a key, so a rule that
+	// matched and was not carried out has to say so — with the capability
+	// named, so "the daemon cannot do this yet" is a fact and not a shrug.
+	if !strings.Contains(stages["action"], "clipboard.copy") ||
+		!strings.Contains(stages["action"], "no adapter") {
+		t.Errorf("action stage=%q, want it to name the capability and say it has no adapter", stages["action"])
 	}
 	// Both views describe the same recorded trace, so the sentence and the
 	// columns cannot tell the user different stories.
@@ -1215,7 +1230,7 @@ func TestTracesClearEmptiesTheRecorderAndSaysWhatIsLeft(t *testing.T) {
 	}
 	decide := func() {
 		if _, err := c.handleKeyEvent(json.RawMessage(
-			`{"keyCode":67,"modifiers":1,"appId":"com.apple.Finder","appMode":"native"}`)); err != nil {
+			`{"keyCode":67,"modifiers":1,"appId":"com.apple.finder","appMode":"native"}`)); err != nil {
 			t.Fatalf("keyEvent: %v", err)
 		}
 	}
@@ -1281,7 +1296,7 @@ func TestTracesClearAnswersTheSameRowsTheReadServes(t *testing.T) {
 		c.registerBuiltin(id, true)
 	}
 	if _, err := c.handleKeyEvent(json.RawMessage(
-		`{"keyCode":67,"modifiers":1,"appId":"com.apple.Finder","appMode":"native"}`)); err != nil {
+		`{"keyCode":67,"modifiers":1,"appId":"com.apple.finder","appMode":"native"}`)); err != nil {
 		t.Fatalf("keyEvent: %v", err)
 	}
 	servedRes, servedErr := c.handleTraces(nil)
@@ -1467,7 +1482,7 @@ func routerHas(c *Core, id string) bool {
 // winChordWinner is the decision path's verdict for the Win+Left chord.
 func winChordWinner(c *Core) string {
 	return c.decideLocked(winLeft, event.FastContext{
-		AppID: "com.apple.Finder", AppMode: event.AppModeNative,
+		AppID: "com.apple.finder", AppMode: event.AppModeNative,
 	}).WinnerRule
 }
 

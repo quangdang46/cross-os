@@ -32,11 +32,6 @@ struct CrossOSFileType: Codable, Equatable {
         let t = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty ? "New .\(ext)" : t
     }
-
-    /// MenuEntry payload for FinderSync rows + daemon requests.
-    func menuEntry() -> MenuEntry {
-        MenuEntry(title: menuTitle, action: "createFile", ext: ext, baseName: baseName)
-    }
 }
 
 enum CrossOSSeedPresets {

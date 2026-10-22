@@ -51,13 +51,13 @@ func TestSpaceVKIsHostIndependent(t *testing.T) {
 func TestSearchRanking(t *testing.T) {
 	apps := []App{
 		{Name: "Finder Contrast", BundleID: "com.other.contrast"},
-		{Name: "Finder", BundleID: "com.apple.Finder"},
+		{Name: "Finder", BundleID: "com.apple.finder"},
 		{Name: "Refinder Pro", BundleID: "com.other.refinder"},
 		{Name: "Terminal", BundleID: "com.apple.Terminal"},
 	}
 	// Fuzzy probe (subsequence, not substring): "fdr" fits f-in-d-e-r order
 	// inside "finder"/"refinder" but matches nothing else.
-	fuzzyApps := []App{{Name: "Finder", BundleID: "com.apple.Finder"}, {Name: "Terminal", BundleID: "com.apple.Terminal"}}
+	fuzzyApps := []App{{Name: "Finder", BundleID: "com.apple.finder"}, {Name: "Terminal", BundleID: "com.apple.Terminal"}}
 	if got := Search("fdr", fuzzyApps); len(got) != 1 || got[0].Name != "Finder" {
 		t.Fatalf("fuzzy fdr=%v, want [Finder]", got)
 	}
@@ -90,7 +90,7 @@ func TestSearchRanking(t *testing.T) {
 // TestLaunchViaCapability: selection builds an app.launch request with the
 // bundle ID (Adapter executes — no direct launch from the plugin).
 func TestLaunchViaCapability(t *testing.T) {
-	a := App{Name: "Finder", BundleID: "com.apple.Finder"}
+	a := App{Name: "Finder", BundleID: "com.apple.finder"}
 	in := LaunchIntent(a)
 	if in.ID != "app.launch" {
 		t.Fatalf("intent=%q, want app.launch", in.ID)

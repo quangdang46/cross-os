@@ -34,7 +34,6 @@ import "C"
 // change to any of them changes the action id and the bridge is recompiled.
 // See scripts/build-core.sh, which every build goes through.
 
-
 import (
 	"fmt"
 )
@@ -241,8 +240,6 @@ func axWindowsReadsForPID(pid int) int { return int(C.cxax_windows_reads_for_pid
 
 func axWindowsReadsReset() { C.cxax_windows_reads_reset() }
 
-
-
-
-
-
+// axWindowsUnanswered counts the applications whose last Accessibility read
+// did not answer, and whose windows are owed another read.
+func axWindowsUnanswered() int { return int(C.cxax_windows_unanswered()) }

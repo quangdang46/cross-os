@@ -302,7 +302,7 @@ func schemaFormHelp() UIContribution {
 				// says why: a fabricated schema would render a form with no write
 				// path behind it, which is a control that looks configurable and
 				// silently is not — a worse lie than an empty page.
-				"note":   "This page draws a plugin's configuration form when one ships a schema. None does yet, so there is nothing to draw.",
+				"note": "This page draws a plugin's configuration form when one ships a schema. None does yet, so there is nothing to draw.",
 			}),
 		},
 	}), nil, "true")

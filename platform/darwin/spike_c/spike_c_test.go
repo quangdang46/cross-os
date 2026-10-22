@@ -20,7 +20,7 @@ import (
 
 func goodFocused() Focused {
 	return Focused{
-		App:    AppInfo{BundleID: "com.apple.Finder", PID: 123},
+		App:    AppInfo{BundleID: "com.apple.finder", PID: 123},
 		Window: WindowInfo{Title: "Documents", Role: "AXWindow", ID: 42, Frame: Frame{X: 0, Y: 25, W: 800, H: 600}},
 	}
 }

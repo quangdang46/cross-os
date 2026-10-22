@@ -19,17 +19,20 @@
 #
 #   ./scripts/build-core.sh              # build the daemon
 #   ./scripts/build-core.sh --test       # build and run the Go tests too
+#   ./scripts/build-core.sh --out PATH   # build the daemon to PATH
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 RUN_TESTS=0
-for arg in "$@"; do
-  case "$arg" in
-    --test) RUN_TESTS=1 ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
-    *) echo "unknown option $arg" >&2; exit 1 ;;
+OUT=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --test) RUN_TESTS=1; shift ;;
+    --out) OUT="$2"; shift 2 ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    *) echo "unknown option $1" >&2; exit 1 ;;
   esac
 done
 
@@ -50,7 +53,16 @@ fi
 export CGO_CFLAGS="${CGO_CFLAGS:-} -DCXOS_C_STAMP=${STAMP}"
 
 mkdir -p "$ROOT/.crossos"
-go -C core build -o "$ROOT/.crossos/crossos" ./cmd/crossos/
+# The default path is the one `scripts/run.sh` starts; `--out` is for the
+# places that want the binary somewhere else (the CI artifact upload wants
+# `core/crossos`, and it wants it built the same way, not by a bare
+# `go build` that links a stale bridge).
+if [[ -z "$OUT" ]]; then
+  OUT="$ROOT/.crossos/crossos"
+else
+  mkdir -p "$(dirname "$OUT")"
+fi
+go -C core build -o "$OUT" ./cmd/crossos/
 
 if [[ "$RUN_TESTS" == "1" ]]; then
   go -C core test ./...

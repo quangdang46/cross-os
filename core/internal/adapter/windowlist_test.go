@@ -478,13 +478,22 @@ func TestListWindowsReadsAtMostOneBatchedCallPerApp(t *testing.T) {
 
 	// The elements the first call acquired are cached, so a second call spends
 	// nothing: no app is read again for windows it has already named.
+	//
+	// **EXCEPT FOR THE APPS WHOSE READ DID NOT ANSWER.** A read that timed out
+	// named nothing, so those apps are owed another read, and the second poll
+	// pays for exactly those and nothing else. A read that failed and was
+	// never retried left the app's windows unnamed for the life of the
+	// process — the Switcher page said there were no windows and nothing was
+	// wrong to see — so the retry is the point, and the budget is what is
+	// owed, not what was wasted.
+	owed := axWindowsUnanswered()
 	before := axWindowsReadsTotal()
 	if _, err := l.ListWindows(); err != nil {
 		t.Fatalf("third ListWindows: %v", err)
 	}
-	if after := axWindowsReadsTotal(); after != before {
-		t.Fatalf("a repeated list read %d more applications (%d then %d); acquired elements are cached, so a second poll must be free",
-			after-before, before, after)
+	if after := axWindowsReadsTotal(); after != before+owed {
+		t.Fatalf("a repeated list read %d more applications (%d then %d), %d owed a retry; acquired elements are cached, so a second poll must cost only the reads that were owed",
+			after-before, before, after, owed)
 	}
 }
 

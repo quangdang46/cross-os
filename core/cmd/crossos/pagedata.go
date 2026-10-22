@@ -598,7 +598,14 @@ func (c *Core) handleReadiness(_ json.RawMessage) (any, *ipc.RPCError) {
 // finderBundleID is the one app the Finder readiness row reports on. The rules
 // that scope themselves to it are read out of the rule table rather than listed
 // here: this names the app, the rule set is the table's.
-const finderBundleID = "com.apple.Finder"
+//
+// **The spelling is the system's.** `NSRunningApplication.bundleIdentifier`
+// reports Finder as "com.apple.finder", and the rule table names the same
+// app, so the readiness row counts the rules that really can fire in Finder.
+// A row that counted the rules of an application that does not exist would be
+// a row that says the Finder shortcuts are ready when they are not there at
+// all.
+const finderBundleID = "com.apple.finder"
 
 // readinessRows derives the readiness list. It is a named function because the
 // first-run wizard (core.onboardingState) reports the same rows: a wizard that

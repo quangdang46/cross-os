@@ -20,8 +20,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sort"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -349,6 +349,31 @@ func (c *Core) decideLocked(ev event.Event, ctx event.FastContext) event.Outcome
 	c.mu.Unlock()
 	rt := event.Compile(all, intent.DefaultRegistry(), grants, func() bool { return killed })
 	out := rt.Decide(ev, ctx)
+	// **A KEY IS NEVER CLAIMED FOR AN ACTION THE DAEMON CANNOT PERFORM.**
+	//
+	// The tap cannot wait for the action to run before it swallows the key,
+	// so a claimed key is a swallowed key. A rule that names a capability
+	// this daemon has no adapter for would therefore take the key away and
+	// do nothing with it — the state the tap's own comment calls worse
+	// than passing the key through.
+	//
+	// So the rule still matches, and the outcome says so, but the decision
+	// is PASS: the original key reaches the application and the application
+	// does what it always did with it. The trace names the capability and
+	// says it was left alone, so the Activity page shows what would have
+	// happened and why it did not happen.
+	//
+	// See `performableCapability` for the measurement.
+	if out.Decision != pluginapi.DecisionPass && out.Request != nil &&
+		!performableCapability(out.Request.Capability.ID) {
+		cap := out.Request.Capability.ID
+		out.Decision = pluginapi.DecisionPass
+		out.Request = nil
+		out.Traces = append(out.Traces, event.StageLog{Stage: "action",
+			Detail: "capability " + cap + " has no adapter: the key is left alone"})
+		out.Traces = append(out.Traces, event.StageLog{Stage: "result",
+			Detail: "pass: the daemon cannot perform " + cap})
+	}
 	c.rec.OnOutcome(out)
 	return out
 }
@@ -1074,7 +1099,7 @@ func (c *Core) methods() map[string]ipc.Handler {
 		// it offered and a client in another language could not see any of
 		// them. See pages.go.
 		"core.pages": c.handleCorePages,
-		"core.apps":               c.handleApps,
+		"core.apps":  c.handleApps,
 		// The Alt+Tab switcher (ws-3): the list the switcher page draws, the
 		// bounded long-poll it waits on, and the focus a commit performs.
 		"core.windows":       c.handleWindows,
@@ -1413,15 +1438,21 @@ func (d *daemonTapLog) Log(stage, msg string) {
 }
 
 // dispatch executes an authorized capability through the adapter seam
-// (bead cross-os-vx9). The tap calls it between Decide and suppress, so a
-// key is only swallowed when its action actually ran.
+// (bead cross-os-vx9). The tap calls it between Decide and suppress.
 //
 // The darwin window seam still answers ErrPermissionDenied until the AX
 // bridge lands (bead qhp AX) — that is CORRECT behaviour for now: the
 // original key passes through and the user keeps a working keyboard.
+//
+// **A CAPABILITY WITH NO ROUTE IS NOT DISPATCHED AT ALL.** The list below is
+// the whole of what this daemon can do, and `performableCapability` reads it
+// so the decision path and the dispatch path cannot disagree about it. A
+// capability that is not on the list is refused by name here, and — the part
+// that matters to the user — is never claimed in the first place: see
+// `decideLocked`.
 func (c *Core) dispatch(req intent.Request) error {
 	switch req.Capability.ID {
-	case "window.move", "window.minimize", "window.maximize", "window.close":
+	case "window.move":
 		return c.windowDispatch(req, c.windowCache)
 	case "window.switcher":
 		return c.applySwitcher(req)
@@ -1439,6 +1470,47 @@ func (c *Core) dispatch(req intent.Request) error {
 		return openTerminalAt(req.Intent.Parameters)
 	default:
 		return fmt.Errorf("core: no adapter for capability %q (not implemented yet)", req.Capability.ID)
+	}
+}
+
+// performableCapability reports whether this daemon can actually PERFORM a
+// capability — the same list `dispatch` routes, so the two cannot drift.
+//
+// **A KEY IS NEVER CLAIMED FOR AN ACTION THE DAEMON CANNOT DO.**
+//
+// The tap's callback cannot wait for the action to run before it swallows the
+// key: the capability implementations do synchronous AX work and the
+// callback has a sub-millisecond budget, so the action is handed to a worker
+// and the key is suppressed immediately. That is the design, and it is the
+// reason the dispatch failure is logged rather than prevented.
+//
+// Measured on this machine, with the built-in windows-keyboard plugin
+// switched on: Ctrl+C in a native app was decided as REPLACE with the intent
+// `clipboard.copy`, the key was swallowed, and the dispatch then failed —
+// "no adapter for capability "clipboard.copy" (not implemented yet)". The
+// user was left with a key that does nothing, which is exactly what the tap
+// comment says is worse than passing it through.
+//
+// The same was true of Alt+F4 (`window.close`), Win+Up (`window.maximize`)
+// and Win+Down (`window.minimize`): four of the plugin's six rules named a
+// capability the daemon had no adapter for.
+//
+// So a rule whose capability this daemon cannot perform does not win. The
+// decision is PASS, the original key goes to the application, and the
+// application does whatever it always did with it. Nothing is broken by a
+// feature that is not finished yet.
+//
+// The rule still MATCHES, and the recorder still says so — the trace names
+// the capability and says it was left alone — so the Activity page shows
+// what would have happened and why it did not happen.
+func performableCapability(id string) bool {
+	switch id {
+	case "window.move", "window.switcher", "clipboard.copyPath",
+		"filesystem.createFile", "filesystem.createFolder", "file.moveToTrash",
+		"app.open", "terminal.openAt":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1474,9 +1546,13 @@ func (c *Core) windowDispatch(req intent.Request, cache *appCache) error {
 			return fmt.Errorf("core: window zone %q has no adapter geometry yet", zone)
 		}
 		m = adapter.MoveResize{ID: fw.ID, X: r.X, Y: r.Y, W: r.W, H: r.H, Move: true, Resize: true}
-	case "window.minimize", "window.maximize", "window.close":
-		// Geometry actions need a real AX action (not yet bridged); report
-		// honestly instead of pretending.
+	default:
+		// **A WINDOW ACTION THAT IS NOT A MOVE IS NOT PERFORMED.**
+		//
+		// `window.minimize`, `window.maximize` and `window.close` need real
+		// AX actions that the bridge does not carry yet. They are named here
+		// so the refusal is specific, and `performableCapability` keeps the
+		// decision path from claiming a key for them in the first place.
 		return fmt.Errorf("core: %s not implemented in the adapter yet", req.Capability.ID)
 	}
 	return wq.MoveResize(m)

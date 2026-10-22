@@ -43,7 +43,13 @@ var IDEAppIDs = []string{
 }
 
 // FinderAppIDs scopes Finder-context rules.
-var FinderAppIDs = []string{"com.apple.Finder"}
+//
+// The bundle id is spelled exactly as the system spells it:
+// `NSRunningApplication.bundleIdentifier` reports Finder as
+// "com.apple.finder", and the rule matcher compares app ids for equality —
+// so a rule scoped to "com.apple.finder" is scoped to an application that
+// does not exist, and the Finder rules could not fire in Finder at all.
+var FinderAppIDs = []string{"com.apple.finder"}
 
 // NeedsShellApproval reports whether capability id requires Level B explicit
 // user approve (shell/process execution — never default).

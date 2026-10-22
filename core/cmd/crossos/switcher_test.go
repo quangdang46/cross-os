@@ -506,7 +506,24 @@ func TestLiveListenerAgainstTheMachineWindows(t *testing.T) {
 		t.Fatalf("switcherFocus(%s): %v", target, rerr.Message)
 	}
 	after := decode[[]wireWindowRow](t, call("core.windows", nil), nil)
-	if after[0].WindowID != target {
-		t.Fatalf("after focusing %s the front window is %s", target, after[0].WindowID)
+	_ = after
+	// **THE AX FOCUSED WINDOW IS THE FACT ASSERTED, NOT THE DRAW ORDER.**
+	//
+	// The rows above are the WindowServer's front-to-back order, and that is
+	// a DIFFERENT fact from the keyboard focus: an application that draws
+	// above everything else — a full-screen remote desktop, a floating
+	// panel — stays first in the draw order however the keyboard is handed
+	// over. Measured on this machine: Parsec's full-screen window stayed at
+	// the head of the order after Finder was focused, so the row order said
+	// Parsec was in front while the keyboard was in Finder.
+	//
+	// The switcher promises the KEYBOARD, and the keyboard focus is the AX
+	// focused window — the same fact the adapter's own focus test asserts.
+	fw, ferr := adapter.NewWindowQuery(&adapter.Driver{Log: tapLog}).Focused()
+	if ferr != nil {
+		t.Skipf("cannot read the focused window on this machine: %v", ferr)
+	}
+	if fmt.Sprintf("%d", fw.ID) != target {
+		t.Fatalf("after focusing %s the keyboard is in window %d (%s)", target, fw.ID, fw.BundleID)
 	}
 }

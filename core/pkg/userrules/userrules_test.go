@@ -355,12 +355,12 @@ func TestDerivesRankFromPickedDimensions(t *testing.T) {
 		},
 		{
 			name: "a named app is app-scoped",
-			rule: Rule{Key: "C", AppIDs: []string{"com.apple.Finder"}, Capability: "clipboard.copy"},
+			rule: Rule{Key: "C", AppIDs: []string{"com.apple.finder"}, Capability: "clipboard.copy"},
 			want: event.CompiledRule{Priority: rule.PriorityApp, Specificity: 2, Scope: rule.ScopeApp},
 		},
 		{
 			name: "app and mode together are two levels deeper",
-			rule: Rule{Key: "C", AppModes: []string{"native"}, AppIDs: []string{"com.apple.Finder"}, Capability: "clipboard.copy"},
+			rule: Rule{Key: "C", AppModes: []string{"native"}, AppIDs: []string{"com.apple.finder"}, Capability: "clipboard.copy"},
 			want: event.CompiledRule{Priority: rule.PriorityApp, Specificity: 3, Scope: rule.ScopeApp},
 		},
 		{
@@ -408,12 +408,12 @@ func TestOverlappingRulesResolveToOneWinner(t *testing.T) {
 	}
 	inFinder := Rule{
 		Key: "C", Modifiers: []string{"Ctrl"},
-		AppIDs:     []string{"com.apple.Finder"},
+		AppIDs:     []string{"com.apple.finder"},
 		Capability: "clipboard.copy", Emit: true,
 	}
 	onOneKeyboard := Rule{
 		Key: "C", Modifiers: []string{"Ctrl"},
-		AppIDs:     []string{"com.apple.Finder"},
+		AppIDs:     []string{"com.apple.finder"},
 		DeviceID:   "kbd-1",
 		Capability: "clipboard.copyPath", Emit: true,
 	}

@@ -15,7 +15,7 @@ type Frame struct {
 
 // AppInfo identifies the focused application.
 type AppInfo struct {
-	// BundleID on macOS (e.g. com.apple.Finder), executable name on Windows.
+	// BundleID on macOS (e.g. com.apple.finder), executable name on Windows.
 	BundleID string
 	PID      int
 }

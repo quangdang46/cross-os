@@ -33,13 +33,30 @@ jobs:
       - name: gofmt check
         # $RUNNER_TEMP resolves on both macOS and Windows runners
         # (/tmp does not exist on windows-latest).
-        run: gofmt -l core app platform extensions | tee "$RUNNER_TEMP/fmt.out" && test ! -s "$RUNNER_TEMP/fmt.out"
-        # NOTE: repo root has no go.mod (multi-module: core, app,
-        # platform/darwin/spike_*, extensions/finder-sync); per-module jobs below.
+        #
+        # `app` is NOT in the list: the Wails app was deleted (bead
+        # cross-os-app-delete) and the shell is Swift now, so `gofmt -l app`
+        # was failing the step on "lstat app: no such file or directory" —
+        # every push red, and for a directory that is not there.
+        run: gofmt -l core platform extensions plugins | tee "$RUNNER_TEMP/fmt.out" && test ! -s "$RUNNER_TEMP/fmt.out"
+        # NOTE: repo root has no go.mod (multi-module: core,
+        # plugins/*, platform/darwin/spike_*, extensions/finder-sync);
+        # per-module jobs below.
       - name: Vet + test core
         run: cd core && go vet ./... && go test -short ./...
-      - name: Vet + test app shell
-        run: cd app && go vet ./... && go test -short ./...
+      # **THE PLUGIN MODULES ARE TESTED HERE.**
+      #
+      # plugins/developer, plugins/launcher and plugins/windows-keyboard are
+      # separate Go modules with their own suites — including the parity
+      # test that pins the core rule table against the plugin matrices.
+      # Nothing ran them: CI covered core and the spikes, so a plugin whose
+      # matrix drifted from the table it is ported into shipped green.
+      # `replace crossos/core => ../../core` is what lets them build here.
+      - name: Vet + test the builtin plugin modules
+        run: |
+          cd plugins/developer && go vet ./... && go test -short ./...
+          cd ../launcher && go vet ./... && go test -short ./...
+          cd ../windows-keyboard && go vet ./... && go test -short ./...
       - name: Vet + test spikes + finder-sync
         run: |
           cd platform/darwin/spike_a && go vet . && go test -short .
@@ -107,9 +124,16 @@ jobs:
       # about the UI against real data, and every page against an empty
       # fixture is an audit of nothing.
       - name: Start the daemon
+        # The build runs at the REPO ROOT, not in `macos`: the job's default
+        # working directory is `macos`, and `go -C core` from there means
+        # `macos/core`, which is not a directory. The daemon is built by the
+        # repo's own script because `go build` alone does not invalidate the
+        # cgo cache when a C source changes — see scripts/build-core.sh and
+        # AGENTS.md.
+        working-directory: .
         run: |
-          go -C core build -o "$RUNNER_TEMP/crossos" ./cmd/crossos/
-          "$RUNNER_TEMP/crossos" serve &
+          ./scripts/build-core.sh
+          ./.crossos/crossos serve &
           for _ in $(seq 1 20); do
             [ -S "$HOME/Library/Application Support/CrossOS/crossos.sock" ] && break
             sleep 0.5
@@ -154,7 +178,18 @@ jobs:
             goos: darwin
             goarch: arm64
             out: crossos
-          - os: macos-latest
+          # **THE INTEL BUILD RUNS ON AN INTEL RUNNER.**
+          #
+          # cgo cannot be cross-compiled: Go turns CGO_ENABLED off when the
+          # target has no C compiler, and the cgo files are then left out of
+          # the build entirely — so the darwin/amd64 build from an arm64
+          # runner failed with
+          #
+          #     internal/adapter/tap_darwin.go:30:12: undefined: TapInstall
+          #
+          # and every push was red. The Intel artifact is built where the
+          # C compiler matches the target: on macos-15-intel.
+          - os: macos-15-intel
             goos: darwin
             goarch: amd64
             out: crossos
@@ -174,7 +209,14 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         # go build ./... emits no binary; build the daemon explicitly so the
         # artifact path below matches a real file.
-        run: cd core && go build -o ${{ matrix.out }} ./cmd/crossos
+        #
+        # The build script, not `go build`: Go's build cache keys a cgo
+        # package on the .go files and the compiler flags, NOT on the C
+        # sources the cgo preamble #includes — so a plain `go build` links a
+        # STALE ax_bridge.o and the binary disagrees with the source.
+        # scripts/build-core.sh stamps the C sources' content into
+        # CGO_CFLAGS, which does invalidate the cache.
+        run: ./scripts/build-core.sh --out "core/${{ matrix.out }}"
       - name: Upload daemon artifact
         uses: actions/upload-artifact@v4
         with:

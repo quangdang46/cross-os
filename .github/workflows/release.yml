@@ -25,7 +25,15 @@ jobs:
             goos: darwin
             goarch: arm64
             out: crossos
-          - os: macos-latest
+          # **THE INTEL BUILD RUNS ON AN INTEL RUNNER.**
+          #
+          # cgo cannot be cross-compiled: Go turns CGO_ENABLED off when the
+          # target has no C compiler, and the cgo files are then left out of
+          # the build — so the darwin/amd64 build from an arm64 runner failed
+          # with "undefined: TapInstall" and the Intel artifact was never
+          # produced. The Intel artifact is built where the C compiler
+          # matches the target.
+          - os: macos-15-intel
             goos: darwin
             goarch: amd64
             out: crossos
@@ -50,7 +58,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          cd core && go build -o ${{ matrix.out }} ./cmd/crossos
+          ./scripts/build-core.sh --out "core/${{ matrix.out }}"
           test -n "${{ secrets.APPLE_DEVELOPER_ID }}" || test "${{ matrix.goos }}" != "darwin" || (echo "macOS signing secret missing — fail closed" && exit 1)
           test -n "${{ secrets.WIN_SIGN_CERT }}" || test "${{ matrix.goos }}" != "windows" || (echo "Windows signing secret missing — fail closed" && exit 1)
       - name: Emit update manifest entry

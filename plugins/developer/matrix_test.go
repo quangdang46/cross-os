@@ -28,8 +28,8 @@ func TestFiveActions(t *testing.T) {
 		intent string
 		dec    pluginapi.Decision
 	}{
-		{"terminal", vkReturn, modCtrl | modShift, "com.apple.Finder", "terminal.openAt", pluginapi.DecisionReplace},
-		{"copypath", vkC, modCtrl | modShift, "com.apple.Finder", "clipboard.copyPath", pluginapi.DecisionReplace},
+		{"terminal", vkReturn, modCtrl | modShift, "com.apple.finder", "terminal.openAt", pluginapi.DecisionReplace},
+		{"copypath", vkC, modCtrl | modShift, "com.apple.finder", "clipboard.copyPath", pluginapi.DecisionReplace},
 		{"editor", vkP, modCtrl | modShift, "com.microsoft.VSCode", "app.open", pluginapi.DecisionReplace},
 		{"f8-passthrough", vkF8, 0, "com.microsoft.VSCode", "", pluginapi.DecisionPass},
 	}
@@ -89,7 +89,7 @@ func TestPerAppScoping(t *testing.T) {
 	rt := testRouter(global)
 	out := rt.Decide(
 		event.Event{Type: event.EventKeyDown, Source: event.SourceKeyboard, KeyCode: vkC, Modifiers: modCtrl | modShift},
-		event.FastContext{AppID: "com.apple.Finder", AppMode: event.AppModeNative})
+		event.FastContext{AppID: "com.apple.finder", AppMode: event.AppModeNative})
 	if out.WinnerRule != pluginID+".ctrl-shift-c-copypath" {
 		t.Fatalf("winner=%q, want developer app-scoped rule (specificity 2 beats 1)", out.WinnerRule)
 	}

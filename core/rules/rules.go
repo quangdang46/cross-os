@@ -99,10 +99,24 @@ func keyboardRules() []event.CompiledRule {
 }
 
 // IDE + Finder app scopes for the developer matrix (ported literals).
+//
+// **THE BUNDLE ID IS SPELLED EXACTLY AS THE SYSTEM SPELLS IT.**
+//
+// The rule matcher compares app ids for equality, and the ids it compares
+// are the ones `NSRunningApplication.bundleIdentifier` reports — which for
+// Finder is "com.apple.finder", all lowercase. A rule that names
+// "com.apple.Finder" names an application that does not exist: the
+// developer's three Finder rules — open a terminal at the folder, copy the
+// path, open the editor — could not fire in Finder at all.
+//
+// Measured on this machine, against the daemon's own app list: with the
+// developer plugin on, Ctrl+Shift+Enter in Finder decided PASS (no rule
+// matched) under "com.apple.finder", and REPLACE/terminal.openAt under the
+// misspelled "com.apple.Finder" — an id no application carries.
 var developerAppIDs = []string{
 	"com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92",
 	"com.apple.Terminal", "com.mitchellh.ghostty", "com.github.wez.wezterm",
-	"com.apple.Finder",
+	"com.apple.finder",
 }
 
 // developer Matrix() port (3 rules): terminal-open, copy-path, editor-open.

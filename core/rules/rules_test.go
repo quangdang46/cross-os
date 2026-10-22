@@ -106,7 +106,7 @@ func TestBuiltinDecisionPath(t *testing.T) {
 	// (developer leaves it unclaimed), Ctrl+Space consumes (launcher).
 	reg := intent.DefaultRegistry()
 	rt := event.Compile(All(), reg, Grants(), nil)
-	native := event.FastContext{AppID: "com.apple.Finder", AppMode: event.AppModeNative}
+	native := event.FastContext{AppID: "com.apple.finder", AppMode: event.AppModeNative}
 	out := rt.Decide(
 		event.Event{Type: event.EventKeyDown, Source: event.SourceKeyboard, KeyCode: 0x43, Modifiers: 1},
 		native)
@@ -140,7 +140,7 @@ func TestBuiltinDecisionPath(t *testing.T) {
 // (ShortcutAction.swift:39-49).
 func TestSwitcherGestureResolvesThroughTheRealRouter(t *testing.T) {
 	rt := event.Compile(All(), intent.DefaultRegistry(), Grants(), nil)
-	native := event.FastContext{AppID: "com.apple.Finder", AppMode: event.AppModeNative}
+	native := event.FastContext{AppID: "com.apple.finder", AppMode: event.AppModeNative}
 	for _, tc := range []struct {
 		phase  event.EventType
 		winner string

@@ -505,6 +505,40 @@ static void cxax_record_windows_read(pid_t pid, int windows) {
     }
 }
 
+// cxax_record_read_failed marks an app's window set as UNKNOWN.
+//
+// **A READ THAT DID NOT ANSWER IS NOT A COUNT.**
+//
+// The count recorded by a read is what says the app's window set has not
+// moved, and that is what makes a repeated poll free. But a read that FAILED
+// answered nothing: recording the count that was ASKED ABOUT would make the
+// next poll believe the set has not moved, and the app's windows would never
+// be named again.
+//
+// Measured on this machine: an app whose Accessibility server did not answer
+// within the messaging bound left the daemon's window list empty for the
+// life of the process — the Switcher page said there were no windows, with
+// nothing wrong to see — and only a restart brought them back. The list was
+// not empty because the machine had no windows; it was empty because one
+// app was asked once and never asked again.
+//
+// So a failed read records -1, which no count can equal, and the next poll
+// asks the app again.
+static void cxax_record_read_failed(pid_t pid) {
+    for (int i = 0; i < cxax_read_slots; i++) {
+        if (cxax_read_pid[i] == (int)pid) {
+            cxax_read_windows[i] = -1;
+            return;
+        }
+    }
+    if (cxax_read_slots < CXAX_READ_SLOTS) {
+        cxax_read_pid[cxax_read_slots] = (int)pid;
+        cxax_read_count[cxax_read_slots] = 0;
+        cxax_read_windows[cxax_read_slots] = -1;
+        cxax_read_slots++;
+    }
+}
+
 // cxax_window_set_changed reports whether the number of windows the app is
 // being asked about differs from the number the last read answered for.
 //
@@ -644,7 +678,11 @@ static int cxax_frame_of(AXUIElementRef el, double *x, double *y, double *w,
 // returns, keyed by the frame the element reports.
 // This is the ONE call into the app; everything after it is a lookup. Returns
 // the number of elements cached, or 0 with *err set.
-static int cxax_acquire_app(pid_t pid, int windows, int *err) {
+// `bound` is the messaging timeout the read is given, in seconds. It is a
+// parameter because the two callers want different things: the list read
+// asks every app once and must not be held up (0.15), while a FOCUS names
+// one window and has nothing to show until that window is in hand (0.5).
+static int cxax_acquire_app(pid_t pid, int windows, double bound, int *err) {
     if (err != NULL) {
         *err = -1;
     }
@@ -670,10 +708,16 @@ static int cxax_acquire_app(pid_t pid, int windows, int *err) {
         //
         // `AXUIElementSetMessagingTimeout` is the system's own bound, and it
         // is set on the ELEMENT so it covers the read that follows.
-        AXUIElementSetMessagingTimeout(appEl, 0.15);
+        AXUIElementSetMessagingTimeout(appEl, bound);
         CFTypeRef ref = NULL;
         AXError e = AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute, &ref);
         if (e != kAXErrorSuccess || ref == NULL) {
+            // **A READ THAT FAILED IS NOT A COUNT.** The count this call
+            // recorded says the app's window set has not moved, and the next
+            // poll would believe it — so the app's windows would never be
+            // named again, for the life of the process. The failure undoes
+            // the count, so the next poll asks again.
+            cxax_record_read_failed(pid);
             if (err != NULL) {
                 *err = (int)e;
             }
@@ -702,7 +746,7 @@ static int cxax_acquire_app(pid_t pid, int windows, int *err) {
             // the cost of hitting it is the same one the design already
             // pays: an application that cannot answer in time has its
             // windows left unnamed, and an unnamed window is not listed.
-            AXUIElementSetMessagingTimeout(w, 0.15);
+            AXUIElementSetMessagingTimeout(w, bound);
             // The element's FRAME is what identifies it, and it is read
             // publicly. The window id it used to be keyed by came from a
             // private function that faults; see `cxax_elem_find`.
@@ -822,7 +866,7 @@ int cxax_app_titles(pid_t pid, const unsigned int *wids, const double *bounds,
     // re-reading the app to look for one would make every poll cost what
     // the first one did.
     if (missing && cxax_window_set_changed(pid, max) &&
-        cxax_acquire_app(pid, max, err) == 0) {
+        cxax_acquire_app(pid, max, 0.15, err) == 0) {
         return 0;
     }
     @autoreleasepool {
@@ -880,12 +924,29 @@ int cxax_focus_window(pid_t pid, double x, double y, double w, double h,
     }
     AXUIElementRef el = cxax_elem_find(pid, x, y, w, h);
     if (el == NULL) {
+        // **THE APP IS READ ONCE WITH THE LIST'S BOUND, AND AGAIN WITH MORE
+        // ROOM IF IT DID NOT ANSWER.**
+        //
+        // The list bound is 0.15 seconds, and an application that is busy
+        // does not answer inside it: the read comes back with
+        // kAXErrorCannotComplete and the app's windows are not named. A
+        // focus has nothing to show until that window is in hand, and the
+        // user is waiting on it — so the second read is given the room the
+        // list does not need.
+        //
+        // Measured on this machine: focusing a System Settings window
+        // failed with "AXError -25205" (the element was never acquired)
+        // because the read timed out at 0.15 seconds. The same window's
+        // Accessibility read answered in well under that when the machine
+        // was idle.
         int ignored = 0;
-        if (cxax_acquire_app(pid, -1, &ignored) == 0) {
-            if (err != NULL) {
-                *err = kAXErrorNoValue;
+        if (cxax_acquire_app(pid, -1, 0.15, &ignored) == 0) {
+            if (cxax_acquire_app(pid, -1, 0.5, &ignored) == 0) {
+                if (err != NULL) {
+                    *err = kAXErrorNoValue;
+                }
+                return 0;
             }
-            return 0;
         }
         el = cxax_elem_find(pid, x, y, w, h);
     }
@@ -907,6 +968,66 @@ int cxax_focus_window(pid_t pid, double x, double y, double w, double h,
         // forward to show it.
         AXError raised = AXUIElementPerformAction(el, kAXRaiseAction);
         if (raised != kAXErrorSuccess) {
+            // **A RAISE THAT HIT THE BOUND IS ASKED AGAIN, ONCE, WITH MORE
+            // ROOM.**
+            //
+            // The bound is there so that one busy application cannot hold
+            // the switcher's focus hostage — measured, a focus that waited
+            // on a busy application took 3.24 SECONDS. But the bound is
+            // also what turns a slow ANSWER into a failure: the AX server
+            // answers a call that outruns the client's own messaging
+            // timeout with kAXErrorCannotComplete (-25204), which is what
+            // "we stopped waiting" looks like from this side.
+            //
+            // Measured on this machine: raising a background application's
+            // window came back with -25204 about one time in fifteen, and
+            // it came back in the bound's own time — the whole test that
+            // failed took 0.20 SECONDS, which is the bound and not much
+            // else. The application was busy, not refusing.
+            //
+            // So the raise is asked again, on a freshly read element, with
+            // twice the room. A window that answers at all answers the
+            // second time, and the price when it does not is bounded and
+            // small: this is the last attempt, and it is 0.5 seconds.
+            int ignored = 0;
+            if (cxax_acquire_app(pid, -1, 0.5, &ignored) > 0) {
+                AXUIElementRef retry = cxax_elem_find(pid, x, y, w, h);
+                if (retry != NULL) {
+                    AXUIElementSetMessagingTimeout(retry, 0.5);
+                    AXError again = AXUIElementPerformAction(retry, kAXRaiseAction);
+                    if (again == kAXErrorSuccess) {
+                        // The window that answered is the window the rest of
+                        // this function has to work with: the key window is
+                        // set on it below.
+                        el = retry;
+                        raised = again;
+                    }
+                }
+            }
+        }
+        // **AN APPLICATION THAT DOES NOT SUPPORT THE RAISE IS NOT A FAILED
+        // FOCUS.**
+        //
+        // Measured on this machine: System Settings' window answers the raise
+        // with kAXErrorAttributeUnsupported (-25205) — the action is not
+        // supported by that element at all. The element is a real AXWindow
+        // with the right title and the right frame; the application simply
+        // does not take a raise.
+        //
+        // The focus is still possible. The app's key window is set to the
+        // one that was asked for, and the app is activated, so the app comes
+        // forward showing the window the user picked. Failing here would
+        // leave the switcher unable to focus one application on the
+        // machine — measured here: focusing the System Settings window
+        // failed with "AXError -25205" every time.
+        //
+        // The raise's failure is still not swallowed: if the activation does
+        // not land either, the focus did not happen, and the caller is told
+        // so.
+        int raiseUnsupported =
+            (raised == kAXErrorAttributeUnsupported ||
+             raised == kAXErrorActionUnsupported);
+        if (raised != kAXErrorSuccess && !raiseUnsupported) {
             if (err != NULL) {
                 *err = (int)raised;
             }
@@ -980,6 +1101,17 @@ int cxax_focus_window(pid_t pid, double x, double y, double w, double h,
                 // The return value is 2, and not 0, so the caller can tell
                 // this from an AX failure: the raise worked, the platform
                 // did not hand the activation over.
+                //
+                // **UNLESS THE RAISE NEVER HAPPENED.** An application that
+                // does not support the raise was never brought forward by it,
+                // so saying "the window was raised" would be a lie. That case
+                // is a failure, and it carries the AX error that said so.
+                if (raiseUnsupported) {
+                    if (err != NULL) {
+                        *err = (int)raised;
+                    }
+                    return 0;
+                }
                 if (err != NULL) {
                     *err = 0;
                 }
@@ -1025,6 +1157,23 @@ int cxax_windows_reads_for_pid(int pid) {
         }
     }
     return 0;
+}
+
+// cxax_windows_unanswered counts the applications whose last read did not
+// answer, and whose windows are therefore owed another read.
+//
+// It is the counterpart of the read counter: a repeated poll costs one read
+// for each of these and nothing for the rest, so the budget a test measures
+// has to allow exactly this many — the reads that were OWED, not the reads
+// that were wasted.
+int cxax_windows_unanswered(void) {
+    int n = 0;
+    for (int i = 0; i < cxax_read_slots; i++) {
+        if (cxax_read_windows[i] < 0) {
+            n++;
+        }
+    }
+    return n;
 }
 
 void cxax_windows_reads_reset(void) {

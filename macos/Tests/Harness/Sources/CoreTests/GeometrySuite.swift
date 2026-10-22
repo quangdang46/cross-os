@@ -1,7 +1,23 @@
 import CoreGraphics
 import Foundation
 
-@testable import CrossOSCore
+// **A PLAIN IMPORT, NOT `@testable`.**
+//
+// The suite is an executable target, and SwiftPM does not compile the
+// library it depends on with `-enable-testing` when it builds one: the
+// module comes out without the testability the `@testable` attribute
+// requires, and the build stops with
+//
+//     module 'CrossOSCore' was not compiled for testing [#ModuleNotTestable]
+//
+// That is what CI hit, on every push, because CI builds from a clean
+// checkout — a machine that had run `swift build --build-tests` once had
+// the flag in its cache and did not see it.
+//
+// The geometry the suite checks is public API (`tileGrid`, `TileGrid`,
+// `TileGridInput`), so the testable import bought nothing and cost the
+// build.
+import CrossOSCore
 
 // The tile grid, against the six groups its TypeScript predecessor's tests
 // covered.
