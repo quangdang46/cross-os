@@ -192,26 +192,45 @@ func TestPhysicalWalkNamesEveryOnScreenWindow(t *testing.T) {
 		t.Log("no windows on this machine; the decode table carries the empty case")
 	}
 
-	// Two walks a moment apart describe the same set: nothing is invented,
-	// dropped, or reordered by the walk itself.
+	// Two walks a moment apart must AGREE about the windows they both saw.
+	//
+	// **THE COUNTS NEED NOT MATCH.** A live machine's window set moves: a
+	// helper surface appears, an application is activated, a window is
+	// raised — and the other live tests in this package do all three, so a
+	// count assertion here is a race with the rest of the suite rather than
+	// a fact about the walk. It failed on a busy machine with "walk is not
+	// stable: 40 windows then 42".
+	//
+	// What must hold is the property the walk is actually for: a window
+	// both walks saw is the SAME window — same pid, same bundle, same
+	// frame. A walk that renamed a window, moved one, or answered a
+	// different app for it would break that, and nothing else would.
 	again, err := axPhysicalWindows()
 	if err != nil {
 		t.Fatalf("second physical walk: %v", err)
-	}
-	if len(again) != len(rows) {
-		t.Fatalf("walk is not stable: %d windows then %d", len(rows), len(again))
 	}
 	first := make(map[uint32]WindowRow, len(rows))
 	for _, r := range rows {
 		first[r.ID] = r
 	}
+	both := 0
 	for _, r := range again {
-		if prev, ok := first[r.ID]; !ok {
-			t.Fatalf("window %d appeared on the second walk and not the first", r.ID)
-		} else if prev.PID != r.PID || prev.BundleID != r.BundleID || prev.W != r.W || prev.H != r.H {
+		prev, ok := first[r.ID]
+		if !ok {
+			// A window the second walk saw and the first did not is a window
+			// that appeared between the walks. The walk copies the id from
+			// the WindowServer, so it cannot invent one.
+			continue
+		}
+		both++
+		if prev.PID != r.PID || prev.BundleID != r.BundleID || prev.W != r.W || prev.H != r.H {
 			t.Fatalf("window %d changed identity between walks: %+v then %+v", r.ID, prev, r)
 		}
 	}
+	if both == 0 {
+		t.Fatalf("the two walks shared no window at all (%d then %d); the walk is not describing the machine", len(rows), len(again))
+	}
+	t.Logf("%d windows in both walks", both)
 }
 
 // requireAXGrant skips with the reason spelled out, so a machine that cannot

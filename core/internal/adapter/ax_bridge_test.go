@@ -50,8 +50,11 @@ func TestAXFocusedThatIsNotAWindowIsTyped(t *testing.T) {
 	q := NewWindowQuery(&Driver{})
 	fw, err := q.Focused()
 	if err != nil {
-		// The only typed answer that is not a denial is "no window".
-		if !errors.Is(err, errNoFocusedWindow) && !errors.Is(err, ErrPermissionDenied) {
+		// The typed answers that are not a denial: "no window" (the plane
+		// has nothing to name) and "the application did not answer" (it was
+		// busy, and the bound expired).
+		if !errors.Is(err, errNoFocusedWindow) && !errors.Is(err, ErrPermissionDenied) &&
+			!errors.Is(err, errAXBusy) {
 			t.Fatalf("Focused: %v, want a typed error", err)
 		}
 		return

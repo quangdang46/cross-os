@@ -45,6 +45,12 @@ const axPermissionCode = -25211
 // axNotTrustedCode is kAXErrorNotTrusted.
 const axNotTrustedCode = -25243
 
+// axCannotCompleteCode is kAXErrorCannotComplete — the AX server's answer
+// when the application it is talking to is busy, or when the client's own
+// messaging timeout expires. The bridge's bound is 0.15 seconds, so a busy
+// application answers this way.
+const axCannotCompleteCode = -25204
+
 // axNoValueCode is kAXErrorNoValue — the Accessibility plane's answer when
 // the thing asked for does not exist. For the focused-window read that
 // thing is the focused window, so it means "there is no focused window",
@@ -55,6 +61,15 @@ const axNoValueCode = -25212
 func axError(op string, code int) error {
 	if code == axPermissionCode || code == axNotTrustedCode {
 		return fmt.Errorf("%w: %s (AXError %d)", ErrPermissionDenied, op, code)
+	}
+	// **A BUSY APPLICATION IS NOT A MISSING PERMISSION.**
+	//
+	// The bridge bounds every call into an application, and an application
+	// that does not answer inside the bound comes back with
+	// kAXErrorCannotComplete. That is a busy application, and the answer
+	// the user needs is "try again", not "go to System Settings".
+	if code == axCannotCompleteCode {
+		return fmt.Errorf("%w: %s (AXError %d)", errAXBusy, op, code)
 	}
 	return fmt.Errorf("adapter: ax %s failed (AXError %d)", op, code)
 }

@@ -19,6 +19,20 @@ var errZeroWindow = errors.New("adapter: zero window id")
 // Settings to grant a permission they already granted.
 var errNoFocusedWindow = errors.New("adapter: no focused window")
 
+// errAXBusy reports that the Accessibility plane did not answer in time.
+//
+// **IT IS NOT A PERMISSION PROBLEM.** kAXErrorCannotComplete is what the
+// AX server answers when the application it is talking to is busy, or when
+// the client's own messaging timeout expires — and the bridge's bound is
+// 0.15 seconds, so a busy application answers that way on a machine whose
+// grant is present and correct.
+//
+// Sending the user to System Settings for it would be the same lie as
+// errNoFocusedWindow: a permission they have already granted. It keeps its
+// own identity because "try again" and "grant access" are different
+// instructions.
+var errAXBusy = errors.New("adapter: the application did not answer in time")
+
 // ErrFocusRefused reports that the window was raised but the platform did
 // not hand the activation over.
 //

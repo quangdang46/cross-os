@@ -132,7 +132,7 @@ func TestErrorsSurfaced(t *testing.T) {
 		// reason: "Focused: adapter: native bridge not yet wired, want a
 		// typed denial".
 		if !errors.Is(err, ErrPermissionDenied) && !errors.Is(err, errNoFocusedWindow) &&
-			!errors.Is(err, errTapNotWired) {
+			!errors.Is(err, errAXBusy) && !errors.Is(err, errTapNotWired) {
 			t.Fatalf("Focused: %v, want a typed denial", err)
 		}
 	}
