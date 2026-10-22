@@ -210,19 +210,16 @@ func TestLiveSocketRoundTrip(t *testing.T) {
 		Intent   string `json:"intent"`
 		Winner   string `json:"winner"`
 	}
+	// Ctrl+C in Finder → the windows-keyboard copy rule. clipboard.copy
+	// dispatches now (the Cmd chord, bead cross-os-jzc), so the key is
+	// claimed: REPLACE with the intent the trace reports.
 	if err := json.Unmarshal(call("core.keyEvent", map[string]any{
 		"keyCode": 67, "modifiers": 1, "appId": "com.apple.finder", "appMode": "native",
 	}), &kd); err != nil {
 		t.Fatalf("live keyEvent decode: %v", err)
 	}
-	// Ctrl+C in Finder: the windows-keyboard rule names `clipboard.copy`,
-	// and this daemon has no adapter for that capability. The rule still
-	// matches — the intent and the winner are both reported — but the key
-	// is NOT claimed, because a key the daemon cannot act on is a key it
-	// must not swallow. PASS is the truthful answer, and it is the answer
-	// that leaves the user's copy shortcut working.
-	if kd.Decision != "PASS" || kd.Intent != "clipboard.copy" {
-		t.Fatalf("live keyEvent ctrl+c: %+v, want PASS/clipboard.copy", kd)
+	if kd.Decision != "REPLACE" || kd.Intent != "clipboard.copy" {
+		t.Fatalf("live keyEvent ctrl+c: %+v, want REPLACE/clipboard.copy", kd)
 	}
 }
 
@@ -246,11 +243,12 @@ func TestKeyEventDecision(t *testing.T) {
 		m, _ := res.(map[string]any)
 		return m
 	}
-	// Ctrl+C in Finder → the windows-keyboard rule names clipboard.copy,
-	// which this daemon cannot perform, so the key is left alone: PASS.
+	// Ctrl+C in Finder → the windows-keyboard copy rule. clipboard.copy
+	// dispatches now (the Cmd chord, bead cross-os-jzc), so the key is
+	// claimed: REPLACE.
 	got := key(`{"keyCode":67,"modifiers":1,"appId":"com.apple.finder","appMode":"native"}`)
-	if got["decision"] != "PASS" || got["intent"] != "clipboard.copy" {
-		t.Fatalf("ctrl+c: %+v, want PASS/clipboard.copy", got)
+	if got["decision"] != "REPLACE" || got["intent"] != "clipboard.copy" {
+		t.Fatalf("ctrl+c: %+v, want REPLACE/clipboard.copy", got)
 	}
 	// F8 in VSCode → PASS (developer leaves it unclaimed).
 	got = key(`{"keyCode":119,"appId":"com.microsoft.VSCode","appMode":"native"}`)
@@ -293,23 +291,18 @@ func TestKeyEventDecision(t *testing.T) {
 	}
 }
 
-// TestAKeyIsNeverClaimedForACapabilityTheDaemonCannotPerform: the tap
-// swallows a claimed key BEFORE the action runs, because the callback
-// cannot wait — the capability work is synchronous AX work and the budget
-// is under a millisecond. So a claimed key is a swallowed key, and a rule
-// that names a capability this daemon has no adapter for would take the
-// key away and do nothing with it.
+// TestEveryBuiltinChordItsRuleClaimsIsDispatchable: the endpoint of beads
+// cross-os-1be and cross-os-jzc. The AX bridge now carries the window
+// actions and the clipboard capability posts the Cmd chord, so every chord
+// the built-in windows-keyboard rules claim is claimed AND dispatchable —
+// the previous suite asserted the opposite for four of them, because their
+// capabilities had no adapter and a claimed key that runs nothing is the
+// exact failure the decide-time gate exists to prevent.
 //
-// Measured on this machine before the rule existed: with windows-keyboard
-// switched on, Ctrl+C in a native app was decided REPLACE/clipboard.copy,
-// the key was swallowed, and the dispatch failed with "no adapter for
-// capability "clipboard.copy" (not implemented yet)". The user's copy
-// shortcut did nothing at all.
-//
-// The rule: such a key is NOT claimed. The rule still matches — the winner
-// and the intent are both reported — so the Activity page shows what would
-// have happened and why it did not happen.
-func TestAKeyIsNeverClaimedForACapabilityTheDaemonCannotPerform(t *testing.T) {
+// The gate itself is still guarded by the unit clause below: a capability
+// id with no dispatch route stays unperformable, so a future rule naming
+// one is refused by the same decision path this table outran.
+func TestEveryBuiltinChordItsRuleClaimsIsDispatchable(t *testing.T) {
 	c, err := NewCore(builtin.All(), builtin.Grants())
 	if err != nil {
 		t.Fatalf("NewCore: %v", err)
@@ -317,21 +310,17 @@ func TestAKeyIsNeverClaimedForACapabilityTheDaemonCannotPerform(t *testing.T) {
 	for _, id := range builtin.BuiltinIDs {
 		c.registerBuiltin(id, true)
 	}
-	type claim struct {
-		label   string
-		params  string
-		capable string
-	}
-	// The four built-in rules whose capability the daemon cannot perform,
-	// and the two it can — the ones that snap a window and the one that
-	// copies a path.
-	cases := []claim{
-		{"ctrl+c copy", `{"keyCode":67,"modifiers":1,"appId":"com.apple.finder","appMode":"native"}`, ""},
-		{"alt+f4 close", `{"keyCode":115,"modifiers":4,"appId":"com.apple.finder","appMode":"native"}`, ""},
-		{"win+up maximize", `{"keyCode":38,"modifiers":8,"appId":"com.apple.finder","appMode":"native"}`, ""},
-		{"win+down minimize", `{"keyCode":40,"modifiers":8,"appId":"com.apple.finder","appMode":"native"}`, ""},
+	cases := []struct {
+		label  string
+		params string
+		cap    string
+	}{
+		{"ctrl+c copy", `{"keyCode":67,"modifiers":1,"appId":"com.apple.finder","appMode":"native"}`, "clipboard.copy"},
+		{"alt+f4 close", `{"keyCode":115,"modifiers":4,"appId":"com.apple.finder","appMode":"native"}`, "window.close"},
+		{"win+up maximize", `{"keyCode":38,"modifiers":8,"appId":"com.apple.finder","appMode":"native"}`, "window.maximize"},
+		{"win+down minimize", `{"keyCode":40,"modifiers":8,"appId":"com.apple.finder","appMode":"native"}`, "window.minimize"},
 		{"win+left snap", `{"keyCode":37,"modifiers":8,"appId":"com.apple.finder","appMode":"native"}`, "window.move"},
-		{"ctrl+shift+c copy path", `{"keyCode":67,"modifiers":3,"appId":"com.apple.finder","appMode":"native"}`, "clipboard.copyPath"},
+		{"win+right snap", `{"keyCode":39,"modifiers":8,"appId":"com.apple.finder","appMode":"native"}`, "window.move"},
 	}
 	for _, tc := range cases {
 		res, rerr := c.handleKeyEvent(json.RawMessage(tc.params))
@@ -340,37 +329,28 @@ func TestAKeyIsNeverClaimedForACapabilityTheDaemonCannotPerform(t *testing.T) {
 		}
 		got, _ := res.(map[string]any)
 		decision, _ := got["decision"].(string)
-		if tc.capable == "" {
-			if decision != "PASS" {
-				t.Fatalf("%s: decision %q, want PASS: the daemon cannot perform this capability, so it must not claim the key", tc.label, decision)
-			}
-			if got["winner"] == "" {
-				t.Fatalf("%s: the rule still matched, so the winner must be reported: %+v", tc.label, got)
-			}
-			continue
-		}
 		if decision != "REPLACE" {
-			t.Fatalf("%s: decision %q, want REPLACE: %s has a dispatch route", tc.label, decision, tc.capable)
+			t.Fatalf("%s: decision %q, want REPLACE: %s has a dispatch route, so the rule's key must be claimed", tc.label, decision, tc.cap)
+		}
+		if !performableCapability(tc.cap) {
+			t.Fatalf("%s: performableCapability(%q)=false, but the rule claims its key — the gate and dispatch must agree", tc.label, tc.cap)
+		}
+		if got["winner"] == "" {
+			t.Fatalf("%s: no winner reported: %+v", tc.label, got)
 		}
 	}
-	// The trace says WHY the key was left alone, and names the capability.
-	c.rec.Clear()
-	if _, rerr := c.handleKeyEvent(json.RawMessage(
-		`{"keyCode":67,"modifiers":1,"appId":"com.apple.finder","appMode":"native"}`)); rerr != nil {
-		t.Fatalf("keyEvent: %v", rerr)
-	}
-	traces := c.rec.Traces()
-	if len(traces) == 0 {
-		t.Fatal("the recorder stored no trace for the left-alone key press")
-	}
-	saw := false
-	for _, st := range traces[len(traces)-1].Stages {
-		if strings.Contains(st.Detail, "clipboard.copy") && strings.Contains(st.Detail, "no adapter") {
-			saw = true
+	// Registry capability ids that have no dispatch route stay
+	// unperformable: this is the half of the gate the live table can no
+	// longer exercise, because every built-in rule names a routed
+	// capability now. The negative list is read off the registry's own
+	// canonical ids so a renumbering of intent.go cannot pass a stale name.
+	for _, cap := range []string{"clipboard.read", "window.read", "input.intercept"} {
+		if performableCapability(cap) {
+			t.Fatalf("performableCapability(%q)=true, but dispatch has no route for it: a rule claiming it would swallow the key and do nothing", cap)
 		}
 	}
-	if !saw {
-		t.Fatalf("no trace stage says the capability has no adapter: %+v", traces[len(traces)-1].Stages)
+	if performableCapability("nosuch.capability") {
+		t.Fatal("an unknown capability must not be performable")
 	}
 }
 
@@ -536,11 +516,12 @@ func TestConfigWriteToggles(t *testing.T) {
 	}
 	// **WIN+LEFT, NOT CTRL+C.**
 	//
-	// The chord has to be one the daemon can act on, or the toggle cannot be
-	// seen: Ctrl+C names clipboard.copy, which has no adapter, so the key is
-	// never claimed and the decision is PASS whether the rule is on or off.
-	// Win+Left is the window-snap rule, and window.move has a dispatch
-	// route, so the decision follows the toggle.
+	// Both chords are ones the daemon can act on now: window.move has a
+	// dispatch route, and since bead cross-os-jzc so does clipboard.copy
+	// (the synthetic Cmd+C chord). Win+Left is kept because the toggle test
+	// predates that second route and its rule — windows-keyboard.win-left-
+	// snap — is the one whose enabled row the test flips. With either chord
+	// the decision follows the toggle instead of staying PASS.
 	if got := fire(); got != "REPLACE" {
 		t.Fatalf("baseline win+left=%s, want REPLACE", got)
 	}
@@ -703,11 +684,11 @@ func TestTapBindsLiveDecisionPath(t *testing.T) {
 		t.Fatal("tap driver must carry a decide function")
 	}
 
-	// **WIN+LEFT, NOT CTRL+C.** The chord has to be one the daemon can act
-	// on, or the toggle is invisible: Ctrl+C names clipboard.copy, which has
-	// no adapter, so the key is never claimed and the decision is PASS
-	// whether the rule is on or off. Win+Left is the window-snap rule, and
-	// window.move has a dispatch route.
+	// **WIN+LEFT, NOT CTRL+C.** Both chords are ones the daemon can act on
+	// now — window.move has a dispatch route and, since bead cross-os-jzc,
+	// so does clipboard.copy — so with either chord the decision follows
+	// the toggle. Win+Left is kept because its window-snap rule is the one
+	// the test disables.
 	ev := event.Event{Type: event.EventKeyDown, KeyCode: 0x25, Modifiers: 1 << 3}
 	ctx := event.FastContext{AppID: "com.apple.finder", AppMode: event.AppModeNative}
 	if out := got.Decide(ev, ctx); out.Decision == pluginapi.DecisionPass {
@@ -723,10 +704,10 @@ func TestTapBindsLiveDecisionPath(t *testing.T) {
 }
 
 // TestDispatchRoutesWindowAndFailsClosed: the daemon's dispatcher reaches
-// the adapter for window capabilities, and reports honestly for what the
-// adapter does not implement yet (bead cross-os-vx9). Until the AX bridge
-// lands the darwin seam denies, so a Win+Left press passes the ORIGINAL key
-// through instead of eating it.
+// the adapter for window capabilities and routes the clipboard capability
+// through the chord seam, and reports honestly for everything it does not
+// implement (bead cross-os-vx9). A dispatch failure is what makes the tap
+// look like it ate a key for nothing, so the refusals stay named.
 func TestDispatchRoutesWindowAndFailsClosed(t *testing.T) {
 	c, err := NewCore(nil, nil)
 	if err != nil {
@@ -749,9 +730,37 @@ func TestDispatchRoutesWindowAndFailsClosed(t *testing.T) {
 			t.Fatal("window action without a cached window must fail, not act on a guess")
 		}
 	}
-	// An unknown capability must fail closed rather than silently no-op.
+	// clipboard.copy routes through the chord seam now (bead cross-os-jzc).
+	// The seam is bound to a recorder for the length of the check, so the
+	// suite never strikes the machine's own Edit menu while asserting the
+	// route.
+	var postedMu sync.Mutex
+	var posted []uint16
+	prevPost := postChordLive
+	postChordLive = func(k uint16) error {
+		postedMu.Lock()
+		posted = append(posted, k)
+		postedMu.Unlock()
+		return nil
+	}
+	defer func() { postChordLive = prevPost }()
+	copyReq := req
+	copyReq.Intent.ID = "clipboard.copy"
+	copyReq.Capability.ID = "clipboard.copy"
+	if err := c.dispatch(copyReq); err != nil {
+		t.Fatalf("clipboard.copy has a dispatch route: %v", err)
+	}
+	postedMu.Lock()
+	got := append([]uint16(nil), posted...)
+	postedMu.Unlock()
+	if len(got) != 1 || got[0] != 0x08 {
+		t.Fatalf("posted=%v, want exactly one chord, the Cmd+C keycode 0x08", got)
+	}
+	// An unperformable capability must fail closed rather than silently
+	// no-op. clipboard.read is one the registry declares but nothing here
+	// routes.
 	bad := req
-	bad.Capability.ID = "clipboard.copy"
+	bad.Capability.ID = "clipboard.read"
 	if err := c.dispatch(bad); err == nil {
 		t.Fatal("capability without an adapter route must report an error")
 	}
@@ -1215,13 +1224,12 @@ func TestSetObserveReachesTheRecorder(t *testing.T) {
 	//
 	// The key pressed here is one the daemon CAN perform: Ctrl+Shift+C in
 	// Finder is the developer plugin's copy-path rule (Ctrl+Shift is
-	// modifiers 1|2), and clipboard.copyPath has a dispatch route.
-	//
-	// It cannot be the windows-keyboard Ctrl+C rule, which resolves to
-	// clipboard.copy: that capability has no adapter, so the daemon does not
-	// claim the key at all, and there is no action to observe. A trace that
-	// says "would execute" for an action the daemon cannot run would be a
-	// lie in the one place the user is watching to find out what the
+	// modifiers 1|2), and clipboard.copyPath has a dispatch route. The
+	// windows-keyboard Ctrl+C rule claims the key now too — clipboard.copy
+	// posts the synthetic chord (bead cross-os-jzc) — so either chord would
+	// trace an execute-by-performable action. Either is truthful: the trace
+	// says "would execute" only for actions the daemon can actually run,
+	// which is the one place the user is watching to find out what the
 	// remapper does.
 	c.registerBuiltin("developer", true)
 	_, rerr := c.handleKeyEvent(json.RawMessage(

@@ -1171,15 +1171,12 @@ func TestTracesExposeTheRecordedDetail(t *testing.T) {
 	if row.Context.AppID != "com.apple.finder" || row.Context.AppMode != "native" {
 		t.Errorf("context=%+v, want the focused app the decision was made in", row.Context)
 	}
-	// **THE DECISION IS PASS, AND THAT IS THE TRUTH.**
-	//
-	// Ctrl+C names clipboard.copy, which this daemon has no adapter for, so
-	// the key is not claimed — the rule matched, and the daemon leaves the
-	// key alone. The trace still carries the winner and the intent, so the
-	// Activity page shows what would have happened, and a stage says why it
-	// did not happen.
-	if row.Decision != "PASS" {
-		t.Errorf("decision=%q, want PASS (a key the daemon cannot act on is not claimed)", row.Decision)
+	// **THE DECISION IS REPLACE, AND THAT IS THE TRUTH NOW.** clipboard.copy
+	// dispatches through the chord seam (bead cross-os-jzc), so the rule's
+	// key is claimed; the trace still carries the winner and the intent, so
+	// the Activity page names what the chord handed to the focused app.
+	if row.Decision != "REPLACE" {
+		t.Errorf("decision=%q, want REPLACE (clipboard.copy has a dispatch route)", row.Decision)
 	}
 	// Losers is a list even when the decision was uncontested: null would be a
 	// missing value the page has to special-case.
@@ -1198,13 +1195,13 @@ func TestTracesExposeTheRecordedDetail(t *testing.T) {
 			t.Errorf("trace has no %q stage: %+v", want, row.Stages)
 		}
 	}
-	// **AND IT SAYS WHY THE KEY WAS LEFT ALONE.** The Activity page is where
-	// the user finds out what the remapper did with a key, so a rule that
-	// matched and was not carried out has to say so — with the capability
-	// named, so "the daemon cannot do this yet" is a fact and not a shrug.
+	// **THE ACTION STAGE NAMES THE CAPABILITY.** The Activity page is where
+	// the user finds out what the remapper did with a key, so a claimed
+	// chord names the capability it carried — "authorized", not a shrug,
+	// and never the old "no adapter" refusal the bridge grew out of.
 	if !strings.Contains(stages["action"], "clipboard.copy") ||
-		!strings.Contains(stages["action"], "no adapter") {
-		t.Errorf("action stage=%q, want it to name the capability and say it has no adapter", stages["action"])
+		strings.Contains(stages["action"], "no adapter") {
+		t.Errorf("action stage=%q, want it to name the routed capability", stages["action"])
 	}
 	// Both views describe the same recorded trace, so the sentence and the
 	// columns cannot tell the user different stories.

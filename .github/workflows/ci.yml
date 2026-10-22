@@ -258,7 +258,7 @@ jobs:
 
   # Windows DLL: build the thin helper from source on every push (bead
   # cross-os-qhp.9). Proves the qhp.8 C sources still compile under MSVC and
-  # all 5 frozen exports resolve — a future edit that breaks the DLL fails
+  # all 6 frozen exports resolve — a future edit that breaks the DLL fails
   # here instead of silently shipping a stale binary. Unsigned build only;
   # signing the DLL/MSI stays cert-gated in qhp.6. No cert/secret needed.
   windows-dll:
@@ -277,7 +277,7 @@ jobs:
           "DLL=$($dll.FullName)"
           "DLL_BYTES=$($dll.Length)"
           "DLL_PATH=$($dll.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-      - name: Assert 5 frozen exports resolve (dumpbin, fail-closed)
+      - name: Assert 6 frozen exports resolve (dumpbin, fail-closed)
         shell: pwsh
         run: |
           # **THE TOOLCHAIN IS FOUND ON DISK, NOT THROUGH vswhere.**
@@ -311,7 +311,7 @@ jobs:
                      Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
           if (-not $dumpbin) { Write-Error "dumpbin.exe not found under: $roots"; exit 1 }
           $out = & $dumpbin.FullName /exports $env:DLL_PATH | Out-String
-          foreach ($sym in @('CrossOS_HookInstall','CrossOS_HookUninstall','CrossOS_SendInput','CrossOS_UIPIStatus','CrossOS_DeviceId')) {
+          foreach ($sym in @('CrossOS_HookInstall','CrossOS_HookUninstall','CrossOS_SendInput','CrossOS_UIPIStatus','CrossOS_DeviceId','CrossOS_WindowAction')) {
             if ($out -notmatch $sym) { Write-Error "export missing: $sym"; exit 1 }
             "EXPORT_OK=$sym"
           }

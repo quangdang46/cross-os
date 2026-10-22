@@ -37,6 +37,13 @@ typedef struct {
     char role[64];
 } cxax_window;
 
+// Window action tags Go sends to cxax_window_action. Go declares the same
+// numbers (ax_cgo.go), so a renumbering here without there breaks the call
+// loudly in reviewable diffs rather than silently in behavior.
+#define CXAX_WIN_CLOSE 1
+#define CXAX_WIN_MINIMIZE 2
+#define CXAX_WIN_MAXIMIZE 3
+
 static void cxax_copy_string(const char *src, char *dst, size_t n) {
     if (src == NULL) {
         dst[0] = '\0';
@@ -1349,5 +1356,179 @@ static int cxax_move_resize(double x, double y, double w, double h, int doMove,
         CFRelease(win);
         CFRelease(appEl);
         return failed ? 0 : 1;
+    }
+}
+
+// cxax_window_action performs the named AX action on the frontmost app's
+// focused window. Action values are the same numbers Go sends:
+// CXAX_WIN_CLOSE, CXAX_WIN_MINIMIZE, CXAX_WIN_MAXIMIZE.
+//
+// Close and minimize are presses on the window's own button attributes —
+// the same events the user's mouse delivers to the red and yellow buttons,
+// so each application's close/minimize behavior (sheets, confirmation
+// prompts, dock animation) is whatever it already is. Maximize is a
+// geometry set to the screen's visible frame, not the zoom button: the
+// green button toggles full-screen on apps that answer the press with the
+// fullscreen transition, and a shortcut named "maximize" must not enter
+// it. Returns 1 on success; on failure *err carries the AXError, the same
+// shape cxax_move_resize answers with so the two share Go's error mapping.
+int cxax_window_action(int action_tag, int *err) {
+    if (err != NULL) {
+        *err = -1;
+    }
+    @autoreleasepool {
+        NSRunningApplication *app = [[NSWorkspace sharedWorkspace]
+            frontmostApplication];
+        if (app == nil) {
+            if (err != NULL) {
+                *err = kAXErrorNoValue;
+            }
+            return 0;
+        }
+        AXUIElementRef appEl =
+            AXUIElementCreateApplication([app processIdentifier]);
+        if (appEl == NULL) {
+            if (err != NULL) {
+                *err = kAXErrorCannotComplete;
+            }
+            return 0;
+        }
+        CFTypeRef focusedRef = NULL;
+        AXError e0 = AXUIElementCopyAttributeValue(
+            appEl, kAXFocusedWindowAttribute, &focusedRef);
+        if (e0 != kAXErrorSuccess || focusedRef == NULL) {
+            if (err != NULL) {
+                *err = (int)e0;
+            }
+            CFRelease(appEl);
+            return 0;
+        }
+        AXUIElementRef win = (AXUIElementRef)focusedRef;
+
+        AXError e = kAXErrorSuccess;
+
+        if (action_tag == CXAX_WIN_MINIMIZE) {
+            // The AX button press carries the window's own minimize
+            // rule (dock animation and integration), which is what a
+            // user pressing the yellow button gets.
+            CFTypeRef btnRef = NULL;
+            AXError be = AXUIElementCopyAttributeValue(
+                win, kAXMinimizeButtonAttribute, &btnRef);
+            if (be != kAXErrorSuccess || btnRef == NULL ||
+                CFGetTypeID(btnRef) != AXUIElementGetTypeID()) {
+                e = (be != kAXErrorSuccess) ? be : kAXErrorNoValue;
+            } else {
+                e = AXUIElementPerformAction((AXUIElementRef)btnRef,
+                                             kAXPressAction);
+                CFRelease(btnRef);
+            }
+        } else if (action_tag == CXAX_WIN_MAXIMIZE) {
+            // Maximize/zoom: the window's own geometry, set to the frame of
+            // the screen it is on. Not the zoom button: the green button
+            // toggles full-screen on apps that answer the press with the
+            // fullscreen transition, and a shortcut named "maximize" must
+            // not enter it. Same shape as window.move, so the seam has one
+            // maximize mechanism.
+            //
+            // Which screen: the one that contains the window's center. The
+            // daemon has no windows of its own, so NSScreen.mainScreen is
+            // the daemon's screen and not the window's — measured on a
+            // two-display desk, the daemon's fill target and the window's
+            // screen were different screens, and the window teleported
+            // rather than maximizing.
+            CGPoint pos = CGPointZero;
+            CGSize size = CGSizeZero;
+            CFTypeRef fpos = NULL;
+            CFTypeRef fsize = NULL;
+            int sized = 0;
+            if (AXUIElementCopyAttributeValue(win, kAXPositionAttribute,
+                                              &fpos) == kAXErrorSuccess &&
+                fpos != NULL) {
+                if (CFGetTypeID(fpos) == AXValueGetTypeID()) {
+                    AXValueGetValue((AXValueRef)fpos, kAXValueCGPointType,
+                                    &pos);
+                }
+                CFRelease(fpos);
+            }
+            if (AXUIElementCopyAttributeValue(win, kAXSizeAttribute,
+                                              &fsize) == kAXErrorSuccess &&
+                fsize != NULL) {
+                if (CFGetTypeID(fsize) == AXValueGetTypeID()) {
+                    AXValueGetValue((AXValueRef)fsize, kAXValueCGSizeType,
+                                    &size);
+                }
+                CFRelease(fsize);
+            }
+            NSScreen *screen = nil;
+            if (size.width > 0 && size.height > 0) {
+                CGPoint center = CGPointMake(pos.x + size.width / 2,
+                                             pos.y + size.height / 2);
+                for (NSScreen *s in [NSScreen screens]) {
+                    if (CGRectContainsPoint(s.frame, center)) {
+                        screen = s;
+                        break;
+                    }
+                }
+            }
+            if (screen == nil) {
+                screen = [NSScreen screens].firstObject;
+            }
+            if (screen == nil) {
+                e = kAXErrorCannotComplete;
+            } else {
+                NSRect visible = [screen visibleFrame];
+                CGPoint target = CGPointMake(visible.origin.x,
+                                             visible.origin.y);
+                CGSize tsize = CGSizeMake(visible.size.width,
+                                          visible.size.height);
+                AXValueRef posV = AXValueCreate(kAXValueCGPointType, &target);
+                AXValueRef sizeV =
+                    AXValueCreate(kAXValueCGSizeType, &tsize);
+                if (posV == NULL || sizeV == NULL) {
+                    e = kAXErrorFailure;
+                } else {
+                    AXError pe = AXUIElementSetAttributeValue(
+                        win, kAXPositionAttribute, posV);
+                    if (pe == kAXErrorSuccess) {
+                        pe = AXUIElementSetAttributeValue(
+                            win, kAXSizeAttribute, sizeV);
+                    }
+                    e = pe;
+                }
+                if (posV != NULL) {
+                    CFRelease(posV);
+                }
+                if (sizeV != NULL) {
+                    CFRelease(sizeV);
+                }
+            }
+        } else if (action_tag == CXAX_WIN_CLOSE) {
+            CFTypeRef btnRef = NULL;
+            AXError be = AXUIElementCopyAttributeValue(
+                win, kAXCloseButtonAttribute, &btnRef);
+            if (be != kAXErrorSuccess || btnRef == NULL ||
+                CFGetTypeID(btnRef) != AXUIElementGetTypeID()) {
+                e = (be != kAXErrorSuccess) ? be : kAXErrorNoValue;
+            } else {
+                e = AXUIElementPerformAction((AXUIElementRef)btnRef,
+                                             kAXPressAction);
+                CFRelease(btnRef);
+            }
+        } else {
+            e = kAXErrorActionUnsupported;
+        }
+
+        CFRelease(win);
+        CFRelease(appEl);
+        if (e != kAXErrorSuccess) {
+            if (err != NULL) {
+                *err = (int)e;
+            }
+            return 0;
+        }
+        if (err != NULL) {
+            *err = 0;
+        }
+        return 1;
     }
 }

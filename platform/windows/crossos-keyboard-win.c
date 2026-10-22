@@ -20,6 +20,37 @@
 
 #include <windows.h>
 
+// --- CrossOS_WindowAction ---
+//
+// The Windows half of the focused-window actions (close, minimize, zoom).
+// The macOS bridge performs each of the three through the window's own
+// affordances (the AX close/minimize buttons, a geometry fill for zoom);
+// Windows' closest equivalents that need no window-class knowledge are the
+// existing messages — WM_CLOSE and WM_SYSCOMMAND's SC_MINIMIZE and
+// SC_MAXIMIZE — which are guessed at by no one here: the system's own
+// menu command is what Alt+F4 and Win+Up/Down drive today.
+
+#define CROSSOS_WIN_CLOSE 1
+#define CROSSOS_WIN_MINIMIZE 2
+#define CROSSOS_WIN_MAXIMIZE 3
+
+__declspec(dllexport) BOOL CrossOS_WindowAction(DWORD action) {
+    HWND hwnd = GetForegroundWindow();
+    if (hwnd == NULL) {
+        return FALSE;
+    }
+    switch (action) {
+    case CROSSOS_WIN_CLOSE:
+        return PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    case CROSSOS_WIN_MINIMIZE:
+        return PostMessageW(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+    case CROSSOS_WIN_MAXIMIZE:
+        return PostMessageW(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+    default:
+        return FALSE;
+    }
+}
+
 // --- CrossOS_HookInstall / CrossOS_HookUninstall ---
 //
 // WH_KEYBOARD_LL hook, thin callback: the real product callback forwards
@@ -134,3 +165,5 @@ __declspec(dllexport) DWORD CrossOS_DeviceId(void) {
     HeapFree(GetProcessHeap(), 0, list);
     return keyboards;
 }
+
+// --- CrossOS_WindowAction --- (see the top comment block)

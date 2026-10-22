@@ -121,6 +121,21 @@ func axMoveResize(m MoveResize) error {
 	return nil
 }
 
+// axWindowAction performs the named action on the frontmost app's focused
+// window. The operations are the same shape MoveResize takes — the focused
+// window of the frontmost application, resolved inside the bridge — because
+// an Alt+F4 or a Win+Down arrives without a window id: whatever has the
+// keyboard is the window the user means. `tag` is adapter.WindowAction;
+// the numbers match the C bridge's CXAX_WIN_* tags exactly (ax_bridge.c),
+// which is where the pairing is documented.
+func axWindowAction(tag int) error {
+	var code C.int
+	if ok := C.cxax_window_action(C.int(tag), &code); ok == 0 {
+		return axError("window action", int(code))
+	}
+	return nil
+}
+
 func boolToIntC(b bool) int {
 	if b {
 		return 1

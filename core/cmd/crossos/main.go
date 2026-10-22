@@ -1456,6 +1456,8 @@ func (c *Core) dispatch(req intent.Request) error {
 		return c.windowDispatch(req, c.windowCache)
 	case "window.switcher":
 		return c.applySwitcher(req)
+	case "clipboard.copy":
+		return translateCopy()
 	case "clipboard.copyPath":
 		return copyPaths(req.Intent.Parameters)
 	case "filesystem.createFile":
@@ -1491,9 +1493,12 @@ func (c *Core) dispatch(req intent.Request) error {
 // user was left with a key that does nothing, which is exactly what the tap
 // comment says is worse than passing it through.
 //
-// The same was true of Alt+F4 (`window.close`), Win+Up (`window.maximize`)
-// and Win+Down (`window.minimize`): four of the plugin's six rules named a
-// capability the daemon had no adapter for.
+// The other three were the same failure with a different rule: Alt+F4
+// (`window.close`), Win+Up (`window.maximize`) and Win+Down
+// (`window.minimize`) decided REPLACE and failed in dispatch until the
+// AX bridge carried the actions (bead cross-os-1be). All four are
+// dispatchable now, so they are performable — the gate is the list, not a
+// separate truth.
 //
 // So a rule whose capability this daemon cannot perform does not win. The
 // decision is PASS, the original key goes to the application, and the
@@ -1505,7 +1510,9 @@ func (c *Core) dispatch(req intent.Request) error {
 // what would have happened and why it did not happen.
 func performableCapability(id string) bool {
 	switch id {
-	case "window.move", "window.switcher", "clipboard.copyPath",
+	case "window.move", "window.switcher", "window.close",
+		"window.minimize", "window.maximize", "clipboard.copy",
+		"clipboard.copyPath",
 		"filesystem.createFile", "filesystem.createFolder", "file.moveToTrash",
 		"app.open", "terminal.openAt":
 		return true
@@ -1514,7 +1521,6 @@ func performableCapability(id string) bool {
 	}
 }
 
-// windowDispatch routes a window.* capability to the platform seam.
 func (c *Core) windowDispatch(req intent.Request, cache *appCache) error {
 	var zone string
 	if len(req.Intent.Parameters) > 0 {
@@ -1525,13 +1531,14 @@ func (c *Core) windowDispatch(req intent.Request, cache *appCache) error {
 			zone = p.Zone
 		}
 	}
-	// Read the CACHED focused window. A live AX query here would block for
-	// the life of the process when accessibility consent is missing, and it
-	// runs on the single dispatch worker — the first window action would
-	// wedge every later action.
 	if cache == nil {
 		return fmt.Errorf("core: no focused-window cache (the tap is not running)")
 	}
+	// Read the CACHED focused window. A live AX query here would block for
+	// the life of the process when accessibility consent is missing, and it
+	// runs on the single dispatch worker — the first window action would
+	// wedge every later action. The cache is also close's harmless gate: a
+	// window the caller has not seen is a window it must not close.
 	fw, ok := cache.window()
 	if !ok {
 		return fmt.Errorf("core: no focused window known yet (accessibility consent missing, or the watcher has not primed)")
@@ -1546,16 +1553,30 @@ func (c *Core) windowDispatch(req intent.Request, cache *appCache) error {
 			return fmt.Errorf("core: window zone %q has no adapter geometry yet", zone)
 		}
 		m = adapter.MoveResize{ID: fw.ID, X: r.X, Y: r.Y, W: r.W, H: r.H, Move: true, Resize: true}
+		return wq.MoveResize(m)
+	case "window.close":
+		// Close is the one non-reversible step here, so the harmless
+		// gate above is honestly enforced, not skipped.
+		return wq.SetWindowAction(adapter.WindowClose)
+	case "window.minimize":
+		return wq.SetWindowAction(adapter.WindowMinimize)
+	case "window.maximize":
+		return wq.SetWindowAction(adapter.WindowMaximize)
 	default:
-		// **A WINDOW ACTION THAT IS NOT A MOVE IS NOT PERFORMED.**
-		//
-		// `window.minimize`, `window.maximize` and `window.close` need real
-		// AX actions that the bridge does not carry yet. They are named here
-		// so the refusal is specific, and `performableCapability` keeps the
-		// decision path from claiming a key for them in the first place.
-		return fmt.Errorf("core: %s not implemented in the adapter yet", req.Capability.ID)
+		return fmt.Errorf("core: %s is not a window capability", req.Capability.ID)
 	}
-	return wq.MoveResize(m)
+}
+
+// translateCopy hands Cmd+C to the focused application. Ctrl+C is the
+// Windows muscle memory for "copy this", and on macOS that gesture is
+// the Cmd chord: the same synthetic-chord shape the F9 replacement has
+// been using since spike A/B, posted off the tap's callback (async
+// handoff only) so the callback's own budget is untouched. The
+// application that receives the chord does whatever it always did with
+// Cmd+C — native copy sheets and all.
+func translateCopy() error {
+	// 0x08: kVK_ANSI_C — the chord is Cmd+C, the modifier held by the bridge.
+	return postChordLive(0x08)
 }
 
 // --- Explorer-pack capabilities ---

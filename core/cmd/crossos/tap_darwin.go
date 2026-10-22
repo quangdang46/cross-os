@@ -24,3 +24,12 @@ func unhealthyTap() bool { return adapter.TapUnhealthy() }
 // core.status: the key was suppressed at decide time, so without this the
 // user has no way to learn the action did nothing.
 func droppedDispatches() int64 { return adapter.DispatchFailures() }
+
+// postChordLive posts the synthetic Cmd chord the copy translation hands
+// to the focused application. It is a var because the post is real input
+// injected into the machine — test seams and future run modes bind a
+// recorder instead of striking the focused application's Edit menu.
+var postChordLive = func(keycode uint16) error {
+	adapter.TapPostCommandKey(keycode)
+	return nil
+}

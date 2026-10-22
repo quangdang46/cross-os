@@ -40,6 +40,13 @@ func (l *otherLister) Focus(id uint32) error {
 	return l.driver.ReportError("focus", errUnsupported)
 }
 
+// The query seam is owned by stub.go on this platform and by tap_windows.go
+// on windows: a NewWindowQuery or a query type declared HERE is a duplicate
+// of one of those, and the duplicate is exactly what linux's cross-GOOS
+// build caught once already (a second query type was added beside stub.go's
+// and redeclared the constructor; it was reverted within the hour). This
+// file stays the lister plus the shared helper shims.
+
 // The batched-acquisition budget has no counter off darwin, because there is no
 // AX bridge to count. Zero is the honest reading: no application was read.
 // These exist so windowlist_test.go can stay untagged and assert the live

@@ -12,6 +12,7 @@ package main
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,16 +30,16 @@ import (
 // would flip this to 1 and fail here.
 func TestRealDispatchCommitsAndDoesNotBlock(t *testing.T) {
 	// The tap commits the action to the worker and returns immediately, so a
-	// capability that cannot run yet (no AX bridge on this path) must NOT
-	// change the verdict: the key is suppressed and the failure is surfaced
-	// through the daemon log, which the UI reads. Blocking here to learn the
-	// outcome is what makes macOS disable the tap.
+	// capability that cannot run yet (no snapshot, no bridge on this path)
+	// must NOT change the verdict: the key is suppressed and the failure is
+	// surfaced through the daemon log, which the UI reads. Blocking here to
+	// learn the outcome is what makes macOS disable the tap.
 	//
-	// **A KEY THE DAEMON CANNOT ACT ON IS NOT CLAIMED AT ALL.** That is the
-	// other half of the same property, and it is checked below: Ctrl+C names
-	// clipboard.copy, which has no adapter, so the verdict is 0 and the key
-	// reaches the application. Committing an action that cannot run would
-	// swallow the key for nothing.
+	// Both chords here are ones the daemon CAN act on now (beads
+	// cross-os-1be / cross-os-jzc), and both are suppressed: the verdict is
+	// about the COMMIT, not about the outcome — the assert is that the
+	// callback never blocks, never reraises, never eats a key whose action
+	// did not even get committed.
 	c, err := NewCoreWithSettings(builtin.All(), builtin.Grants(), "")
 	if err != nil {
 		t.Fatalf("NewCore: %v", err)
@@ -57,10 +58,23 @@ func TestRealDispatchCommitsAndDoesNotBlock(t *testing.T) {
 	adapter.BindDecideForTest(d)
 	defer adapter.BindDecideForTest(nil)
 
+	// The chord posts are real input injected into the machine, so this
+	// test binds the seam to a recorder: committing must happen for the
+	// test, but strike-the-real-Edit-menu must not.
+	var postedMu sync.Mutex
+	var posted []uint16
+	prevPost := postChordLive
+	postChordLive = func(k uint16) error {
+		postedMu.Lock()
+		posted = append(posted, k)
+		postedMu.Unlock()
+		return nil
+	}
+	defer func() { postChordLive = prevPost }()
+
 	done := make(chan int32, 1)
-	// **A CHORD THE DAEMON CAN ACT ON.** Win+Left is the window-snap rule,
-	// and window.move has a dispatch route — so the tap commits it and
-	// suppresses the original.
+	// Win+Left is the window-snap rule, and window.move has a dispatch
+	// route — so the tap commits it and suppresses the original.
 	go func() { done <- adapter.DecideForMacTest(0x7B, 1<<3, event.FastContext{}) }()
 	select {
 	case got := <-done:
@@ -71,19 +85,39 @@ func TestRealDispatchCommitsAndDoesNotBlock(t *testing.T) {
 		t.Fatal("callback blocked on dispatch — this is the timeout-disable cause")
 	}
 
-	// **A KEY THE DAEMON CANNOT ACT ON IS LEFT ALONE.** Ctrl+C in Finder is
-	// the windows-keyboard copy rule, and clipboard.copy has no adapter —
-	// so the tap must answer 0 and let the key through. Answering 1 would
-	// swallow the user's copy for an action that cannot run.
+	// Ctrl+C in Finder is the windows-keyboard copy rule. The worker
+	// commits it the same way, and the chord that reaches the recorder is
+	// Cmd+C — the Windows-to-macOS translation — not the physical Ctrl+C
+	// the user pressed.
 	alone := make(chan int32, 1)
 	go func() { done2 := adapter.DecideForMacTest(0x08, 1, event.FastContext{}); alone <- done2 }()
 	select {
 	case got := <-alone:
-		if got != 0 {
-			t.Fatalf("verdict=%d, want 0 (a key the daemon cannot act on must not be swallowed)", got)
+		if got != 1 {
+			t.Fatalf("verdict=%d, want 1 (the copy chord is suppressed after its commit)", got)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("callback blocked on the left-alone path")
+		t.Fatal("callback blocked on the copy path")
+	}
+	// The worker is asynchronous — the snap job it runs first logs its
+	// no-cache refusal after the callback has already returned — so the
+	// copy chord is waited for, bounded, rather than sampled at a race
+	// point.
+	deadline := time.Now().Add(time.Second)
+	for {
+		postedMu.Lock()
+		got := append([]uint16(nil), posted...)
+		postedMu.Unlock()
+		if len(got) > 0 {
+			if got[0] != 0x08 {
+				t.Fatalf("posted=%v, want the Cmd+C keycode 0x08 chord through the seam", got)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the worker never ran the copy commit; no chord reached the seam")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -138,18 +172,20 @@ func TestMacKeycodesDriveRules(t *testing.T) {
 		mods   uint32 // internal Mod* bits, for the flag reconstruction
 		winner string
 		// claimed is whether the daemon CAN perform the rule's capability.
-		// It cannot: clipboard.copy has no adapter, and window.close,
-		// window.maximize and window.minimize need AX actions the bridge
-		// does not carry yet. A chord the daemon cannot act on is NOT
-		// claimed — the tap leaves the key alone — so the verdict is 0.
+		// Every built-in rule here is dispatchable since beads
+		// cross-os-1be (window close/minimize/maximize carry real AX
+		// actions) and cross-os-jzc (clipboard.copy posts the Cmd chord) —
+		// decideLocked refuses a key whose capability has no route, so a
+		// verdict of 0 next to a named winner would now mean a routing
+		// bug, and the table pins it as one.
 		claimed bool
 	}{
-		{"Ctrl+C", 0x08, 1 << 0, "windows-keyboard.ctrl-c-copy", false},
+		{"Ctrl+C", 0x08, 1 << 0, "windows-keyboard.ctrl-c-copy", true},
 		{"Win+Left", 0x7B, 1 << 3, "windows-keyboard.win-left-snap", true},
 		{"Win+Right", 0x7C, 1 << 3, "windows-keyboard.win-right-snap", true},
-		{"Win+Up", 0x7E, 1 << 3, "windows-keyboard.win-up-maximize", false},
-		{"Win+Down", 0x7D, 1 << 3, "windows-keyboard.win-down-minimize", false},
-		{"Alt+F4", 0x76, 1 << 2, "windows-keyboard.alt-f4-close-window", false},
+		{"Win+Up", 0x7E, 1 << 3, "windows-keyboard.win-up-maximize", true},
+		{"Win+Down", 0x7D, 1 << 3, "windows-keyboard.win-down-minimize", true},
+		{"Alt+F4", 0x76, 1 << 2, "windows-keyboard.alt-f4-close-window", true},
 		{"Ctrl+Shift+C", 0x08, 1<<0 | 1<<1, "developer.ctrl-shift-c-copypath", true},
 		{"Ctrl+Shift+P", 0x23, 1<<0 | 1<<1, "developer.ctrl-shift-p-editor", true},
 	}
@@ -168,9 +204,10 @@ func TestMacKeycodesDriveRules(t *testing.T) {
 			t.Fatalf("%s: winner=%q, want %q (internal-VK path)", tc.name, out.WinnerRule, tc.winner)
 		}
 		// The same chord through the real macOS tap entry point, with the
-		// focused app the cache reports. The verdict is 1 for a chord the
-		// daemon can act on and 0 for one it cannot — the macOS keycode
-		// reached the rule either way, which is what this test is about.
+		// focused app the cache reports. The verdict is 1 for every
+		// dispatched built-in chord — the macOS keycode must reach the
+		// rule AND the action must run — and 0 only for a chord the
+		// decision path deliberately refuses to claim.
 		focus.set(ctx)
 		want := int32(0)
 		if tc.claimed {

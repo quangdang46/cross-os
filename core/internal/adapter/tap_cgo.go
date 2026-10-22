@@ -54,6 +54,11 @@ const (
 	cgFlagMeta  = 1 << 20
 )
 
+// kCGEventFlagMaskCommand is CGEventFlags' Command bit, spelled out at the
+// send site so the posted chord reads as a named modifier rather than a
+// bare integer (1<<20, the same bit cgFlagMeta decodes).
+const kCGEventFlagMaskCommand = uint64(1) << 20
+
 // modsFromFlags translates CGEventFlags into the internal modifier mask the
 // router matches against (keyboard.ModCtrl/Shift/Alt/Meta).
 func modsFromFlags(flags uint64) uint32 {
@@ -325,6 +330,16 @@ func TapReenable() {
 // never inside the callback; spike A/B reentrancy rule).
 func TapPostF9() {
 	C.cxpost_f9()
+}
+
+// TapPostCommandKey posts one synthetic Command+key chord (down then up)
+// through the tap bridge. It is the write half of the copy-handed-to-app
+// capability: whatever the focused application does with Cmd+key, it does
+// here through the same HID source a physical keyboard writes through.
+// The keycode is macOS (kVK_*); the translation from the Windows-VK table
+// already happened at decide time. Async handoff only.
+func TapPostCommandKey(macKeycode uint16) {
+	C.cxpost_command_key(C.uint16_t(macKeycode), C.uint64_t(kCGEventFlagMaskCommand))
 }
 
 // tapHandle is the installed tap record, or NULL. Guarded by tapMu: it is

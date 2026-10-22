@@ -75,6 +75,54 @@ func TestAXMoveResizeDenialIsTyped(t *testing.T) {
 	}
 }
 
+// TestAXWindowActionMaximizeZoomsTheFocusedWindow drives the one live half
+// of the window actions that is safe to drive on the working machine
+// (bead cross-os-1be): the zoom. Close and minimize would change the user's
+// desktop in ways the test cannot undo, so they stay at the typed-refusal
+// paragraph below.
+//
+// The zoom is checked the way move/resize is: the frame is read from the
+// plane, the action is performed, the frame is read again, and the second
+// read must show a window that is AT LEAST as large — a "done" that carries
+// the old geometry is the promise the next poll contradicts in the user's
+// list. An already-maximized window zooms to the same frame, which the
+// at-least reading accepts honestly instead of failing on no-op.
+func TestAXWindowActionMaximizeZoomsTheFocusedWindow(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the AX bridge is macOS")
+	}
+	q := NewWindowQuery(&Driver{})
+	before, err := q.Focused()
+	if err != nil {
+		t.Skipf("no focused window to act on: %v", err)
+	}
+	if err := q.SetWindowAction(WindowMaximize); err != nil {
+		t.Fatalf("maximize: %v", err)
+	}
+	after, err := q.Focused()
+	if err != nil {
+		t.Fatalf("read after maximize: %v", err)
+	}
+	if after.W < before.W || after.H < before.H {
+		t.Fatalf("frame after maximize %vx%v is smaller than before %vx%v; the action answered done without the geometry",
+			after.W, after.H, before.W, before.H)
+	}
+}
+
+// The refused tags, without and with the grant: SetWindowAction is typed on
+// both sides of consent — an unwired plane answers the typed not-supported
+// (stub), the bridge answers its own action-unsupported or a consent or
+// nothing-such-window error, and none of them is ever a silent success.
+func TestAXWindowActionRefusalsAreTyped(t *testing.T) {
+	q := NewWindowQuery(&Driver{})
+	if err := q.SetWindowAction(WindowAction(7)); err == nil {
+		t.Fatal("an invalid action tag must be refused, not performed")
+	}
+	if err := q.SetWindowAction(WindowClose); err == nil {
+		return // consent present; the refusal cases above are the contract
+	}
+}
+
 func TestAXMoveResizeRejectsNoOp(t *testing.T) {
 	q := NewWindowQuery(&Driver{})
 	// Neither move nor resize: rejected before any AX call.

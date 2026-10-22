@@ -169,3 +169,38 @@ static void cxpost_f9(void) {
     }
     CFRelease(src);
 }
+
+// cxpost_command_key posts one Command+key chord, down then up, sourced
+// from the HID system state the physical keyboards write (so the receiving
+// app hears a chord indistinguishable in source from a physical one).
+//
+// @param mac_keycode  a macOS virtual keycode (kVK_*) — the POST speaks
+//                     macOS, the table that DECIDED the chord speaks
+//                     Windows VK, and the boundary that translated the
+//                     decided event already did its job upstream.
+// @param chord        the modifier to hold during down+up, as a
+//                     CGEventFlags-style mask (upstream callers pass
+//                     kCGEventFlagMask* — Command today, extend
+//                     deliberately).
+//
+// Async handoff only: Go calls this off-callback (never from inside
+// cxtap_proc), per the spike A/B reentrancy rule.
+static void cxpost_command_key(uint16_t mac_keycode, uint64_t flags_mask) {
+    CGEventSourceRef src = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+    if (src == NULL) {
+        return; // HID system unavailable: skip the chord, nothing to fault
+    }
+    CGEventRef down = CGEventCreateKeyboardEvent(src, (CGKeyCode)mac_keycode, true);
+    if (down != NULL) {
+        CGEventSetFlags(down, flags_mask);
+        CGEventPost(kCGHIDEventTap, down);
+        CFRelease(down);
+    }
+    CGEventRef up = CGEventCreateKeyboardEvent(src, (CGKeyCode)mac_keycode, false);
+    if (up != NULL) {
+        CGEventSetFlags(up, flags_mask);
+        CGEventPost(kCGHIDEventTap, up);
+        CFRelease(up);
+    }
+    CFRelease(src);
+}

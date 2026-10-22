@@ -150,12 +150,47 @@ func isSurface(onScreen bool, w, h float64) bool {
 var errWindowGone = errors.New("adapter: window id is not on this machine")
 
 // WindowQuery is the context seam (spike C product path): focused query +
-// move/resize. Permission-DENIED returns ErrPermissionDenied (typed, fast —
-// never a hang); callers serve stale/empty cache on it.
+// move/resize + the focused-window actions. Permission-DENIED returns
+// ErrPermissionDenied (typed, fast — never a hang); callers serve
+// stale/empty cache on it.
+//
+// SetWindowAction returns AFTER the change took effect: a frame that reads
+// back already changed is the truth the dispatch logged, and a "done" that
+// carries the old geometry is a promise the next poll contradicts in the
+// user's list.
 type WindowQuery interface {
 	Focused() (FocusedWindow, error)
 	MoveResize(m MoveResize) error
+	// SetWindowAction closes, minimizes or zooms the focused window: one of
+	// the three WindowAction tags, never a fourth meaning.
+	SetWindowAction(a WindowAction) error
 }
+
+// WindowAction is the discrete set of focused-window actions the seam
+// performs. It is a type of its own (not bare ints) so a capability routed
+// to a misspelled action is a compile error, not a window that did something
+// the user did not press a key for.
+type WindowAction uint8
+
+// The three actions the bridge carries. The numbers match the C bridge's
+// CXAX_WIN_* tags exactly (ax_bridge.c), so a renumbering there without here
+// is caught by the live clause, which asserts the bridge did the thing the
+// number names.
+const (
+	// WindowClose closes the focused window — what the red button does —
+	// never quitting the application that owns it: the app's own rule
+	// runs (sheets, autosave prompts), so the behavior is the one the user
+	// has always had from their mouse. A window that was dirty will ask.
+	WindowClose WindowAction = 1
+	// WindowMinimize minimizes the focused window to the Dock — what the
+	// yellow button does — so the window stays in the Dock under the app's
+	// own title, and restores from there under the rules macOS owns.
+	WindowMinimize WindowAction = 2
+	// WindowMaximize fills the focused window's screen with it — the full
+	// visible frame, the same shape the snap zone "fullscreen" already
+	// takes — so the dock and menu bar stay where the user left them.
+	WindowMaximize WindowAction = 3
+)
 
 // WindowLister is the enumeration + focus seam. It is a separate interface
 // from WindowQuery because the three WindowQuery implementations live in

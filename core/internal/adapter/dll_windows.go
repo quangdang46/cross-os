@@ -16,6 +16,7 @@
 //	  report 0 + last-error; caller owns passthrough+notice fallback)
 //	CrossOS_UIPIStatus() -> elevation/reachability bits
 //	CrossOS_DeviceId() -> Raw Input device identity (observe-only path)
+//	CrossOS_WindowAction(action) -> focused-window close/minimize/maximize
 package adapter
 
 import (

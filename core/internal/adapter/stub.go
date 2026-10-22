@@ -33,6 +33,16 @@ func (s *stubQuery) Focused() (FocusedWindow, error) {
 func (s *stubQuery) MoveResize(m MoveResize) error {
 	return s.driver.ReportError("move", errUnsupported)
 }
+func (s *stubQuery) SetWindowAction(a WindowAction) error {
+	return s.driver.ReportError("window action", errUnsupported)
+}
+
+// The rot guard for every GOOS whose build compiles this file: it resolves
+// only while stubQuery still carries all three WindowQuery methods with
+// the signatures the interface gives them, so a method dropped or renamed
+// here breaks the linux cross-GOOS build under this var instead of
+// surfacing as a nil-satisfaction somewhere a test would have to find.
+var _ = func(s *stubQuery, a WindowAction) error { return s.SetWindowAction(a) }
 
 type stubProbe struct{ driver *Driver }
 

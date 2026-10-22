@@ -25,3 +25,9 @@ func unhealthyTap() bool { return false }
 
 // droppedDispatches is always zero where there is no live tap.
 func droppedDispatches() int64 { return 0 }
+
+// postChordLive has nothing to post through off macOS: no HID source to
+// stand in for the machine's own keyboard. The refusal is the same typed
+// offer as the tap's — ship a no-op and clipboard.copy would lie by
+// succeeding on every platform and doing the work on none.
+var postChordLive = func(_ uint16) error { return errTapUnsupported }

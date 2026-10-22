@@ -95,6 +95,14 @@ func (q *darwinQuery) MoveResize(m MoveResize) error {
 	return nil
 }
 
+// SetWindowAction closes, minimizes or zooms the focused window.
+func (q *darwinQuery) SetWindowAction(a WindowAction) error {
+	if err := axWindowAction(int(a)); err != nil {
+		return q.driver.ReportError("window action", err)
+	}
+	return nil
+}
+
 type darwinProbe struct{ driver *Driver }
 
 func NewUIPIProbe(d *Driver) UIPIProbe { return &darwinProbe{driver: d} }

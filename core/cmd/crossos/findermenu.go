@@ -70,9 +70,9 @@ type finderMenu struct {
 // filetype.Seeds() here answered from it: a fresh catalog enables txt alone, so
 // the submenu carried one row no matter what the person had done, and a type
 // they had just enabled never reached the menu they right-click. That is the
-// disagreement FinderRight's single-catalog rule exists to prevent — both ends
-// read one list by one set of ids, "避免「设置里的开关与右键菜单对不上」"
-// (MenuFeature.swift:5-6) — so this reads what the page writes.
+// disagreement FinderRight's single-catalog rule exists to prevent — both
+// ends read one list by one set of ids, so the settings switch and the
+// right-click menu cannot disagree — so this reads what the page writes.
 //
 // A store that has never been configured still hands back the seeds
 // (settings.Store.FileTypes), so a fresh daemon's submenu is unchanged: one
