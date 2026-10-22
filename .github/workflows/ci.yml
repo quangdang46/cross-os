@@ -43,6 +43,12 @@ jobs:
         # plugins/*, platform/darwin/spike_*, extensions/finder-sync);
         # per-module jobs below.
       - name: Vet + test core
+        # **THE SCRIPT IS RUN UNDER BASH, NOT POWERSHELL.**
+        #
+        # The Windows runner's default shell for `run:` is pwsh, and pwsh
+        # does not run a bash script: "./scripts/build-core.sh: The term
+        # './scripts/build-core.sh' is not recognized as a name of a cmdlet".
+        shell: bash
         # **THE STAMPED PATH, NOT `go test`.**
         #
         # Go's build cache keys a cgo package on the .go files and the

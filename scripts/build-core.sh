@@ -44,7 +44,22 @@ C_SOURCES=$(find platform -type f \( -name '*.c' -o -name '*.h' -o -name '*.m' \
 if [[ -z "$C_SOURCES" ]]; then
   STAMP=0
 else
-  STAMP=$(shasum -a 256 $C_SOURCES | shasum -a 256 | cut -c1-16)
+  # **THE HASH IS TAKEN WITH WHATEVER THE MACHINE HAS.**
+  #
+  # `shasum` is macOS and Perl; `sha256sum` is Linux and Git for Windows.
+  # The Windows lane of CI runs this script under Git Bash, where shasum is
+  # not there — and a script that dies on a missing hash tool is a script
+  # that does not run on half the machines it is meant to.
+  #
+  # The stamp's job is to CHANGE when a C source changes, not to agree with
+  # itself across platforms, so either tool answers it. Both print
+  # "<hash>  <name>", so the second pass hashes the same text either way.
+  if command -v shasum >/dev/null 2>&1; then
+    HASH="shasum -a 256"
+  else
+    HASH="sha256sum"
+  fi
+  STAMP=$($HASH $C_SOURCES | $HASH | cut -c1-16)
 fi
 
 # The flag is a preprocessor define, so it reaches the compiler without being
