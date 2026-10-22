@@ -7,13 +7,33 @@
 # compiler help a mac gets. See docs/dev-verification.md for the findings and
 # the per-GOOS file sets this depends on.
 #
-# It is NOT scripts/run.sh: that one builds the real product and needs wails3
-# plus a macOS host. This one needs only go + node + npm.
+# **THE `app/` GATES ARE GONE, AND THE SHELL'S GATES ARE SWIFT'S.**
+#
+# The Wails app was deleted (bead cross-os-app-delete): the window is a
+# native AppKit shell under macos/ and the daemon is a Go service, and the
+# two speak JSON-RPC over a Unix socket. This script still drove the deleted
+# module — `go -C app test ./backend/...` answered "chdir app: no such file
+# or directory", and the frontend typecheck looked for app/frontend/node_modules
+# — so it FAILED on every current checkout:
+#
+#     FAIL go test ./backend/... — unrecognised error
+#           go: chdir app: no such file or directory
+#
+# The Swift shell's gates replaced them, and they are the ones that exist.
+#
+# **THE DAEMON'S GATES GO THROUGH scripts/build-core.sh.**
+#
+# Not `go build` and not `go test` directly: Go's build cache keys a cgo
+# package on the .go files and the compiler flags, and NOT on the C files a
+# cgo preamble reaches with `#include` — so a plain `go build` after editing
+# the AX or tap bridge links a STALE bridge and the daemon keeps the old
+# behaviour. build-core.sh stamps the C sources' content into CGO_CFLAGS,
+# which changes the action id and does recompile them.
 #
 # Usage:
 #   ./scripts/dev-verify.sh              run every check
-#   ./scripts/dev-verify.sh core         core module only
-#   ./scripts/dev-verify.sh app          app (shell) module only
+#   ./scripts/dev-verify.sh core         daemon module only
+#   ./scripts/dev-verify.sh shell        the Swift shell only
 #   ./scripts/dev-verify.sh --help
 #
 # Exit status: 0 when every check passed except the KNOWN GOOS gaps listed
@@ -53,14 +73,13 @@ GAP_PATTERNS=()
 
 KNOWN_GAPS=()
 
-# Gates that could not run on this machine (e.g. the frontend typecheck on a
-# box with no node_modules or no generated Wails bindings). Tracked so the
-# closing summary can say "these did NOT run" instead of a bare OK. The
-# failure mode bead cross-os-64q names is exactly "cannot check" being reported
-# as a pass; this array is what stops that. The skip stays non-fatal on
-# purpose — this script's whole job is to run on whatever machine you have,
-# including one without the Wails toolchain — but it is never silent and never
-# counted as a pass.
+# Gates that could not run on this machine (e.g. the Swift shell's suite on a
+# box with no Swift toolchain). Tracked so the closing summary can say "these
+# did NOT run" instead of a bare OK. The failure mode bead cross-os-64q names
+# is exactly "cannot check" being reported as a pass; this array is what stops
+# that. The skip stays non-fatal on purpose — this script's whole job is to
+# run on whatever machine you have, including one with no Swift toolchain —
+# but it is never silent and never counted as a pass.
 SKIPPED=()
 
 # An unrecognised compiler diagnostic. Matches go build / go vet / go test
@@ -111,9 +130,9 @@ run_gate() {
 # A gate that could not run is NOT a pass. This prints a distinct SKIP line
 # (never the green PASS word), records the label so the closing summary can
 # list it under "skipped, NOT verified", and states the exact command that
-# makes the gate runnable. Scoped to interactive dev convenience: the same
-# gate is enforced for real in CI (the "frontend" job in
-# .github/workflows/ci.yml), so a local skip never hides a broken typecheck.
+# makes the gate runnable. The skip stays non-fatal on purpose: this script
+# runs on whatever machine you have, and "cannot check here" is not the same
+# as "broken here".
 skip_gate() {
   local label="$1" reason="$2" fix="$3"
   printf '  \033[33mSKIP\033[0m %s — gate NOT run: %s\n' "$label" "$reason"
@@ -121,119 +140,83 @@ skip_gate() {
   SKIPPED+=("$label — $reason")
 }
 
+# The daemon.
+#
+# **THE BUILD AND THE TESTS GO THROUGH THE REPO'S OWN SCRIPT.**
+#
+# `go -C core build` and `go -C core test` both link the cgo package, and
+# Go's build cache does not know that the C sources behind that package
+# changed: the AX bridge and the tap bridge are plain .c files the cgo
+# preamble reaches with `#include`, and a file reached that way is invisible
+# to the cache. A test run that way can be measuring the bridge from before
+# the edit — which is how a "failing" live test turned out to be an old
+# binary.
+#
+# build-core.sh stamps the C sources' content into CGO_CFLAGS, so the action
+# id changes whenever a C file changes and the bridge is recompiled.
 check_core() {
   say "core module (GOOS=$(go env GOOS))"
   local failures=0
-  run_gate "go build ./..." go -C core build ./... || failures=$((failures+1))
-  run_gate "go vet ./..."   go -C core vet   ./... || failures=$((failures+1))
-  run_gate "go test ./..."  go -C core test  ./... || failures=$((failures+1))
+  run_gate "daemon build (cgo-stamped)" scripts/build-core.sh || failures=$((failures+1))
+  run_gate "go vet ./..."              go -C core vet ./... || failures=$((failures+1))
+  run_gate "daemon test (cgo-stamped)" scripts/build-core.sh --test || failures=$((failures+1))
   return $failures
 }
 
-# The shell embeds //go:embed all:frontend/dist, so `go build ./...` at the
-# app/ module root cannot even typecheck main.go until dist/ holds at least
-# one file. Two ways to satisfy that, in order of preference:
+# The plugin modules.
 #
-#   1. wails3 on PATH  -> generate the bindings and build the REAL bundle.
-#      The @wailsio/runtime vite plugin hard-requires
-#      bindings/github.com/wailsapp/wails/v3/internal/eventcreate, which only
-#      `wails3 generate bindings ./...` writes. No other input produces it.
-#   2. no wails3       -> write a placeholder index.html so the Go toolchain
-#      can typecheck main.go and backend/. The placeholder states in its own
-#      body that no bundle exists; it is NOT a build product and must never be
-#      shipped. dist/ is gitignored, so it cannot reach a commit.
-ensure_dist() {
-  if [[ -f app/frontend/dist/index.html ]]; then return 0; fi
-  if command -v wails3 >/dev/null 2>&1 && [[ -d app/frontend/node_modules ]]; then
-    say "wails3 found — building the real frontend bundle"
-    # The generator takes the MODULE root, and the module is app/ (its go.mod
-    # lives there and main.go is the only Wails entrypoint). Pointing it at the
-    # repo root finds no go.mod, writes nothing, and the vite build then fails
-    # on the missing event bindings with the reason swallowed by 2>/dev/null.
-    (cd app && wails3 generate bindings ./) || return 1
-    (cd app/frontend && npm run build) || return 1
-    return 0
-  fi
-  warn "no wails3 on PATH: the real frontend bundle cannot be built here."
-  warn "  @wailsio/runtime's vite plugin requires generated event bindings, and"
-  warn "  only 'wails3 generate bindings ./...' writes them. Writing a"
-  warn "  PLACEHOLDER dist/index.html so the Go build can typecheck main.go."
-  mkdir -p app/frontend/dist
-  cat > app/frontend/dist/index.html <<'HTML'
-<!doctype html>
-<meta charset="utf-8">
-<title>CrossOS — bundle not built</title>
-<body style="font:14px system-ui;margin:3rem;max-width:40rem">
-<h1>Frontend bundle not built</h1>
-<p>This directory is a <strong>placeholder</strong>, written by
-<code>scripts/dev-verify.sh</code> so <code>go build</code> can typecheck the
-shell. It contains no application code and the window will not work.</p>
-<p>To build the real bundle, install the Wails v3 CLI and run
-<code>scripts/run.sh</code> (or <code>wails3 dev</code>) from a checkout.</p>
-</body>
-HTML
-}
-
-check_app() {
-  say "app module (GOOS=$(go env GOOS))"
+# They are separate Go modules — core cannot import them back — and each has
+# its own suite, including the parity test that pins the core rule table
+# against the plugin matrices. Nothing ran them from this script, and CI ran
+# them only after the plugin lane was added there.
+check_plugins() {
+  say "builtin plugin modules (GOOS=$(go env GOOS))"
   local failures=0
-  # backend/ carries no embed directive, so this is the app-side check that
-  # works from a clean checkout with nothing built.
-  run_gate "go test ./backend/..." go -C app test ./backend/... || failures=$((failures+1))
-  # check_frontend returns 0 when it SKIPS (inputs absent — reported in the
-  # summary) and >0 only when the typecheck actually ran and FAILED. Calling
-  # it as a bare statement used to discard that non-zero, so a genuinely
-  # broken typecheck printed FAIL but still exited 0 with a green OK. Fold its
-  # result into the gate count so the script is fail-closed as its header
-  # promises (bead cross-os-64q).
-  check_frontend || failures=$((failures+1))
-  ensure_dist
-  run_gate "go build ./..." go -C app build ./... || failures=$((failures+1))
+  for m in plugins/developer plugins/launcher plugins/windows-keyboard; do
+    run_gate "$m" bash -c "cd '$m' && go vet ./... && go test ./..." || failures=$((failures+1))
+  done
   return $failures
 }
 
-# The frontend typecheck is a real gate, not a courtesy. The Wails models are
-# generated JavaScript, and tsconfig sets allowJs precisely so the ServiceApi
-# annotation in src/lib/service.ts checks the generated Service instead of an
-# `any` — a renamed model property is otherwise a silent `undefined` in a
-# settings row with a green typecheck.
+# The Swift shell.
 #
-# It is skipped only when an input it needs (node_modules, the generated
-# bindings) is absent, because this script also runs on boxes that have no
-# Wails toolchain. But the skip is EXPLICIT and is recorded in SKIPPED so the
-# closing summary prints "skipped, NOT verified" instead of a bare OK: an
-# unchecked typecheck must never read as a checked one (bead cross-os-64q).
-# When the inputs are present the typecheck is a real gate and a failure is a
-# FAILURE. The same typecheck is enforced in CI regardless.
-check_frontend() {
-  say "app/frontend"
+# **THE SUITE IS AN EXECUTABLE, NOT A `.testTarget`.**
+#
+# Neither XCTest nor swift-testing is importable from the Command Line Tools
+# toolchain, so a `.testTarget` is dead on arrival there and `swift test`
+# reports a failure that is about the machine rather than the code. The
+# assertions live in macos/Tests/Harness/Sources/CoreTests/ and run as a
+# program: `swift run CoreTests`.
+#
+# The suite is also why the harness imports CrossOSCore WITHOUT `@testable`:
+# an executable target's dependency is not compiled with -enable-testing, so
+# a `@testable` import fails to build on a clean checkout ("module
+# 'CrossOSCore' was not compiled for testing"). The geometry the suite
+# checks is public API, so the plain import is the same coverage.
+check_shell() {
+  say "swift shell (macos/)"
+  if ! command -v swift >/dev/null 2>&1; then
+    skip_gate "swift build + CoreTests" "no swift toolchain on this machine" \
+      "install Xcode or the Command Line Tools, then re-run"
+    return 0
+  fi
   local failures=0
-  if [[ ! -d app/frontend/node_modules ]]; then
-    skip_gate "npx tsc --noEmit" "app/frontend/node_modules is absent" \
-      "cd app/frontend && npm ci"
-    return 0
-  fi
-  if [[ ! -f app/frontend/bindings/crossos/app/backend/service.js ]]; then
-    skip_gate "npx tsc --noEmit" "Wails bindings are not generated" \
-      "cd app && wails3 generate bindings ./"
-    return 0
-  fi
-  if (cd app/frontend && npx tsc --noEmit); then
-    printf '  \033[32mPASS\033[0m npx tsc --noEmit\n'
-  else
-    printf '  \033[31mFAIL\033[0m npx tsc --noEmit\n'
-    failures=$((failures+1))
-  fi
+  run_gate "swift build" bash -c "cd macos && swift build" || failures=$((failures+1))
+  run_gate "CoreTests"   bash -c "cd macos && swift run CoreTests" || failures=$((failures+1))
+  # The geometry probe is the switcher's arithmetic, checked against the
+  # numbers in docs/baseline/ — the contract the port is judged by.
+  run_gate "switcher geometry probe" bash -c "cd macos && ./.build/debug/CrossOS --geometry" || failures=$((failures+1))
   return $failures
 }
 
 rc=0
 case "${1:-all}" in
-  -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-  core) check_core; rc=$? ;;
-  app)  check_app;  rc=$? ;;
-  all)  check_core || rc=1; check_app || rc=1 ;;
-  *)    die "unknown target '$1' (try --help)" ;;
+  -h|--help) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  core)   check_core;   rc=$? ;;
+  plugins) check_plugins; rc=$? ;;
+  shell)  check_shell;  rc=$? ;;
+  all)    check_core || rc=1; check_plugins || rc=1; check_shell || rc=1 ;;
+  *)      die "unknown target '$1' (try --help)" ;;
 esac
 
 if (( rc != 0 )); then
@@ -249,7 +232,7 @@ fi
 if (( ${#SKIPPED[@]} )); then
   printf '\n\033[33mSkipped, NOT verified\033[0m (these gates did not run here):\n'
   for s in "${SKIPPED[@]}"; do printf '  - %s\n' "$s"; done
-  printf 'CI runs this for real — see the "frontend" job in .github/workflows/ci.yml.\n'
+  printf 'CI runs these for real — see the "shell" job in .github/workflows/ci.yml.\n'
   printf '\n\033[33mOK\033[0m for every gate that ran; the items above were NOT checked.\n'
 else
   printf '\n\033[32mOK\033[0m\n'

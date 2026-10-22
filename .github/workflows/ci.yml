@@ -43,7 +43,25 @@ jobs:
         # plugins/*, platform/darwin/spike_*, extensions/finder-sync);
         # per-module jobs below.
       - name: Vet + test core
-        run: cd core && go vet ./... && go test -short ./...
+        # **THE STAMPED PATH, NOT `go test`.**
+        #
+        # Go's build cache keys a cgo package on the .go files and the
+        # compiler flags, and NOT on the C files a cgo preamble reaches with
+        # `#include` — the AX bridge and the tap bridge are plain .c files
+        # that way. A plain `go test` can therefore link a STALE bridge: the
+        # suite runs, the daemon in it is the one from before the edit, and
+        # the result answers a question nobody asked. A cold runner gets it
+        # right by accident; a warm build cache gets it wrong quietly.
+        #
+        # scripts/build-core.sh stamps the C sources' content into
+        # CGO_CFLAGS, which changes the action id and does recompile them.
+        # It is the same path the release workflow builds the artifact with.
+        run: |
+          # The `cd` is in a subshell: the script below is at the REPO ROOT,
+          # and a `cd core` that outlived its line would make it
+          # "no such file or directory".
+          (cd core && go vet ./...)
+          ./scripts/build-core.sh --test
       # **THE PLUGIN MODULES ARE TESTED HERE.**
       #
       # plugins/developer, plugins/launcher and plugins/windows-keyboard are
